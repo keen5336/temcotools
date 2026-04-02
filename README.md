@@ -60,6 +60,30 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## Database Bootstrap
+
+Before running the app for the first time, create the PostgreSQL user and database:
+
+```sql
+-- Run as the postgres superuser:
+CREATE USER ops_tools WITH PASSWORD 'your-secure-password';
+CREATE DATABASE ops_tools OWNER ops_tools;
+GRANT ALL PRIVILEGES ON DATABASE ops_tools TO ops_tools;
+```
+
+Then set your `DATABASE_URL` in `.env`:
+
+```
+DATABASE_URL=postgresql://ops_tools:your-secure-password@localhost:5432/ops_tools
+```
+
+Apply migrations:
+
+```bash
+npx prisma migrate deploy
+npx prisma generate
+```
+
 ## Azure AD Setup
 
 1. Go to [Azure Portal](https://portal.azure.com) → **Azure Active Directory** → **App registrations** → **New registration**
