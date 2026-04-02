@@ -1,23 +1,21 @@
-import { auth } from "@/auth";
+import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import SignInButton from "@/components/SignInButton";
+import PinLoginForm from "@/components/PinLoginForm";
 
 export default async function SignInPage({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  const session = await auth();
-  if (session?.user) redirect("/");
+  const session = await getSession();
+  if (session.userId) redirect("/");
 
   const params = await searchParams;
 
   return (
-    <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-10 w-full max-w-sm">
-        <h1 className="text-xl font-semibold text-gray-900 mb-1">
-          TemcoTools
-        </h1>
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8 w-full max-w-sm">
+        <h1 className="text-xl font-semibold text-gray-900 mb-1">TemcoTools</h1>
         <p className="text-sm text-gray-500 mb-8">Internal operations system</p>
 
         {params.error === "inactive" && (
@@ -26,8 +24,9 @@ export default async function SignInPage({
           </div>
         )}
 
-        <SignInButton />
+        <PinLoginForm />
       </div>
     </div>
   );
 }
+

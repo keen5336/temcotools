@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import SessionProviderWrapper from "@/components/SessionProviderWrapper";
 
 export const metadata: Metadata = {
   title: "TemcoTools",
@@ -14,9 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="antialiased">
-        <SessionProviderWrapper>{children}</SessionProviderWrapper>
-      </body>
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
