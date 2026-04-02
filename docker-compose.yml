@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ops_tools
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ops_tools
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - temco_net
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
+        NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme-at-least-32-chars}
+        NEXTAUTH_URL: https://temco.chronchive.com
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme-at-least-32-chars}
+      NEXTAUTH_URL: https://temco.chronchive.com
+      AZURE_AD_CLIENT_ID: ${AZURE_AD_CLIENT_ID}
+      AZURE_AD_CLIENT_SECRET: ${AZURE_AD_CLIENT_SECRET}
+      AZURE_AD_TENANT_ID: ${AZURE_AD_TENANT_ID}
+    depends_on:
+      - db
+    networks:
+      - temco_net
+
+networks:
+  temco_net:
+    driver: bridge
+
+volumes:
+  db_data:
