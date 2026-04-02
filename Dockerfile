@@ -17,10 +17,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ARG DATABASE_URL
 ENV DATABASE_URL=\$DATABASE_URL
-ARG NEXTAUTH_SECRET
-ENV NEXTAUTH_SECRET=\$NEXTAUTH_SECRET
-ARG NEXTAUTH_URL
-ENV NEXTAUTH_URL=\$NEXTAUTH_URL
+ARG SESSION_SECRET
+ENV SESSION_SECRET=\$SESSION_SECRET
 
 RUN npx prisma generate
 RUN npm run build
@@ -36,10 +34,15 @@ ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+# Copy all the files and install only production dependencies
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/prisma.config.js ./prisma.config.js
 COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/package-lock.json ./package-lock.json
+
+RUN npm ci --omit=dev
 
 # Set the correct permission for prerender cache
 RUN mkdir .next

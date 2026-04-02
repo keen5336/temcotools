@@ -17,14 +17,12 @@ services:
       dockerfile: Dockerfile
       args:
         DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
-        NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme-at-least-32-chars}
-        NEXTAUTH_URL: https://temco.chronchive.com
+        SESSION_SECRET: ${SESSION_SECRET:-changeme-at-least-32-characters-long}
     ports:
       - "3000:3000"
     environment:
       DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-changeme-at-least-32-chars}
-      NEXTAUTH_URL: https://temco.chronchive.com
+      SESSION_SECRET: ${SESSION_SECRET:-changeme-at-least-32-characters-long}
       AZURE_AD_CLIENT_ID: ${AZURE_AD_CLIENT_ID}
       AZURE_AD_CLIENT_SECRET: ${AZURE_AD_CLIENT_SECRET}
       AZURE_AD_TENANT_ID: ${AZURE_AD_TENANT_ID}
