@@ -14,11 +14,6 @@
  * already exists. Run it once after the first database migration.
  */
 
-try {
-  require("dotenv/config");
-} catch (e) {
-  // Ignore missing dotenv in production
-}
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
