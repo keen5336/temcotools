@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MARS Label Tool</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121933;
+      --panel-2: #182142;
+      --text: #eef2ff;
+      --muted: #aab3d1;
+      --line: #2a3767;
+      --accent: #77a8ff;
+      --accent-2: #8ef0d0;
+      --danger: #ff7c94;
+      --warn: #ffd37c;
+      --ok: #9ff0b0;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+      --radius: 18px;
+      --radius-sm: 12px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --sans: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at top right, rgba(119, 168, 255, 0.16), transparent 26%),
+        radial-gradient(circle at top left, rgba(142, 240, 208, 0.08), transparent 22%),
+        linear-gradient(180deg, #09101f, #0d1326 28%, #0a1020);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 16px;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+    }
+
+    .title h1 {
+      margin: 0;
+      font-size: clamp(1.8rem, 2.3vw, 2.6rem);
+      letter-spacing: 0.02em;
+    }
+
+    .title p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      max-width: 900px;
+      line-height: 1.45;
+    }
+
+    .status-pill {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--muted);
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-size: 0.92rem;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.95fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .panel {
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      padding: 18px 18px 0;
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 1.05rem;
+      letter-spacing: 0.02em;
+    }
+
+    .panel-subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 0.93rem;
+      line-height: 1.4;
+    }
+
+    .panel-body {
+      padding: 18px;
+    }
+
+    .stack { display: grid; gap: 14px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .row > * { min-width: 0; }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-size: 0.88rem;
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+
+    .field { flex: 1 1 180px; }
+    .field.small { flex: 0 1 180px; }
+    .field.wide { flex: 1 1 100%; }
+
+    input[type="text"],
+    input[type="url"],
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      font: inherit;
+      outline: none;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.06s ease;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(119, 168, 255, 0.18);
+    }
+
+    textarea {
+      min-height: 200px;
+      resize: vertical;
+      font-family: var(--mono);
+      line-height: 1.4;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .bottom-bar {
+      position: sticky;
+      bottom: 0;
+      z-index: 40;
+      margin-top: 18px;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px 16px 0 0;
+      background: rgba(9, 18, 36, 0.95);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.28);
+    }
+
+    .bottom-bar-left {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .bottom-bar-title {
+      font-size: 0.9rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .bottom-bar-note {
+      font-size: 0.8rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 720px;
+    }
+
+    button {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 11px 14px;
+      font: inherit;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 0.06s ease, border-color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+    }
+
+    button:hover { border-color: var(--accent); }
+    button:active { transform: translateY(1px); }
+    button.primary {
+      background: linear-gradient(180deg, #6f97f5, #5278e0);
+      border-color: #6f97f5;
+      color: white;
+    }
+    button.success {
+      background: linear-gradient(180deg, #3ba271, #287e56);
+      border-color: #53bb89;
+      color: white;
+    }
+    button.danger {
+      background: linear-gradient(180deg, #b24a66, #8d364d);
+      border-color: #e06f8b;
+      color: white;
+    }
+    button.ghost {
+      background: transparent;
+    }
+
+    .inline-note {
+      font-size: 0.85rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .kv-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .kv {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px 14px;
+      min-height: 78px;
+    }
+
+    .kv .k {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+    }
+
+    .kv .v {
+      font-size: 1rem;
+      font-weight: 700;
+      word-break: break-word;
+    }
+
+    .preview-wrap {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .label-preview {
+      background: #fff;
+      color: #111;
+      border-radius: 14px;
+      border: 1px solid #d9deee;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.4);
+      width: 100%;
+      max-width: 420px;
+      aspect-ratio: 4 / 3;
+      padding: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .label-serial-tag {
+      font-size: 0.68rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      color: #555;
+      letter-spacing: 0.08em;
+      margin-bottom: 2px;
+    }
+
+    .label-serial {
+      font-size: 1.55rem;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: 0.02em;
+      margin-bottom: 10px;
+      word-break: break-word;
+    }
+
+    .label-major-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .label-major-card {
+      background: #f4f6fb;
+      border: 1px solid #dce3f4;
+      border-radius: 10px;
+      padding: 8px 10px;
+    }
+
+    .label-major-card .k,
+    .label-detail .k {
+      font-size: 0.58rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: #666;
+      text-transform: uppercase;
+    }
+
+    .label-major-card .v {
+      font-size: 1rem;
+      font-weight: 800;
+      margin-top: 4px;
+      line-height: 1.1;
+      word-break: break-word;
+    }
+
+    .label-details {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      margin-bottom: 10px;
+    }
+
+    .label-detail .v {
+      margin-top: 2px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+
+    .barcode {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 18px;
+      height: 44px;
+      background:
+        repeating-linear-gradient(
+          90deg,
+          #111 0px,
+          #111 2px,
+          #fff 2px,
+          #fff 4px,
+          #111 4px,
+          #111 5px,
+          #fff 5px,
+          #fff 8px,
+          #111 8px,
+          #111 12px,
+          #fff 12px,
+          #fff 14px
+        );
+      border-radius: 4px 4px 0 0;
+      border: 1px solid #aaa;
+      border-bottom: none;
+    }
+
+    .barcode-text {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 4px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      color: #333;
+    }
+
+    .codebox {
+      background: #091224;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .codebox textarea {
+      min-height: 220px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: #d6e4ff;
+    }
+
+    .badge-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .badge.ok { color: var(--ok); }
+    .badge.warn { color: var(--warn); }
+
+    .footer-note {
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 1180px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .kv-grid,
+      .label-major-row,
+      .label-details {
+        grid-template-columns: 1fr;
+      }
+
+      .wrap {
+        padding: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="title">
+        <h1>MARS Label Tool</h1>
+        <p>Paste the full return page text, extract the fields automatically, preview the label, and print straight to a networked label printer. Includes editable ZPL templates stored in local storage.</p>
+      </div>
+      <div class="status-pill" id="statusPill">Ready</div>
+    </div>
+
+    <div class="grid">
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">1) Paste source text</h2>
+            <p class="panel-subtitle">From the return page: <strong>Ctrl + A</strong>, <strong>Ctrl + C</strong>, paste it here, then parse. The parser grabs the next non-empty line after each field label.</p>
+          </div>
+          <div class="panel-body stack">
+            <div class="field wide">
+              <label for="sourceText">Page dump</label>
+              <textarea id="sourceText" spellcheck="false" placeholder="Paste the copied return page text here..."></textarea>
+            </div>
+            <div class="actions">
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">2) Extracted fields</h2>
+            <p class="panel-subtitle">These are the values that feed the label. You can correct anything manually before printing.</p>
+          </div>
+          <div class="panel-body stack">
+            <div class="row">
+              <div class="field">
+                <label for="serialNumber">Serial #</label>
+                <input id="serialNumber" type="text" />
+              </div>
+              <div class="field">
+                <label for="dateSubmitted">Date Submitted</label>
+                <input id="dateSubmitted" type="text" />
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="submissionNumber">Submission #</label>
+                <input id="submissionNumber" type="text" />
+              </div>
+              <div class="field">
+                <label for="vendorRaNumber">Vendor RA #</label>
+                <input id="vendorRaNumber" type="text" />
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="orderNumber">Order #</label>
+                <input id="orderNumber" type="text" />
+              </div>
+              <div class="field">
+                <label for="vendor">Vendor</label>
+                <input id="vendor" type="text" />
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label for="modelNumber">Model #</label>
+                <input id="modelNumber" type="text" />
+              </div>
+              <div class="field">
+                <label for="submittedBy">Return Submitted By</label>
+                <input id="submittedBy" type="text" />
+              </div>
+            </div>
+            <div class="actions">
+              <button id="refreshPreviewBtn">Refresh preview</button>
+              <button id="resetFieldsBtn" class="ghost">Reset fields</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">3) Printer</h2>
+            <p class="panel-subtitle">Use direct raw printing only if your browser and printer allow it. Otherwise point this at a tiny local print bridge like <code>http://localhost:3000</code>.</p>
+          </div>
+          <div class="panel-body stack">
+            <div class="row">
+              <div class="field">
+                <label for="printerEndpoint">Printer / bridge endpoint</label>
+                <input id="printerEndpoint" type="url" placeholder="http://localhost:3000" />
+              </div>
+              <div class="field small">
+                <label for="contentType">Content-Type</label>
+                <select id="contentType">
+                  <option value="text/plain">text/plain</option>
+                  <option value="application/octet-stream">application/octet-stream</option>
+                </select>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="success" id="printBtn">Print label</button>
+              <button id="copyZplBtn">Copy ZPL</button>
+            </div>
+            <div class="badge-row">
+              <span class="badge ok">Default template included</span>
+              <span class="badge">Templates persist in local storage</span>
+              <span class="badge warn">Direct browser → port 9100 may fail</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="stack">
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Live label preview</h2>
+            <p class="panel-subtitle">The white card is a visual preview. The actual printer uses the ZPL template below.</p>
+          </div>
+          <div class="panel-body preview-wrap">
+            <div class="label-preview" id="labelPreview">
+              <div class="label-serial-tag">Serial</div>
+              <div class="label-serial" id="previewSerial">UNKNOWN</div>
+
+              <div class="label-major-row">
+                <div class="label-major-card">
+                  <div class="k">Submission</div>
+                  <div class="v" id="previewSubmission">UNKNOWN</div>
+                </div>
+                <div class="label-major-card">
+                  <div class="k">Date</div>
+                  <div class="v" id="previewDate">UNKNOWN</div>
+                </div>
+              </div>
+
+              <div class="label-details">
+                <div class="label-detail">
+                  <div class="k">Order</div>
+                  <div class="v" id="previewOrder">UNKNOWN</div>
+                </div>
+                <div class="label-detail">
+                  <div class="k">Vendor</div>
+                  <div class="v" id="previewVendor">UNKNOWN</div>
+                </div>
+                <div class="label-detail">
+                  <div class="k">Model</div>
+                  <div class="v" id="previewModel">UNKNOWN</div>
+                </div>
+                <div class="label-detail">
+                  <div class="k">Submitted By</div>
+                  <div class="v" id="previewSubmittedBy">UNKNOWN</div>
+                </div>
+                <div class="label-detail" style="grid-column: 1 / -1;">
+                  <div class="k">Vendor RA</div>
+                  <div class="v" id="previewVendorRa">UNKNOWN</div>
+                </div>
+              </div>
+
+              
+            </div>
+
+            <div class="kv-grid">
+              <div class="kv"><div class="k">Submission #</div><div class="v" id="barcodeValueText">UNKNOWN</div></div>
+              <div class="kv"><div class="k">Active template</div><div class="v" id="activeTemplateText">Default RTV 4x3</div></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Template manager</h2>
+            <p class="panel-subtitle">Start from the default template, duplicate it, then tweak the ZPL. Use placeholders like <code>{{serialNumber}}</code>.</p>
+          </div>
+          <div class="panel-body stack">
+            <div class="row">
+              <div class="field">
+                <label for="templateSelect">Template</label>
+                <select id="templateSelect"></select>
+              </div>
+              <div class="field">
+                <label for="templateName">Template name</label>
+                <input id="templateName" type="text" placeholder="New template name" />
+              </div>
+            </div>
+            <div class="actions">
+              <button id="newTemplateBtn">New from current</button>
+              <button id="saveTemplateBtn" class="primary">Save template</button>
+              <button id="deleteTemplateBtn" class="danger">Delete template</button>
+              <button id="resetDefaultBtn" class="ghost">Restore default template</button>
+            </div>
+            <div class="codebox">
+              <textarea id="templateEditor" spellcheck="false"></textarea>
+            </div>
+            <div class="inline-note">
+              Available placeholders: <code>{{serialNumber}}</code>, <code>{{dateSubmitted}}</code>, <code>{{submissionNumber}}</code>, <code>{{orderNumber}}</code>, <code>{{vendor}}</code>, <code>{{modelNumber}}</code>, <code>{{submittedBy}}</code>, <code>{{vendorRaNumber}}</code>.
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2 class="panel-title">Rendered ZPL</h2>
+            <p class="panel-subtitle">This is what gets sent to the printer or bridge endpoint.</p>
+          </div>
+          <div class="panel-body">
+            <div class="codebox">
+              <textarea id="zplOutput" spellcheck="false" readonly></textarea>
+            </div>
+            <div class="footer-note">Label format tuned for a clean 4x3 layout: serial is dominant, submission and date are next, and the operational detail block stays readable without clutter.</div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <div class="bottom-bar-left">
+        <div class="bottom-bar-title">Ready to print</div>
+        <div class="bottom-bar-note">Paste the return page text, let it auto-parse, then hit print. If the printer ignores the browser response, the label can still print successfully.</div>
+      </div>
+      <div class="actions" style="margin-left:auto;">
+        <button class="success" id="bottomPrintBtn">Print label</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEYS = {
+      templates: 'rtv-label-tool.templates',
+      activeTemplateId: 'rtv-label-tool.activeTemplateId',
+      printerEndpoint: 'rtv-label-tool.printerEndpoint',
+      contentType: 'rtv-label-tool.contentType'
+    };
+
+    const DEFAULT_TEMPLATE_ID = 'default-rtv-4x3';
+    const DEFAULT_TEMPLATE_NAME = 'Default RTV 4x3';
+
+    const DEFAULT_TEMPLATE_ZPL = `^XA
+^CI28
+^PW812
+^LL1180
+^LH0,0
+
+^FO24,22^A0N,24,24^FDSERIAL^FS
+^FO24,54^A0N,72,72^FD{{serialNumber}}^FS
+
+^FO24,150^GB764,140,2^FS
+^FO40,160^A0N,48,48^FDSUBMISSION #^FS
+^FO40,210^A0N,100,100^FD{{submissionNumber}}^FS
+
+^FO24,310^GB764,140,2^FS
+^FO40,320^A0N,48,48^FDDATE SUBMITTED^FS
+^FO40,370^A0N,72,72^FD{{dateSubmitted}}^FS
+
+^FO24,470^GB764,120,2^FS
+^FO40,480^A0N,40,40^FDORDER^FS
+^FO40,525^A0N,84,84^FD{{orderNumber}}^FS
+
+^FO24,610^GB764,120,2^FS
+^FO40,620^A0N,40,40^FDVENDOR^FS
+^FO40,665^A0N,84,84^FD{{vendor}}^FS
+
+^FO24,750^GB764,120,2^FS
+^FO40,760^A0N,40,40^FDMODEL #^FS
+^FO40,805^A0N,84,84^FD{{modelNumber}}^FS
+
+^FO24,890^GB764,120,2^FS
+^FO40,900^A0N,40,40^FDSUBMITTED BY^FS
+^FO40,945^A0N,84,84^FD{{submittedBy}}^FS
+
+^FO24,1030^GB764,120,2^FS
+^FO40,1040^A0N,40,40^FDVENDOR RA^FS
+^FO40,1085^A0N,84,84^FD{{vendorRaNumber}}^FS
+
+^XZ`;
+
+    const state = {
+      templates: {},
+      activeTemplateId: DEFAULT_TEMPLATE_ID,
+      fields: {
+        serialNumber: '',
+        dateSubmitted: '',
+        submissionNumber: '',
+        orderNumber: '',
+        vendor: '',
+        modelNumber: '',
+        submittedBy: '',
+        vendorRaNumber: ''
+      }
+    };
+
+    const els = {};
+
+    function initEls() {
+      [
+        'statusPill', 'sourceText', 'refreshPreviewBtn', 'resetFieldsBtn',
+        'serialNumber', 'dateSubmitted', 'submissionNumber', 'orderNumber', 'vendor', 'modelNumber', 'submittedBy', 'vendorRaNumber',
+        'printerEndpoint', 'contentType', 'printBtn', 'bottomPrintBtn', 'copyZplBtn', 'templateSelect', 'templateName', 'newTemplateBtn', 'saveTemplateBtn', 'deleteTemplateBtn',
+        'resetDefaultBtn', 'templateEditor', 'zplOutput', 'previewSerial', 'previewDate', 'previewSubmission', 'previewOrder', 'previewVendor', 'previewModel',
+        'previewSubmittedBy', 'previewVendorRa', 'barcodeValueText', 'activeTemplateText'
+      ].forEach(id => els[id] = document.getElementById(id));
+    }
+
+    function setStatus(message, tone = 'default') {
+      els.statusPill.textContent = message;
+      els.statusPill.style.borderColor = tone === 'error' ? 'var(--danger)' : tone === 'ok' ? 'var(--ok)' : tone === 'warn' ? 'var(--warn)' : 'var(--line)';
+      els.statusPill.style.color = tone === 'error' ? 'var(--danger)' : tone === 'ok' ? 'var(--ok)' : tone === 'warn' ? 'var(--warn)' : 'var(--muted)';
+    }
+
+    function loadTemplates() {
+      const raw = localStorage.getItem(STORAGE_KEYS.templates);
+      if (raw) {
+        try {
+          state.templates = JSON.parse(raw) || {};
+        } catch {
+          state.templates = {};
+        }
+      }
+
+      if (!state.templates[DEFAULT_TEMPLATE_ID]) {
+        state.templates[DEFAULT_TEMPLATE_ID] = {
+          id: DEFAULT_TEMPLATE_ID,
+          name: DEFAULT_TEMPLATE_NAME,
+          content: DEFAULT_TEMPLATE_ZPL,
+          isDefault: true
+        };
+      }
+
+      const savedActiveTemplateId = localStorage.getItem(STORAGE_KEYS.activeTemplateId);
+      state.activeTemplateId = state.templates[savedActiveTemplateId] ? savedActiveTemplateId : DEFAULT_TEMPLATE_ID;
+      persistTemplates();
+    }
+
+    function persistTemplates() {
+      localStorage.setItem(STORAGE_KEYS.templates, JSON.stringify(state.templates));
+      localStorage.setItem(STORAGE_KEYS.activeTemplateId, state.activeTemplateId);
+    }
+
+    function templateList() {
+      return Object.values(state.templates).sort((a, b) => {
+        if (a.isDefault && !b.isDefault) return -1;
+        if (!a.isDefault && b.isDefault) return 1;
+        return a.name.localeCompare(b.name);
+      });
+    }
+
+    function refreshTemplateSelect() {
+      const list = templateList();
+      els.templateSelect.innerHTML = '';
+      for (const tpl of list) {
+        const opt = document.createElement('option');
+        opt.value = tpl.id;
+        opt.textContent = tpl.name + (tpl.isDefault ? ' (default)' : '');
+        if (tpl.id === state.activeTemplateId) opt.selected = true;
+        els.templateSelect.appendChild(opt);
+      }
+      loadActiveTemplateIntoEditor();
+    }
+
+    function loadActiveTemplateIntoEditor() {
+      const tpl = state.templates[state.activeTemplateId];
+      if (!tpl) return;
+      els.templateEditor.value = tpl.content;
+      els.templateName.value = tpl.name;
+      els.activeTemplateText.textContent = tpl.name;
+      renderZpl();
+    }
+
+    function getCurrentTemplateContent() {
+      return els.templateEditor.value;
+    }
+
+    function sanitizeText(value) {
+      return String(value ?? '')
+        .replace(/[\^~]/g, ' ')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function normalizeLines(text) {
+      return String(text)
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+    }
+
+    function getValueAfterLabel(lines, label, occurrence = 'last') {
+      const needle = label.toLowerCase();
+      const indexes = [];
+      lines.forEach((line, idx) => {
+        if (line.toLowerCase() === needle) indexes.push(idx);
+      });
+      if (!indexes.length) return '';
+      const index = occurrence === 'first' ? indexes[0] : indexes[indexes.length - 1];
+      for (let i = index + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line) return line;
+      }
+      return '';
+    }
+
+    function extractInlineValue(text, label) {
+      const re = new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*#?\\s*([^\\n\\r]+)', 'i');
+      const match = String(text).match(re);
+      return match ? match[1].trim() : '';
+    }
+
+    function parseFields(text) {
+      const lines = normalizeLines(text);
+
+      const fields = {
+        orderNumber: getValueAfterLabel(lines, 'Order #') || extractInlineValue(text, 'Order'),
+        vendor: getValueAfterLabel(lines, 'Vendor'),
+        serialNumber: getValueAfterLabel(lines, 'Serial #') || extractInlineValue(text, 'Serial'),
+        modelNumber: getValueAfterLabel(lines, 'Model #') || extractInlineValue(text, 'Model'),
+        submissionNumber: getValueAfterLabel(lines, 'Submission #') || extractInlineValue(text, 'Submission'),
+        submittedBy: getValueAfterLabel(lines, 'Return Submitted By'),
+        vendorRaNumber: getValueAfterLabel(lines, 'Vendor RA #') || extractInlineValue(text, 'Vendor RA'),
+        dateSubmitted: getValueAfterLabel(lines, 'Date Submitted')
+      };
+
+      return fields;
+    }
+
+    function syncFieldsFromInputs() {
+      state.fields.serialNumber = els.serialNumber.value.trim();
+      state.fields.dateSubmitted = els.dateSubmitted.value.trim();
+      state.fields.submissionNumber = els.submissionNumber.value.trim();
+      state.fields.orderNumber = els.orderNumber.value.trim();
+      state.fields.vendor = els.vendor.value.trim();
+      state.fields.modelNumber = els.modelNumber.value.trim();
+      state.fields.submittedBy = els.submittedBy.value.trim();
+      state.fields.vendorRaNumber = els.vendorRaNumber.value.trim();
+    }
+
+    function syncInputsFromFields() {
+      els.serialNumber.value = state.fields.serialNumber || '';
+      els.dateSubmitted.value = state.fields.dateSubmitted || '';
+      els.submissionNumber.value = state.fields.submissionNumber || '';
+      els.orderNumber.value = state.fields.orderNumber || '';
+      els.vendor.value = state.fields.vendor || '';
+      els.modelNumber.value = state.fields.modelNumber || '';
+      els.submittedBy.value = state.fields.submittedBy || '';
+      els.vendorRaNumber.value = state.fields.vendorRaNumber || '';
+    }
+
+    function safeField(key) {
+      return sanitizeText(state.fields[key]) || 'UNKNOWN';
+    }
+
+    function renderPreview() {
+      syncFieldsFromInputs();
+      els.previewSerial.textContent = safeField('serialNumber');
+      els.previewDate.textContent = safeField('dateSubmitted');
+      els.previewSubmission.textContent = safeField('submissionNumber');
+      els.previewOrder.textContent = safeField('orderNumber');
+      els.previewVendor.textContent = safeField('vendor');
+      els.previewModel.textContent = safeField('modelNumber');
+      els.previewSubmittedBy.textContent = safeField('submittedBy');
+      els.previewVendorRa.textContent = safeField('vendorRaNumber');
+      els.barcodeValueText.textContent = safeField('submissionNumber');
+    }
+
+    function renderTemplate(templateString, data) {
+      return templateString.replace(/{{\s*(\w+)\s*}}/g, (_, key) => sanitizeText(data[key] ?? ''));
+    }
+
+    function renderZpl() {
+      syncFieldsFromInputs();
+      renderPreview();
+      const zpl = renderTemplate(getCurrentTemplateContent(), state.fields);
+      els.zplOutput.value = zpl;
+      return zpl;
+    }
+
+    function parseSourceText() {
+      const text = els.sourceText.value.trim();
+      if (!text) {
+        setStatus('Paste source text first', 'warn');
+        return;
+      }
+      state.fields = parseFields(text);
+      syncInputsFromFields();
+      renderZpl();
+      setStatus('Fields parsed', 'ok');
+    }
+
+    function resetFields() {
+      state.fields = {
+        serialNumber: '',
+        dateSubmitted: '',
+        submissionNumber: '',
+        orderNumber: '',
+        vendor: '',
+        modelNumber: '',
+        submittedBy: '',
+        vendorRaNumber: ''
+      };
+      syncInputsFromFields();
+      renderZpl();
+      setStatus('Fields reset');
+    }
+
+    async function copyZpl() {
+      try {
+        const zpl = renderZpl();
+        await navigator.clipboard.writeText(zpl);
+        setStatus('ZPL copied', 'ok');
+      } catch {
+        setStatus('Could not copy ZPL', 'error');
+      }
+    }
+
+    function fireAndForgetPrint(url, options) {
+      try {
+        fetch(url, options).catch(err => {
+          console.warn('Background print fetch error:', err);
+        });
+
+      } catch (err) {
+        console.warn('Background print request failed to start:', err);
+      }
+    }
+
+    function printLabel() {
+  const endpoint = els.printerEndpoint.value.trim();
+  if (!endpoint) {
+    setStatus('Set printer endpoint first', 'warn');
+    return;
+  }
+
+  const zpl = renderZpl();
+
+  localStorage.setItem(STORAGE_KEYS.printerEndpoint, endpoint);
+  localStorage.setItem(STORAGE_KEYS.contentType, els.contentType.value);
+
+  setStatus('Sending label...', 'ok');
+
+  try {
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': els.contentType.value },
+      body: zpl,
+      keepalive: true,
+      mode: 'no-cors'
+    }).catch(() => {});
+  } catch (err) {
+    console.warn('Print request start failed:', err);
+  }
+
+  setTimeout(() => {
+    window.location.href = window.location.pathname;
+  }, 400);
+}
+
+    function saveTemplate() {
+      const name = els.templateName.value.trim();
+      if (!name) {
+        setStatus('Template name is required', 'warn');
+        return;
+      }
+
+      const currentId = state.activeTemplateId;
+      const current = state.templates[currentId];
+      if (!current) return;
+
+      current.name = name;
+      current.content = els.templateEditor.value;
+      state.templates[currentId] = current;
+      persistTemplates();
+      refreshTemplateSelect();
+      setStatus('Template saved', 'ok');
+    }
+
+    function createTemplateFromCurrent() {
+      const name = els.templateName.value.trim() || `Custom Template ${new Date().toLocaleString()}`;
+      const id = 'tpl-' + Date.now();
+      state.templates[id] = {
+        id,
+        name,
+        content: els.templateEditor.value || DEFAULT_TEMPLATE_ZPL,
+        isDefault: false
+      };
+      state.activeTemplateId = id;
+      persistTemplates();
+      refreshTemplateSelect();
+      setStatus('New template created', 'ok');
+    }
+
+    function deleteTemplate() {
+      const tpl = state.templates[state.activeTemplateId];
+      if (!tpl) return;
+      if (tpl.isDefault) {
+        setStatus('Default template cannot be deleted', 'warn');
+        return;
+      }
+      delete state.templates[state.activeTemplateId];
+      state.activeTemplateId = DEFAULT_TEMPLATE_ID;
+      persistTemplates();
+      refreshTemplateSelect();
+      setStatus('Template deleted', 'ok');
+    }
+
+    function restoreDefaultTemplate() {
+      state.templates[DEFAULT_TEMPLATE_ID] = {
+        id: DEFAULT_TEMPLATE_ID,
+        name: DEFAULT_TEMPLATE_NAME,
+        content: DEFAULT_TEMPLATE_ZPL,
+        isDefault: true
+      };
+      state.activeTemplateId = DEFAULT_TEMPLATE_ID;
+      persistTemplates();
+      refreshTemplateSelect();
+      setStatus('Default template restored', 'ok');
+    }
+
+    function switchTemplate(templateId) {
+      if (!state.templates[templateId]) return;
+      state.activeTemplateId = templateId;
+      persistTemplates();
+      loadActiveTemplateIntoEditor();
+      setStatus('Template loaded');
+    }
+
+    function wireEvents() {
+      els.refreshPreviewBtn.addEventListener('click', () => {
+        renderZpl();
+        setStatus('Preview refreshed');
+      });
+      els.resetFieldsBtn.addEventListener('click', resetFields);
+      els.printBtn.addEventListener('click', printLabel);
+      els.bottomPrintBtn.addEventListener('click', printLabel);
+      els.copyZplBtn.addEventListener('click', copyZpl);
+      els.templateSelect.addEventListener('change', e => switchTemplate(e.target.value));
+      els.newTemplateBtn.addEventListener('click', createTemplateFromCurrent);
+      els.saveTemplateBtn.addEventListener('click', saveTemplate);
+      els.deleteTemplateBtn.addEventListener('click', deleteTemplate);
+      els.resetDefaultBtn.addEventListener('click', restoreDefaultTemplate);
+      els.templateEditor.addEventListener('input', renderZpl);
+
+      [
+        els.serialNumber, els.dateSubmitted, els.submissionNumber, els.orderNumber,
+        els.vendor, els.modelNumber, els.submittedBy, els.vendorRaNumber
+      ].forEach(input => input.addEventListener('input', renderZpl));
+
+      let parseTimer;
+      els.sourceText.addEventListener('input', () => {
+        clearTimeout(parseTimer);
+        parseTimer = setTimeout(() => {
+          parseSourceText();
+        }, 120);
+      });
+
+      els.sourceText.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          printLabel();
+        }
+      });
+    }
+
+    function loadSettings() {
+      els.printerEndpoint.value = localStorage.getItem(STORAGE_KEYS.printerEndpoint) || 'http://localhost:3000';
+      els.contentType.value = localStorage.getItem(STORAGE_KEYS.contentType) || 'text/plain';
+    }
+
+    function init() {
+      initEls();
+      loadTemplates();
+      loadSettings();
+      refreshTemplateSelect();
+      syncInputsFromFields();
+      wireEvents();
+      renderZpl();
+      els.sourceText.focus();
+      setStatus('Ready');
+    }
+
+    init();
+  </script>
+</body>
+</html>
