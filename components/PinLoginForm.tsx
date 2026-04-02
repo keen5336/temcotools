@@ -73,14 +73,14 @@ export default function PinLoginForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+        <div role="alert" className="alert alert-error text-sm">
           {error}
         </div>
       )}
 
-      <div>
-        <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-          Username
+      <div className="form-control">
+        <label htmlFor="username" className="label">
+          <span className="label-text font-medium">Username</span>
         </label>
         <input
           ref={usernameRef}
@@ -93,15 +93,15 @@ export default function PinLoginForm() {
           onBlur={() => {
             if (username.trim()) pinRef.current?.focus();
           }}
-          className="w-full border border-gray-300 rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input input-bordered w-full"
           placeholder="Enter username"
           disabled={loading}
         />
       </div>
 
-      <div>
-        <label htmlFor="pin" className="block text-sm font-medium text-gray-700 mb-1">
-          PIN
+      <div className="form-control">
+        <label htmlFor="pin" className="label">
+          <span className="label-text font-medium">PIN</span>
         </label>
         <input
           ref={pinRef}
@@ -111,18 +111,20 @@ export default function PinLoginForm() {
           autoComplete="current-password"
           value={pin}
           onChange={handlePinInput}
-          className="w-full border border-gray-300 rounded-lg px-4 py-3 text-base tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input input-bordered w-full tracking-widest"
           placeholder="••••"
           disabled={loading}
           maxLength={6}
         />
-        <p className="mt-1 text-xs text-gray-400">4 to 6 digits</p>
+        <div className="label">
+          <span className="label-text-alt text-base-content/50">4 to 6 digits</span>
+        </div>
       </div>
 
       <button
         type="submit"
         disabled={loading}
-        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-3 px-4 rounded-lg text-base transition"
+        className="btn btn-primary w-full"
       >
         {loading ? "Signing in…" : "Sign In"}
       </button>
