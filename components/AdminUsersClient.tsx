@@ -42,10 +42,14 @@ export default function AdminUsersClient() {
     setError(null);
     try {
       const res = await fetch(`/api/admin/users?search=${encodeURIComponent(q)}`);
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || `Request failed with status ${res.status}`);
+      }
       setUsers(await res.json());
-    } catch {
-      setError("Failed to load users.");
+    } catch (err) {
+      console.error("Failed to fetch users:", err);
+      setError(err instanceof Error ? err.message : "Failed to load users.");
     } finally {
       setLoading(false);
     }

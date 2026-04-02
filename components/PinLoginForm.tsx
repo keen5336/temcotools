@@ -57,7 +57,8 @@ export default function PinLoginForm() {
       localStorage.setItem(LAST_USERNAME_KEY, username.trim());
       router.push("/");
       router.refresh();
-    } catch {
+    } catch (err) {
+      console.error("Login request failed:", err);
       setError("Network error. Please try again.");
     } finally {
       setLoading(false);
