@@ -181,9 +181,7 @@ export default function PipelineBuilderClient() {
         break;
       case "join": {
         const wb = XLSX.read(joinCsv, { type: "string" });
-        const parsed = XLSX.utils.sheet_to_json<Record<string, unknown>>(
-          wb.Sheets[wb.SheetNames[0]]
-        );
+        const parsed = parseWorkbook(wb);
         step = {
           type: "join",
           rightData: parsed,
@@ -512,8 +510,8 @@ export default function PipelineBuilderClient() {
                           <div>
                             <label className="label py-0.5">
                               <span className="label-text text-xs">
-                                Right-side CSV (paste — first-row headers, must
-                                include the join key column)
+                              Right-side data (paste CSV — first-row headers, parsed via xlsx,
+                                must include the join key column)
                               </span>
                             </label>
                             <textarea
