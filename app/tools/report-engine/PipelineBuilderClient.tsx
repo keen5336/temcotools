@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef } from "react";
+import ExcelJS from "exceljs";
 import {
   executePipeline,
   type Step,
@@ -12,75 +13,109 @@ import PreviewTable from "@/components/PreviewTable";
 
 type StepWithId = Step & { id: string };
 
-// ── CSV Helpers ───────────────────────────────────────────────────────────────
+// ── Spreadsheet / CSV Helpers ─────────────────────────────────────────────────
 
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === "," && !inQuotes) {
-      result.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  result.push(current);
-  return result;
-}
-
-function parseCSV(text: string): Record<string, string>[] {
+/**
+ * Minimal CSV parser used for .csv file uploads and the join-step paste area.
+ * ExcelJS CSV support requires a Node.js Readable stream, so we handle plain
+ * text CSV inline.
+ */
+function parseCSV(text: string): Record<string, unknown>[] {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return [];
-  const headers = parseCSVLine(lines[0]).map((h) => h.trim());
+  const parseRow = (line: string): string[] => {
+    const result: string[] = [];
+    let cur = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === "," && !inQuotes) {
+        result.push(cur);
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    result.push(cur);
+    return result;
+  };
+  const headers = parseRow(lines[0]).map((h) => h.trim());
   if (headers.length === 0) return [];
   return lines
     .slice(1)
     .filter((l) => l.trim() !== "")
     .map((line) => {
-      const values = parseCSVLine(line);
+      const values = parseRow(line);
       return Object.fromEntries(
         headers.map((h, i) => [h, (values[i] ?? "").trim()])
       );
     });
 }
 
-function exportCSV(
+/**
+ * Parse a binary xlsx/xls ArrayBuffer using ExcelJS.
+ * Logs a warning when the workbook has multiple sheets and uses the first one.
+ */
+async function parseWorkbook(
+  buffer: ArrayBuffer
+): Promise<Record<string, unknown>[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  if (workbook.worksheets.length > 1) {
+    console.warn(
+      `Workbook has ${workbook.worksheets.length} sheets. Using the first sheet: "${workbook.worksheets[0].name}".`
+    );
+  }
+
+  const worksheet = workbook.worksheets[0];
+  const headers: string[] = [];
+  const rows: Record<string, unknown>[] = [];
+
+  worksheet.eachRow((row, rowNumber) => {
+    // row.values is 1-indexed; index 0 is always undefined
+    const cells = (row.values as ExcelJS.CellValue[]).slice(1);
+    if (rowNumber === 1) {
+      cells.forEach((v) => headers.push(String(v ?? "")));
+    } else {
+      const obj: Record<string, unknown> = {};
+      cells.forEach((v, i) => {
+        obj[headers[i]] = v;
+      });
+      rows.push(obj);
+    }
+  });
+
+  return rows;
+}
+
+async function exportXLSX(
   data: Record<string, unknown>[],
-  filename = "report-export.csv"
-): void {
+  filename = "report-export.xlsx"
+): Promise<void> {
   if (data.length === 0) return;
   const headers = Object.keys(data[0]);
-  const escape = (v: unknown): string => {
-    const s = String(v ?? "");
-    return s.includes(",") || s.includes('"') || s.includes("\n")
-      ? `"${s.replace(/"/g, '""')}"`
-      : s;
-  };
-  const csv = [
-    headers.map(escape).join(","),
-    ...data.map((row) => headers.map((h) => escape(row[h])).join(",")),
-  ].join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet("Report");
+  worksheet.addRow(headers);
+  data.forEach((row) => worksheet.addRow(headers.map((h) => row[h])));
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function uid(): string {
-  return crypto.randomUUID();
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -143,6 +178,8 @@ export default function PipelineBuilderClient() {
   const [rawData, setRawData] = useState<Record<string, unknown>[]>([]);
   const [fileName, setFileName] = useState<string>("");
   const [steps, setSteps] = useState<StepWithId[]>([]);
+  const [fileError, setFileError] = useState<string>("");
+  const [exportError, setExportError] = useState<string>("");
 
   // ─ New-step form state
   const [showNewStep, setShowNewStep] = useState(false);
@@ -180,15 +217,36 @@ export default function PipelineBuilderClient() {
     const file = e.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
+    setFileError("");
+    const isCsv = file.name.toLowerCase().endsWith(".csv");
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const parsed = parseCSV(text);
-      setRawData(parsed);
-      setSteps([]);
-      setShowNewStep(false);
-    };
-    reader.readAsText(file);
+    if (isCsv) {
+      reader.onload = (ev) => {
+        const text = ev.target?.result as string;
+        const parsed = parseCSV(text);
+        setRawData(parsed);
+        setSteps([]);
+        setShowNewStep(false);
+      };
+      reader.readAsText(file);
+    } else {
+      reader.onload = async (ev) => {
+        try {
+          const buffer = ev.target?.result as ArrayBuffer;
+          const parsed = await parseWorkbook(buffer);
+          setRawData(parsed);
+          setSteps([]);
+          setShowNewStep(false);
+        } catch (err) {
+          setFileError(
+            err instanceof Error
+              ? err.message
+              : "Failed to parse file. Make sure it is a valid .xlsx or .xls workbook."
+          );
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
   }
 
   function resetNewStepForm(cols: string[]) {
@@ -234,7 +292,7 @@ export default function PipelineBuilderClient() {
         break;
       }
     }
-    setSteps((prev) => [...prev, { ...step, id: uid() }]);
+    setSteps((prev) => [...prev, { ...step, id: crypto.randomUUID() }]);
     setShowNewStep(false);
   }
 
@@ -298,13 +356,13 @@ export default function PipelineBuilderClient() {
                 1 · Upload
               </h3>
               <p className="text-xs text-base-content/60 mb-3">
-                Upload a CSV file to start the pipeline.
+                Upload a spreadsheet (.xlsx, .xls) or CSV file to start the pipeline.
               </p>
               <div className="flex items-center gap-3 flex-wrap">
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".xlsx,.xls,.csv"
                   className="file-input file-input-sm file-input-bordered"
                   onChange={handleFile}
                 />
@@ -315,6 +373,9 @@ export default function PipelineBuilderClient() {
                   <strong>{columns.length}</strong> columns from{" "}
                   <em>{fileName}</em>
                 </p>
+              )}
+              {fileError && (
+                <p className="text-xs text-error mt-2">✕ {fileError}</p>
               )}
             </div>
             <hr />
@@ -553,8 +614,8 @@ export default function PipelineBuilderClient() {
                           <div>
                             <label className="label py-0.5">
                               <span className="label-text text-xs">
-                                Right-side CSV (paste — first-row headers, must
-                                include the join key column)
+                              Right-side data (paste CSV — first-row headers,
+                                must include the join key column)
                               </span>
                             </label>
                             <textarea
@@ -652,10 +713,16 @@ export default function PipelineBuilderClient() {
               ) : (
                 <div className="flex gap-3 flex-wrap">
                   <button
-                    onClick={() => exportCSV(previewData)}
+                    onClick={() =>
+                      exportXLSX(previewData).catch((err) =>
+                        setExportError(
+                          err instanceof Error ? err.message : "Export failed."
+                        )
+                      )
+                    }
                     className="btn btn-sm btn-primary"
                   >
-                    ↓ Download CSV
+                    ↓ Download Excel (.xlsx)
                   </button>
                   <button
                     onClick={() => window.print()}
@@ -664,6 +731,9 @@ export default function PipelineBuilderClient() {
                     ⊞ Print Report
                   </button>
                 </div>
+              )}
+              {exportError && (
+                <p className="text-xs text-error mt-2">✕ {exportError}</p>
               )}
             </div>
           </li>
