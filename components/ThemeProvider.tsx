@@ -2,10 +2,10 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 
-export type Theme = "light" | "dark" | "corporate" | "nord" | "dim";
+export type Theme = "light" | "dark" | "cupcake" | "nord" | "dim";
 
-export const THEMES: Theme[] = ["corporate", "light", "dark", "nord", "dim"];
-const DEFAULT_THEME: Theme = "corporate";
+export const THEMES: Theme[] = ["light", "dark", "cupcake", "nord", "dim"];
+const DEFAULT_THEME: Theme = "light";
 const STORAGE_KEY = "temco_theme";
 
 interface ThemeContextValue {

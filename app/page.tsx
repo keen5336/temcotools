@@ -21,6 +21,12 @@ export default async function HomePage() {
       href: "/tools/scanner-lookup",
       description: "Look up items and locations by barcode scan.",
     },
+    {
+      name: "Report Engine",
+      href: "/tools/report-engine",
+      description:
+        "Build data transformation pipelines on CSV files and export formatted reports.",
+    },
   ];
 
   return (
