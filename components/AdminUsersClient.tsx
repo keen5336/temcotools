@@ -156,88 +156,84 @@ export default function AdminUsersClient() {
           placeholder="Search by username or display name…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full sm:w-80 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input input-bordered input-sm w-full sm:w-80"
         />
         <button
           onClick={() => { setShowCreate(true); setCreateError(null); }}
-          className="ml-auto shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition"
+          className="btn btn-primary btn-sm ml-auto shrink-0"
         >
           + New User
         </button>
       </div>
 
-      {loading && <p className="text-sm text-gray-500">Loading…</p>}
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {loading && <p className="text-sm text-base-content/60">Loading…</p>}
+      {error && <p className="text-sm text-error">{error}</p>}
 
       {!loading && !error && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200">
+        <div className="overflow-x-auto rounded-lg border border-base-200">
+          <table className="table table-sm w-full">
+            <thead>
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Display Name</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Username</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Role</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Status</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Last Login</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Actions</th>
+                <th>Display Name</th>
+                <th>Username</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Last Login</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
+                  <td colSpan={6} className="text-center text-base-content/40 py-6">
                     No users found.
                   </td>
                 </tr>
               )}
               {users.map((user) => (
-                <tr key={user.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-900">{user.displayName}</td>
-                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{user.username}</td>
-                  <td className="px-4 py-3">
+                <tr key={user.id} className="hover">
+                  <td>{user.displayName}</td>
+                  <td className="font-mono text-xs">{user.username}</td>
+                  <td>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded font-medium ${
-                        user.role === "admin"
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-gray-100 text-gray-600"
+                      className={`badge badge-sm ${
+                        user.role === "admin" ? "badge-primary" : "badge-ghost"
                       }`}
                     >
                       {user.role}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td>
                     <span
-                      className={`text-xs px-2 py-0.5 rounded font-medium ${
-                        user.isActive
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-600"
+                      className={`badge badge-sm ${
+                        user.isActive ? "badge-success" : "badge-error"
                       }`}
                     >
                       {user.isActive ? "Active" : "Inactive"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-500">
+                  <td className="text-base-content/60">
                     {user.lastLoginAt
                       ? new Date(user.lastLoginAt).toLocaleString()
                       : "Never"}
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
+                  <td>
+                    <div className="flex items-center gap-1">
                       <button
                         onClick={() => openEdit(user)}
-                        className="text-xs text-gray-600 hover:underline"
+                        className="btn btn-ghost btn-xs"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => quickUpdate(user.id, { role: user.role === "admin" ? "user" : "admin" })}
-                        className="text-xs text-blue-600 hover:underline"
+                        className="btn btn-ghost btn-xs text-primary"
                       >
                         {user.role === "admin" ? "Demote" : "Promote"}
                       </button>
                       <button
                         onClick={() => quickUpdate(user.id, { isActive: !user.isActive })}
-                        className={`text-xs hover:underline ${user.isActive ? "text-red-600" : "text-green-600"}`}
+                        className={`btn btn-ghost btn-xs ${user.isActive ? "text-error" : "text-success"}`}
                       >
                         {user.isActive ? "Deactivate" : "Activate"}
                       </button>
@@ -253,73 +249,75 @@ export default function AdminUsersClient() {
       {/* Create User Modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Create User</h2>
-            <form onSubmit={handleCreate} className="space-y-4">
-              {createError && (
-                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">{createError}</p>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                <input
-                  type="text"
-                  autoCapitalize="none"
-                  value={createForm.username}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={createForm.displayName}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, displayName: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">PIN (4–6 digits)</label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  value={createForm.pin}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  maxLength={6}
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <select
-                  value={createForm.role}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as "admin" | "user" }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="user">user</option>
-                  <option value="admin">admin</option>
-                </select>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="submit"
-                  disabled={createLoading}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 rounded-lg transition"
-                >
-                  {createLoading ? "Creating…" : "Create"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setShowCreate(false); setCreateForm(EMPTY_CREATE); }}
-                  className="flex-1 border border-gray-300 text-gray-700 text-sm font-medium py-2 rounded-lg hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+          <div className="card bg-base-100 shadow-xl w-full max-w-sm">
+            <div className="card-body">
+              <h2 className="card-title">Create User</h2>
+              <form onSubmit={handleCreate} className="space-y-4">
+                {createError && (
+                  <div role="alert" className="alert alert-error text-sm">{createError}</div>
+                )}
+                <div className="form-control">
+                  <label className="label"><span className="label-text font-medium">Username</span></label>
+                  <input
+                    type="text"
+                    autoCapitalize="none"
+                    value={createForm.username}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
+                    className="input input-bordered input-sm w-full"
+                    required
+                  />
+                </div>
+                <div className="form-control">
+                  <label className="label"><span className="label-text font-medium">Display Name</span></label>
+                  <input
+                    type="text"
+                    value={createForm.displayName}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, displayName: e.target.value }))}
+                    className="input input-bordered input-sm w-full"
+                    required
+                  />
+                </div>
+                <div className="form-control">
+                  <label className="label"><span className="label-text font-medium">PIN (4–6 digits)</span></label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    value={createForm.pin}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                    className="input input-bordered input-sm w-full"
+                    maxLength={6}
+                    required
+                  />
+                </div>
+                <div className="form-control">
+                  <label className="label"><span className="label-text font-medium">Role</span></label>
+                  <select
+                    value={createForm.role}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as "admin" | "user" }))}
+                    className="select select-bordered select-sm w-full"
+                  >
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={createLoading}
+                    className="btn btn-primary btn-sm flex-1"
+                  >
+                    {createLoading ? "Creating…" : "Create"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowCreate(false); setCreateForm(EMPTY_CREATE); }}
+                    className="btn btn-ghost btn-sm flex-1"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
@@ -327,64 +325,67 @@ export default function AdminUsersClient() {
       {/* Edit User Modal */}
       {editUser && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Edit User</h2>
-            <form onSubmit={handleEdit} className="space-y-4">
-              {editError && (
-                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-2">{editError}</p>
-              )}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                <input
-                  type="text"
-                  autoCapitalize="none"
-                  value={editForm.username ?? ""}
-                  onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={editForm.displayName ?? ""}
-                  onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  New PIN <span className="text-gray-400 font-normal">(leave blank to keep current)</span>
-                </label>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  value={editForm.pin ?? ""}
-                  onChange={(e) => setEditForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  maxLength={6}
-                  placeholder="4–6 digits"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="submit"
-                  disabled={editLoading}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2 rounded-lg transition"
-                >
-                  {editLoading ? "Saving…" : "Save"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEditUser(null)}
-                  className="flex-1 border border-gray-300 text-gray-700 text-sm font-medium py-2 rounded-lg hover:bg-gray-50 transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+          <div className="card bg-base-100 shadow-xl w-full max-w-sm">
+            <div className="card-body">
+              <h2 className="card-title">Edit User</h2>
+              <form onSubmit={handleEdit} className="space-y-4">
+                {editError && (
+                  <div role="alert" className="alert alert-error text-sm">{editError}</div>
+                )}
+                <div className="form-control">
+                  <label className="label"><span className="label-text font-medium">Username</span></label>
+                  <input
+                    type="text"
+                    autoCapitalize="none"
+                    value={editForm.username ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))}
+                    className="input input-bordered input-sm w-full"
+                    required
+                  />
+                </div>
+                <div className="form-control">
+                  <label className="label"><span className="label-text font-medium">Display Name</span></label>
+                  <input
+                    type="text"
+                    value={editForm.displayName ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
+                    className="input input-bordered input-sm w-full"
+                    required
+                  />
+                </div>
+                <div className="form-control">
+                  <label className="label">
+                    <span className="label-text font-medium">New PIN</span>
+                    <span className="label-text-alt text-base-content/50">(leave blank to keep current)</span>
+                  </label>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    value={editForm.pin ?? ""}
+                    onChange={(e) => setEditForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
+                    className="input input-bordered input-sm w-full"
+                    maxLength={6}
+                    placeholder="4–6 digits"
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={editLoading}
+                    className="btn btn-primary btn-sm flex-1"
+                  >
+                    {editLoading ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditUser(null)}
+                    className="btn btn-ghost btn-sm flex-1"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}
