@@ -19,49 +19,49 @@ export default function NavBar({ session }: NavBarProps) {
     router.refresh();
   }
 
+  function handleSetTheme(t: typeof THEMES[number]) {
+    setTheme(t);
+    (document.activeElement as HTMLElement)?.blur();
+  }
+
   return (
     <nav className="navbar bg-base-100 border-b border-base-200 px-4">
-      <div className="navbar-start gap-1">
+      <div className="navbar-start">
         <Link href="/" className="btn btn-ghost font-semibold">
           TemcoTools
         </Link>
-        <Link href="/tools/rtv-label" className="btn btn-ghost btn-sm">
-          Tools
-        </Link>
-        {session.role === "admin" && (
-          <Link href="/admin/users" className="btn btn-ghost btn-sm">
-            Admin
-          </Link>
-        )}
       </div>
-      <div className="navbar-end gap-2">
-        <span className="text-sm text-base-content/70">{session.displayName}</span>
-        {session.role === "admin" && (
-          <div className="badge badge-primary text-xs">Admin</div>
-        )}
+      <div className="navbar-end">
         <div className="dropdown dropdown-end">
-          <div tabIndex={0} role="button" aria-label="Select theme" className="btn btn-ghost btn-sm">
-            Theme
+          <div tabIndex={0} role="button" className="btn btn-ghost btn-sm">
+            {session.displayName}
           </div>
           <ul
             tabIndex={0}
-            className="dropdown-content menu bg-base-100 rounded-box shadow-md w-36 p-1 z-[1] border border-base-200"
+            className="dropdown-content menu bg-base-100 rounded-box shadow-md w-44 p-1 z-[1] border border-base-200"
           >
-            {THEMES.map((t) => (
-              <li key={t}>
-                <button
-                  onClick={() => setTheme(t)}
-                  className={t === theme ? "active" : ""}
-                >
-                  {t}
-                </button>
-              </li>
-            ))}
+            <li>
+              <details>
+                <summary>Theme</summary>
+                <ul>
+                  {THEMES.map((t) => (
+                    <li key={t}>
+                      <button
+                        onClick={() => handleSetTheme(t)}
+                        className={t === theme ? "active" : ""}
+                      >
+                        {t}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </li>
+            <li>
+              <button onClick={handleSignOut}>Sign out</button>
+            </li>
           </ul>
         </div>
-        <button onClick={handleSignOut} className="btn btn-ghost btn-sm">
-          Sign out
-        </button>
       </div>
     </nav>
   );
