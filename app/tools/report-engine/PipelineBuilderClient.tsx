@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useRef } from "react";
+import * as XLSX from "xlsx";
 import {
   executePipeline,
   type Step,
@@ -12,75 +13,29 @@ import PreviewTable from "@/components/PreviewTable";
 
 type StepWithId = Step & { id: string };
 
-// ── CSV Helpers ───────────────────────────────────────────────────────────────
+// ── Excel / Spreadsheet Helpers ───────────────────────────────────────────────
 
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (ch === "," && !inQuotes) {
-      result.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
+function parseWorkbook(
+  workbook: XLSX.WorkBook
+): Record<string, unknown>[] {
+  if (workbook.SheetNames.length > 1) {
+    console.warn(
+      `Workbook has ${workbook.SheetNames.length} sheets. Using the first sheet: "${workbook.SheetNames[0]}".`
+    );
   }
-  result.push(current);
-  return result;
+  const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet);
 }
 
-function parseCSV(text: string): Record<string, string>[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = parseCSVLine(lines[0]).map((h) => h.trim());
-  if (headers.length === 0) return [];
-  return lines
-    .slice(1)
-    .filter((l) => l.trim() !== "")
-    .map((line) => {
-      const values = parseCSVLine(line);
-      return Object.fromEntries(
-        headers.map((h, i) => [h, (values[i] ?? "").trim()])
-      );
-    });
-}
-
-function exportCSV(
+function exportXLSX(
   data: Record<string, unknown>[],
-  filename = "report-export.csv"
+  filename = "report-export.xlsx"
 ): void {
   if (data.length === 0) return;
-  const headers = Object.keys(data[0]);
-  const escape = (v: unknown): string => {
-    const s = String(v ?? "");
-    return s.includes(",") || s.includes('"') || s.includes("\n")
-      ? `"${s.replace(/"/g, '""')}"`
-      : s;
-  };
-  const csv = [
-    headers.map(escape).join(","),
-    ...data.map((row) => headers.map((h) => escape(row[h])).join(",")),
-  ].join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function uid(): string {
-  return crypto.randomUUID();
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Report");
+  XLSX.writeFile(workbook, filename);
 }
 
 // ── Icons ─────────────────────────────────────────────────────────────────────
@@ -182,13 +137,14 @@ export default function PipelineBuilderClient() {
     setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const text = ev.target?.result as string;
-      const parsed = parseCSV(text);
+      const buffer = ev.target?.result as ArrayBuffer;
+      const workbook = XLSX.read(buffer);
+      const parsed = parseWorkbook(workbook);
       setRawData(parsed);
       setSteps([]);
       setShowNewStep(false);
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   }
 
   function resetNewStepForm(cols: string[]) {
@@ -224,7 +180,10 @@ export default function PipelineBuilderClient() {
         step = { type: "map", from: mapFrom, to: mapTo.trim() || null };
         break;
       case "join": {
-        const parsed = parseCSV(joinCsv);
+        const wb = XLSX.read(joinCsv, { type: "string" });
+        const parsed = XLSX.utils.sheet_to_json<Record<string, unknown>>(
+          wb.Sheets[wb.SheetNames[0]]
+        );
         step = {
           type: "join",
           rightData: parsed,
@@ -234,7 +193,7 @@ export default function PipelineBuilderClient() {
         break;
       }
     }
-    setSteps((prev) => [...prev, { ...step, id: uid() }]);
+    setSteps((prev) => [...prev, { ...step, id: crypto.randomUUID() }]);
     setShowNewStep(false);
   }
 
@@ -298,13 +257,13 @@ export default function PipelineBuilderClient() {
                 1 · Upload
               </h3>
               <p className="text-xs text-base-content/60 mb-3">
-                Upload a CSV file to start the pipeline.
+                Upload a spreadsheet (.xlsx, .xls) or CSV file to start the pipeline.
               </p>
               <div className="flex items-center gap-3 flex-wrap">
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv,text/csv"
+                  accept=".xlsx,.xls,.csv"
                   className="file-input file-input-sm file-input-bordered"
                   onChange={handleFile}
                 />
@@ -652,10 +611,10 @@ export default function PipelineBuilderClient() {
               ) : (
                 <div className="flex gap-3 flex-wrap">
                   <button
-                    onClick={() => exportCSV(previewData)}
+                    onClick={() => exportXLSX(previewData)}
                     className="btn btn-sm btn-primary"
                   >
-                    ↓ Download CSV
+                    ↓ Download Excel (.xlsx)
                   </button>
                   <button
                     onClick={() => window.print()}
