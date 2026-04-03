@@ -18,6 +18,14 @@ model User {
   lastLoginAt DateTime?
 }
 
+model Pipeline {
+  id        String   @id @default(cuid())
+  name      String
+  steps     Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 enum Role {
   admin
   user

@@ -1,17 +1,18 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import { THEMES, type Theme } from "@/lib/themes";
 
-export type Theme = "light" | "dark" | "corporate" | "nord" | "dim";
+export type { Theme };
+export { THEMES };
 
-export const THEMES: Theme[] = ["corporate", "light", "dark", "nord", "dim"];
-const DEFAULT_THEME: Theme = "corporate";
+const DEFAULT_THEME: Theme = "light";
 const STORAGE_KEY = "temco_theme";
 
 interface ThemeContextValue {
   theme: Theme;
   setTheme: (theme: Theme) => void;
-  themes: Theme[];
+  themes: typeof THEMES;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
@@ -24,7 +25,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     if (typeof window === "undefined") return DEFAULT_THEME;
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    return stored && THEMES.includes(stored) ? stored : DEFAULT_THEME;
+    return stored && (THEMES as readonly string[]).includes(stored)
+      ? stored
+      : DEFAULT_THEME;
   });
 
   useEffect(() => {
