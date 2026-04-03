@@ -7,7 +7,8 @@ export const metadata: Metadata = {
   description: "Internal warehouse operations tools",
 };
 
-// Blocking script runs before React hydrates to prevent flash of unstyled content.
+// Intentionally minified: this script runs inline before React hydrates to prevent
+// flash of unstyled content. Extra bytes here delay first paint.
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('temco_theme');if(['light','dark','cupcake','nord','dim'].indexOf(t)>-1)document.documentElement.setAttribute('data-theme',t);}catch(e){}})();`;
 
 export default function RootLayout({

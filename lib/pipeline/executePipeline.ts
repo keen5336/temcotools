@@ -110,6 +110,7 @@ function applySort(
   data: Record<string, unknown>[],
   step: SortStep
 ): Record<string, unknown>[] {
+  // Spread creates a shallow copy so the original array is never mutated.
   return [...data].sort((a, b) => {
     const av = a[step.column];
     const bv = b[step.column];
