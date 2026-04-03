@@ -321,9 +321,11 @@ export default function MarsLabelClient() {
         body: zplOutput,
         keepalive: true,
         mode: "no-cors",
-      }).catch(() => {});
-    } catch {
-      // ignore
+      }).catch((err) => {
+        console.warn("Print request failed:", err);
+      });
+    } catch (err) {
+      console.warn("Print request start failed:", err);
     }
     setTimeout(() => {
       window.location.href = window.location.pathname;
@@ -360,8 +362,8 @@ export default function MarsLabelClient() {
   }
 
   function handleNewTemplate() {
-    const name = templateName.trim() || `Custom Template ${new Date().toLocaleString()}`;
-    const id = "tpl-" + Date.now();
+    const name = templateName.trim() || `Custom Template ${new Date().toISOString()}`;
+    const id = "tpl-" + crypto.randomUUID();
     const newTpl: Template = { id, name, content: templateEditorContent || DEFAULT_TEMPLATE_ZPL };
     const updated = { ...templates, [id]: newTpl };
     setTemplates(updated);
@@ -606,13 +608,15 @@ export default function MarsLabelClient() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mb-10">
-                  {[
-                    { k: "Order", v: safeField(fields.orderNumber) },
-                    { k: "Vendor", v: safeField(fields.vendor) },
-                    { k: "Model", v: safeField(fields.modelNumber) },
-                    { k: "Submitted By", v: safeField(fields.submittedBy) },
-                    { k: "Vendor RA", v: safeField(fields.vendorRaNumber), wide: true },
-                  ].map(({ k, v, wide }) => (
+                  {(
+                    [
+                      { k: "Order", v: safeField(fields.orderNumber) },
+                      { k: "Vendor", v: safeField(fields.vendor) },
+                      { k: "Model", v: safeField(fields.modelNumber) },
+                      { k: "Submitted By", v: safeField(fields.submittedBy) },
+                      { k: "Vendor RA", v: safeField(fields.vendorRaNumber), wide: true },
+                    ] as Array<{ k: string; v: string; wide?: boolean }>
+                  ).map(({ k, v, wide }) => (
                     <div key={k} className={wide ? "col-span-2" : ""}>
                       <div className="text-[0.55rem] font-black uppercase tracking-widest text-[#666]">
                         {k}
@@ -778,8 +782,10 @@ export default function MarsLabelClient() {
         </button>
       </div>
 
-      {/* Status pill — floats top-right, shown when not default */}
+      {/* Status pill — floats top-right */}
       <div
+        role="status"
+        aria-live="polite"
         className={`fixed top-16 right-4 z-50 border rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${statusClass}`}
       >
         {status.message}
