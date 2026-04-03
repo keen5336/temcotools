@@ -7,9 +7,9 @@ export default async function HomePage() {
 
   const tools = [
     {
-      name: "RTV Label Tool",
+      name: "MARS Label Tool",
       href: "/tools/rtv-label",
-      description: "Generate and print RTV shipping labels.",
+      description: "Generate and print MARS return shipping labels.",
     },
     {
       name: "Receiving Reconcile",
