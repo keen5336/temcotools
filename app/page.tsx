@@ -27,6 +27,11 @@ export default async function HomePage() {
       description:
         "Build data transformation pipelines on CSV files and export formatted reports.",
     },
+    {
+      name: "Barcode Generator",
+      href: "/tools/barcode-generator",
+      description: "Paste a list of values to generate and print a batch of barcodes.",
+    },
   ];
 
   return (

@@ -46,7 +46,9 @@ function BarcodeCard({ value }: { value: string }) {
       {error ? (
         <div className="text-xs text-error text-center px-2">{error}</div>
       ) : (
-        <canvas ref={canvasRef} className="max-w-full" />
+        <div className="bg-white p-2 rounded">
+          <canvas ref={canvasRef} className="max-w-full" />
+        </div>
       )}
     </div>
   );
