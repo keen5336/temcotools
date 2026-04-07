@@ -12,6 +12,7 @@ services:
       - temco_net
 
   app:
+    container_name: temcotools
     build:
       context: .
       dockerfile: Dockerfile
@@ -23,10 +24,18 @@ services:
     environment:
       DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
       SESSION_SECRET: ${SESSION_SECRET:-changeme-at-least-32-characters-long}
+      TRUST_PROXY: "true"
+      PROTOCOL: "https"
+      NODE_ENV: "production"
+      NEXTAUTH_URL: "https://temco.chronchive.com"
+      NEXT_PUBLIC_APP_URL: "https://temco.chronchive.com"
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       - db
     networks:
-      - temco_net
+      temco_net:
+        aliases:
+          - temcotools.internal
 
 networks:
   temco_net:

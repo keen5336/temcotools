@@ -137,7 +137,31 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 | `npx prisma migrate dev` | Run pending migrations (dev) |
 | `npx prisma migrate deploy` | Run pending migrations (prod) |
 
-## Deployment
+## Docker Deployment
+
+To rebuild and redeploy after pulling new changes:
+
+1. **Rebuild the image**:
+   ```bash
+   docker compose build
+   ```
+
+2. **Restart the services**:
+   ```bash
+   docker compose up -d
+   ```
+
+3. **Apply database migrations** (if any):
+   ```bash
+   docker compose exec app npx prisma migrate deploy
+   ```
+
+4. **Bootstrap admin user** (if first time or needed, requires `BOOTSTRAP_ADMIN_*` environment variables):
+   ```bash
+   docker compose exec app npx tsx scripts/bootstrap-admin.ts
+   ```
+
+## Manual Deployment
 
 1. Set all environment variables on your hosting platform (`DATABASE_URL`, `SESSION_SECRET`).
 2. Run `npx prisma migrate deploy` as part of your deployment pipeline.
