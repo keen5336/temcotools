@@ -314,22 +314,17 @@ export default function MarsLabelClient() {
     localStorage.setItem(STORAGE_KEYS.printerEndpoint, endpoint);
     localStorage.setItem(STORAGE_KEYS.contentType, contentType);
     showStatus("Sending label...", "ok");
-    try {
-      fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": contentType },
-        body: zplOutput,
-        keepalive: true,
-        mode: "no-cors",
-      }).catch((err) => {
-        console.warn("Print request failed:", err);
-      });
-    } catch (err) {
-      console.warn("Print request start failed:", err);
-    }
-    setTimeout(() => {
-      window.location.href = window.location.pathname;
-    }, 400);
+    fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": contentType },
+      body: zplOutput,
+      keepalive: true,
+      mode: "no-cors",
+    }).catch((err) => {
+      console.error("Printer Fetch Error:", err);
+      alert(`Printer error: ${err instanceof Error ? err.message : String(err)}`);
+      showStatus("Send failed", "error");
+    });
   }
 
   function handleSwitchTemplate(templateId: string) {

@@ -12,16 +12,6 @@ export default async function HomePage() {
       description: "Generate and print MARS return shipping labels.",
     },
     {
-      name: "Receiving Reconcile",
-      href: "/tools/receiving-reconcile",
-      description: "Reconcile receiving documents against purchase orders.",
-    },
-    {
-      name: "Scanner Lookup",
-      href: "/tools/scanner-lookup",
-      description: "Look up items and locations by barcode scan.",
-    },
-    {
       name: "Report Engine",
       href: "/tools/report-engine",
       description:
