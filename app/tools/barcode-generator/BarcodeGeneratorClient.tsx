@@ -46,7 +46,7 @@ function BarcodeCard({ value }: { value: string }) {
       {error ? (
         <div className="text-xs text-error text-center px-2">{error}</div>
       ) : (
-        <div className="bg-base-100 p-2 rounded">
+        <div style={{ backgroundColor: "#ffffff" }} className="p-2 rounded">
           <canvas ref={canvasRef} className="max-w-full" />
         </div>
       )}

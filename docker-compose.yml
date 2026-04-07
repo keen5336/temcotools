@@ -10,6 +10,11 @@ services:
       - db_data:/var/lib/postgresql/data
     networks:
       - temco_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ops_tools -d ops_tools"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   app:
     container_name: temcotools
@@ -31,7 +36,8 @@ services:
       NEXT_PUBLIC_APP_URL: "https://temco.chronchive.com"
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       temco_net:
         aliases:

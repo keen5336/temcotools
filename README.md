@@ -92,9 +92,9 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 │   ├── admin/
 │   │   └── users/                # User management (admin only)
 │   ├── tools/
-│   │   ├── rtv-label/            # RTV label generation tool
-│   │   ├── receiving-reconcile/  # Receiving reconciliation tool
-│   │   └── scanner-lookup/       # Barcode scanner lookup tool
+│   │   ├── rtv-label/            # MARS label generation and printing tool
+│   │   ├── barcode-generator/    # Batch barcode generation and printing tool
+│   │   └── report-engine/        # CSV pipeline / report builder tool
 │   ├── api/
 │   │   ├── auth/
 │   │   │   ├── login/            # POST — validates username + PIN, sets session cookie
@@ -167,6 +167,20 @@ To rebuild and redeploy after pulling new changes:
 2. Run `npx prisma migrate deploy` as part of your deployment pipeline.
 3. Run `npm run bootstrap` once to create the initial admin user.
 4. Build with `npm run build`.
+
+## Troubleshooting
+
+### Printing fails or the browser shows a network error
+
+The MARS Label tool sends ZPL data directly to the Zebra printer at `10.108.40.114` over the local network. If printing fails:
+
+1. **Allow mixed-content / local network access** – When the browser prompts you to allow communication with the printer's local IP address (e.g. `10.108.40.114`), click **Allow**. Some browsers block requests to private IP addresses from HTTPS pages by default.
+2. **Check the printer endpoint** – In the MARS Label tool settings, confirm the printer endpoint matches the actual printer address and port (e.g. `http://10.108.40.114:9100`).
+3. **Verify network connectivity** – Ensure your device is on the same local network as the printer.
+
+### The app fails to start / database connection errors
+
+Ensure the `db` service is fully healthy before the `app` container initialises. The `docker-compose.yml` uses a healthcheck on the `db` service so that `app` waits until PostgreSQL is ready.
 
 ## License
 

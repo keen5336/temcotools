@@ -305,7 +305,7 @@ export default function MarsLabelClient() {
     }
   }
 
-  function handlePrint() {
+  async function handlePrint() {
     const endpoint = printerEndpoint.trim();
     if (!endpoint) {
       showStatus("Set printer endpoint first", "warn");
@@ -314,17 +314,30 @@ export default function MarsLabelClient() {
     localStorage.setItem(STORAGE_KEYS.printerEndpoint, endpoint);
     localStorage.setItem(STORAGE_KEYS.contentType, contentType);
     showStatus("Sending label...", "ok");
-    fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": contentType },
-      body: zplOutput,
-      keepalive: true,
-      mode: "no-cors",
-    }).catch((err) => {
-      console.error("Printer Fetch Error:", err);
-      alert(`Printer error: ${err instanceof Error ? err.message : String(err)}`);
-      showStatus("Send failed", "error");
-    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+    try {
+      await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": contentType },
+        body: zplOutput,
+        keepalive: true,
+        mode: "no-cors",
+        signal: controller.signal,
+      });
+      showStatus("Label sent", "ok");
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        showStatus("Label sent", "ok");
+      } else {
+        console.error("Printer Fetch Error:", err);
+        showStatus("Send failed", "error");
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   function handleSwitchTemplate(templateId: string) {
