@@ -1,13 +1,21 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
-import ExcelJS from "exceljs";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   executePipeline,
   type Step,
   type FilterOperator,
 } from "@/lib/pipeline/executePipeline";
 import PreviewTable from "@/components/PreviewTable";
+
+declare global {
+  interface Window {
+    XLSX: any;
+  }
+}
+
+const XLSX_CDN_URL =
+  "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,54 +68,40 @@ function parseCSV(text: string): Record<string, unknown>[] {
 }
 
 /**
- * Parse a binary xlsx/xls ArrayBuffer using ExcelJS.
+ * Parse a binary xlsx/xls ArrayBuffer using window.XLSX (loaded via CDN).
  * Logs a warning when the workbook has multiple sheets and uses the first one.
  */
-async function parseWorkbook(
-  buffer: ArrayBuffer
-): Promise<Record<string, unknown>[]> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer);
+function parseWorkbook(buffer: ArrayBuffer): Record<string, unknown>[] {
+  const workbook = window.XLSX.read(new Uint8Array(buffer), { type: "array" });
+  if (!workbook) throw new Error("Failed to parse Excel file");
 
-  if (workbook.worksheets.length > 1) {
+  if (workbook.SheetNames.length > 1) {
     console.warn(
-      `Workbook has ${workbook.worksheets.length} sheets. Using the first sheet: "${workbook.worksheets[0].name}".`
+      `Workbook has ${workbook.SheetNames.length} sheets. Using the first sheet: "${workbook.SheetNames[0]}".`
     );
   }
 
-  const worksheet = workbook.worksheets[0];
-  const headers: string[] = [];
-  const rows: Record<string, unknown>[] = [];
-
-  worksheet.eachRow((row, rowNumber) => {
-    // row.values is 1-indexed; index 0 is always undefined
-    const cells = (row.values as ExcelJS.CellValue[]).slice(1);
-    if (rowNumber === 1) {
-      cells.forEach((v) => headers.push(String(v ?? "")));
-    } else {
-      const obj: Record<string, unknown> = {};
-      cells.forEach((v, i) => {
-        obj[headers[i]] = v;
-      });
-      rows.push(obj);
-    }
-  });
-
-  return rows;
+  const firstSheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[firstSheetName];
+  return window.XLSX.utils.sheet_to_json(worksheet) as Record<
+    string,
+    unknown
+  >[];
 }
 
-async function exportXLSX(
+function exportXLSX(
   data: Record<string, unknown>[],
   filename = "report-export.xlsx"
-): Promise<void> {
+): void {
   if (data.length === 0) return;
-  const headers = Object.keys(data[0]);
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet("Report");
-  worksheet.addRow(headers);
-  data.forEach((row) => worksheet.addRow(headers.map((h) => row[h])));
-  const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer], {
+  const wb = window.XLSX.utils.book_new();
+  const ws = window.XLSX.utils.json_to_sheet(data);
+  window.XLSX.utils.book_append_sheet(wb, ws, "Report");
+  const wbout: ArrayBuffer = window.XLSX.write(wb, {
+    bookType: "xlsx",
+    type: "array",
+  });
+  const blob = new Blob([wbout], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   const url = URL.createObjectURL(blob);
@@ -174,6 +168,26 @@ const VALUE_LESS_OPS: FilterOperator[] = ["isempty", "notempty"];
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function PipelineBuilderClient() {
+  // ─ Library state
+  const [xlsxLoaded, setXlsxLoaded] = useState(false);
+  const [xlsxLoadError, setXlsxLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (window.XLSX) {
+      setXlsxLoaded(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = XLSX_CDN_URL;
+    script.async = true;
+    script.onload = () => setXlsxLoaded(true);
+    script.onerror = () =>
+      setXlsxLoadError(
+        `Failed to load spreadsheet library from ${XLSX_CDN_URL}. Please check your internet connection.`
+      );
+    document.head.appendChild(script);
+  }, []);
+
   // ─ Data state
   const [rawData, setRawData] = useState<Record<string, unknown>[]>([]);
   const [fileName, setFileName] = useState<string>("");
@@ -230,10 +244,10 @@ export default function PipelineBuilderClient() {
       };
       reader.readAsText(file);
     } else {
-      reader.onload = async (ev) => {
+      reader.onload = (ev) => {
         try {
           const buffer = ev.target?.result as ArrayBuffer;
-          const parsed = await parseWorkbook(buffer);
+          const parsed = parseWorkbook(buffer);
           setRawData(parsed);
           setSteps([]);
           setShowNewStep(false);
@@ -341,6 +355,15 @@ export default function PipelineBuilderClient() {
     <>
       {/* ── Screen view (hidden during print) ── */}
       <div className="print:hidden">
+        {xlsxLoadError && (
+          <div className="alert alert-error mb-4 text-sm">{xlsxLoadError}</div>
+        )}
+        {!xlsxLoaded && !xlsxLoadError && (
+          <div className="flex items-center gap-2 text-sm text-base-content/50 mb-4">
+            <span className="loading loading-spinner loading-xs" />
+            Loading spreadsheet library…
+          </div>
+        )}
         <ul className="timeline timeline-vertical w-full">
           {/* ─────────────────── Step 1: Upload ─────────────────── */}
           <li>
@@ -365,14 +388,23 @@ export default function PipelineBuilderClient() {
                   accept=".xlsx,.xls,.csv"
                   className="file-input file-input-sm file-input-bordered"
                   onChange={handleFile}
+                  disabled={!xlsxLoaded}
                 />
               </div>
               {hasData && (
-                <p className="text-xs text-success mt-2">
-                  ✓ Loaded <strong>{rawData.length}</strong> rows ·{" "}
-                  <strong>{columns.length}</strong> columns from{" "}
-                  <em>{fileName}</em>
-                </p>
+                <>
+                  <p className="text-xs text-success mt-2">
+                    ✓ Loaded <strong>{rawData.length}</strong> rows ·{" "}
+                    <strong>{columns.length}</strong> columns from{" "}
+                    <em>{fileName}</em>
+                  </p>
+                  <div className="mt-3">
+                    <p className="text-xs text-base-content/50 mb-1">
+                      Preview (first 5 rows):
+                    </p>
+                    <PreviewTable data={rawData.slice(0, 5)} />
+                  </div>
+                </>
               )}
               {fileError && (
                 <p className="text-xs text-error mt-2">✕ {fileError}</p>
@@ -713,13 +745,15 @@ export default function PipelineBuilderClient() {
               ) : (
                 <div className="flex gap-3 flex-wrap">
                   <button
-                    onClick={() =>
-                      exportXLSX(previewData).catch((err) =>
+                    onClick={() => {
+                      try {
+                        exportXLSX(previewData);
+                      } catch (err) {
                         setExportError(
                           err instanceof Error ? err.message : "Export failed."
-                        )
-                      )
-                    }
+                        );
+                      }
+                    }}
                     className="btn btn-sm btn-primary"
                   >
                     ↓ Download Excel (.xlsx)
