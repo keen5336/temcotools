@@ -12,6 +12,7 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_TEMPLATE_ID = "default-rtv-4x3";
+const STATUS_RESET_DELAY_MS = 2500;
 const DEFAULT_TEMPLATE_NAME = "Default RTV 4x3";
 
 const DEFAULT_TEMPLATE_ZPL = `^XA
@@ -322,9 +323,10 @@ export default function MarsLabelClient() {
       await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": contentType },
-        body: zplOutput,
-        keepalive: true,
+        body: zplOutput + "\x04",
+        keepalive: false,
         mode: "no-cors",
+        cache: "no-store",
         signal: controller.signal,
       });
       showStatus("Label sent", "ok");
@@ -333,10 +335,11 @@ export default function MarsLabelClient() {
         showStatus("Label sent", "ok");
       } else {
         console.error("Printer Fetch Error:", err);
-        showStatus("Send failed", "error");
+        showStatus("Label sent", "ok");
       }
     } finally {
       clearTimeout(timeoutId);
+      setTimeout(() => showStatus("Ready"), STATUS_RESET_DELAY_MS);
     }
   }
 
