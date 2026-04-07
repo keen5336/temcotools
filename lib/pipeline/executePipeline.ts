@@ -114,13 +114,18 @@ function applySort(
   return [...data].sort((a, b) => {
     const av = a[step.column];
     const bv = b[step.column];
+    const aStr = String(av ?? "");
+    const bStr = String(bv ?? "");
+    // Push blanks to the bottom regardless of sort direction.
+    if (aStr === "" && bStr !== "") return 1;
+    if (aStr !== "" && bStr === "") return -1;
     const an = Number(av);
     const bn = Number(bv);
     let cmp: number;
     if (!isNaN(an) && !isNaN(bn)) {
       cmp = an - bn;
     } else {
-      cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+      cmp = aStr.localeCompare(bStr);
     }
     return step.direction === "asc" ? cmp : -cmp;
   });

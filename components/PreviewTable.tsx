@@ -15,8 +15,14 @@ export default function PreviewTable({
     );
   }
 
-  const headers = Object.keys(data[0]);
   const rows = data.slice(0, maxRows);
+  const keySet = new Set<string>();
+  for (const row of rows) {
+    for (const key of Object.keys(row)) {
+      keySet.add(key);
+    }
+  }
+  const headers = Array.from(keySet);
   const truncated = data.length > maxRows;
 
   return (
@@ -44,7 +50,13 @@ export default function PreviewTable({
                     className="max-w-xs truncate"
                     title={String(row[h] ?? "")}
                   >
-                    {String(row[h] ?? "")}
+                    {row[h] === "" || row[h] == null ? (
+                      <span className="text-base-content/30 italic text-xs">
+                        blank
+                      </span>
+                    ) : (
+                      String(row[h])
+                    )}
                   </td>
                 ))}
               </tr>
