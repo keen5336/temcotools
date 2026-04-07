@@ -83,7 +83,7 @@ function parseWorkbook(buffer: ArrayBuffer): Record<string, unknown>[] {
 
   const firstSheetName = workbook.SheetNames[0];
   const worksheet = workbook.Sheets[firstSheetName];
-  return window.XLSX.utils.sheet_to_json(worksheet) as Record<
+  return window.XLSX.utils.sheet_to_json(worksheet, { defval: "" }) as Record<
     string,
     unknown
   >[];
@@ -215,10 +215,17 @@ export default function PipelineBuilderClient() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const columns = useMemo(
-    () => (rawData.length > 0 ? Object.keys(rawData[0]) : []),
-    [rawData]
-  );
+  const columns = useMemo(() => {
+    if (rawData.length === 0) return [];
+    const keySet = new Set<string>();
+    const sampleSize = Math.min(rawData.length, 200);
+    for (let i = 0; i < sampleSize; i++) {
+      for (const key of Object.keys(rawData[i])) {
+        keySet.add(key);
+      }
+    }
+    return Array.from(keySet);
+  }, [rawData]);
 
   const previewData = useMemo(
     () => executePipeline(rawData, steps as Step[]),
