@@ -30,6 +30,14 @@ export default function NavBar({ session }: NavBarProps) {
         <Link href="/" className="btn btn-ghost font-semibold">
           TemcoTools
         </Link>
+        <div className="hidden sm:flex gap-1 ml-2">
+          <Link href="/tools/rtv-label" className="btn btn-ghost btn-sm">
+            MARS Label
+          </Link>
+          <Link href="/tools/barcode-generator" className="btn btn-ghost btn-sm">
+            Barcode Generator
+          </Link>
+        </div>
       </div>
       <div className="navbar-end">
         <div className="dropdown dropdown-end">
