@@ -47,6 +47,19 @@ export default async function HomePage() {
           ))}
           {session.role === "admin" && (
             <Link
+              href="/admin/files"
+              className="block bg-base-100 border border-base-200 rounded-lg p-5 hover:border-primary hover:shadow-sm transition"
+            >
+              <h2 className="text-base font-semibold text-base-content mb-1">
+                File Manager
+              </h2>
+              <p className="text-sm text-base-content/70">
+                Upload, download, organize, and clear shared swap-space files.
+              </p>
+            </Link>
+          )}
+          {session.role === "admin" && (
+            <Link
               href="/admin/users"
               className="block bg-base-100 border border-base-200 rounded-lg p-5 hover:border-primary hover:shadow-sm transition"
             >

@@ -37,6 +37,11 @@ export default function NavBar({ session }: NavBarProps) {
           <Link href="/tools/barcode-generator" className="btn btn-ghost btn-sm">
             Barcode Generator
           </Link>
+          {session.role === "admin" && (
+            <Link href="/admin/files" className="btn btn-ghost btn-sm">
+              File Manager
+            </Link>
+          )}
         </div>
       </div>
       <div className="navbar-end">
@@ -65,6 +70,16 @@ export default function NavBar({ session }: NavBarProps) {
                 </ul>
               </details>
             </li>
+            {session.role === "admin" && (
+              <li>
+                <Link href="/admin/files">File Manager</Link>
+              </li>
+            )}
+            {session.role === "admin" && (
+              <li>
+                <Link href="/admin/users">User Management</Link>
+              </li>
+            )}
             <li>
               <button onClick={handleSignOut}>Sign out</button>
             </li>

@@ -25,6 +25,7 @@ services:
     ports:
       - "3000:3000"
     environment:
+      ADMIN_FILE_MANAGER_ROOT: /data/admin-files
       DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
       SESSION_SECRET: ${SESSION_SECRET:-changeme-at-least-32-characters-long}
       TRUST_PROXY: "true"
@@ -36,6 +37,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./runtime/admin-files:/data/admin-files
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/signin || exit 1"]
       interval: 15s
