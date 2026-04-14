@@ -22,11 +22,18 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
 }
 
+function toUploadList(files: File[] | FileList | null | undefined) {
+  return Array.from(files ?? []).filter((file) => file.size > 0);
+}
+
 export default function AdminFileManagerClient() {
   const [currentPath, setCurrentPath] = useState("");
   const [entries, setEntries] = useState<Entry[]>([]);
   const [parentPath, setParentPath] = useState("");
   const [folderName, setFolderName] = useState("");
+  const [minSizeKb, setMinSizeKb] = useState("");
+  const [modifiedWithinDays, setModifiedWithinDays] = useState("all");
+  const [dragActive, setDragActive] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -79,18 +86,15 @@ export default function AdminFileManagerClient() {
     setBusy(false);
   }
 
-  async function uploadFiles(e: React.FormEvent) {
-    e.preventDefault();
-    const files = fileInputRef.current?.files;
-    if (!files?.length) return;
-
+  async function uploadSelectedFiles(files: File[]) {
+    if (!files.length) return;
     setBusy(true);
     setError("");
     setStatus("");
 
     const formData = new FormData();
     formData.set("path", currentPath);
-    Array.from(files).forEach((file) => formData.append("files", file));
+    files.forEach((file) => formData.append("files", file));
 
     const res = await fetch("/api/admin/files", {
       method: "POST",
@@ -105,9 +109,20 @@ export default function AdminFileManagerClient() {
     }
 
     if (fileInputRef.current) fileInputRef.current.value = "";
-    setStatus("Upload complete.");
+    setStatus(`${files.length} file${files.length === 1 ? "" : "s"} uploaded.`);
     await load(currentPath);
     setBusy(false);
+  }
+
+  async function uploadFiles(e: React.FormEvent) {
+    e.preventDefault();
+    await uploadSelectedFiles(toUploadList(fileInputRef.current?.files));
+  }
+
+  async function handleDropUpload(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragActive(false);
+    await uploadSelectedFiles(toUploadList(e.dataTransfer.files));
   }
 
   async function removeEntry(path: string, kind: Entry["kind"]) {
@@ -137,6 +152,17 @@ export default function AdminFileManagerClient() {
   }
 
   const breadcrumbs = currentPath ? currentPath.split("/") : [];
+  const minSizeBytes = minSizeKb.trim() ? Number(minSizeKb) * 1024 : 0;
+  const modifiedCutoff =
+    modifiedWithinDays === "all"
+      ? null
+      : Date.now() - Number(modifiedWithinDays) * 24 * 60 * 60 * 1000;
+  const filteredEntries = entries.filter((entry) => {
+    if (entry.kind === "directory") return true;
+    if (minSizeBytes > 0 && entry.size < minSizeBytes) return false;
+    if (modifiedCutoff && new Date(entry.modifiedAt).getTime() < modifiedCutoff) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-5">
@@ -177,7 +203,37 @@ export default function AdminFileManagerClient() {
           <div className="grid gap-4 lg:grid-cols-2">
             <form onSubmit={uploadFiles} className="rounded-xl border border-base-300 p-4 space-y-3">
               <div className="font-semibold">Upload files</div>
-              <input ref={fileInputRef} type="file" multiple className="file-input file-input-bordered w-full" />
+              <div
+                className={`rounded-xl border-2 border-dashed p-5 text-center transition ${
+                  dragActive
+                    ? "border-primary bg-primary/10"
+                    : "border-base-300 bg-base-200/40"
+                }`}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setDragActive(false);
+                }}
+                onDrop={handleDropUpload}
+              >
+                <div className="font-medium">Drag files here</div>
+                <div className="text-sm text-base-content/60 mt-1">
+                  or choose files below to upload into {currentPath || "/"}
+                </div>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="file-input file-input-bordered w-full"
+              />
               <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
                 Upload to {currentPath || "/"}
               </button>
@@ -205,11 +261,50 @@ export default function AdminFileManagerClient() {
 
       <div className="card bg-base-100 border border-base-200 shadow-sm">
         <div className="card-body gap-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <h2 className="card-title text-base">Contents</h2>
-            <button className="btn btn-sm btn-outline" onClick={() => load(currentPath)} disabled={busy}>
-              Refresh
-            </button>
+            <div className="flex flex-wrap gap-3 items-end">
+              <label className="form-control">
+                <div className="label py-1">
+                  <span className="label-text text-xs uppercase tracking-wide text-base-content/60">
+                    Min File Size
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="input input-bordered input-sm w-32"
+                  placeholder="KB"
+                  value={minSizeKb}
+                  onChange={(e) => setMinSizeKb(e.target.value)}
+                />
+              </label>
+              <label className="form-control">
+                <div className="label py-1">
+                  <span className="label-text text-xs uppercase tracking-wide text-base-content/60">
+                    Modified Within
+                  </span>
+                </div>
+                <select
+                  className="select select-bordered select-sm w-40"
+                  value={modifiedWithinDays}
+                  onChange={(e) => setModifiedWithinDays(e.target.value)}
+                >
+                  <option value="all">All Time</option>
+                  <option value="1">24 Hours</option>
+                  <option value="7">7 Days</option>
+                  <option value="30">30 Days</option>
+                </select>
+              </label>
+              <button
+                className="btn btn-sm btn-outline"
+                onClick={() => load(currentPath)}
+                disabled={busy}
+              >
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -230,8 +325,8 @@ export default function AdminFileManagerClient() {
                       Loading…
                     </td>
                   </tr>
-                ) : entries.length ? (
-                  entries.map((entry) => (
+                ) : filteredEntries.length ? (
+                  filteredEntries.map((entry) => (
                     <tr key={entry.path}>
                       <td className="font-medium">{entry.name}</td>
                       <td>{entry.kind}</td>
@@ -264,7 +359,7 @@ export default function AdminFileManagerClient() {
                 ) : (
                   <tr>
                     <td colSpan={5} className="text-center text-base-content/60 py-8">
-                      This folder is empty.
+                      No entries match the current filters.
                     </td>
                   </tr>
                 )}
@@ -276,4 +371,3 @@ export default function AdminFileManagerClient() {
     </div>
   );
 }
-
