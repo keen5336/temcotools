@@ -22,8 +22,8 @@ const DEFAULT_TEMPLATE_ZPL = `^XA
 ^LH0,0
 
 ^FO35,40^A0N,300,280^FDMARS^FS
-^BY4,2,110
-^FO660,860^BCR,110,Y,N,N^FD{{submissionNumber}}^FS
+^BY3,2,100
+^FO610,860^BCR,100,Y,N,N^FD{{submissionNumber}}^FS
 
 ^FO24,360^A0N,24,24^FDSERIAL^FS
 ^FO24,392^A0N,70,70^FD{{serialNumber}}^FS
@@ -34,20 +34,20 @@ const DEFAULT_TEMPLATE_ZPL = `^XA
 ^FO450,480^A0N,35,35^FDVENDOR^FS
 ^FO450,515^A0N,80,80^FD{{vendor}}^FS
 
-^FO24,610^A0N,35,35^FDDATE SUBMITTED^FS
-^FO24,645^A0N,70,70^FD{{dateSubmitted}}^FS
+^FO24,595^A0N,35,35^FDDATE SUBMITTED^FS
+^FO24,630^A0N,70,70^FD{{dateSubmitted}}^FS
 
-^FO24,730^A0N,35,35^FDORDER^FS
-^FO24,775^A0N,70,70^FD{{orderNumber}}^FS
+^FO24,705^A0N,35,35^FDORDER^FS
+^FO24,745^A0N,70,70^FD{{orderNumber}}^FS
 
-^FO24,870^A0N,35,35^FDMODEL #^FS
-^FO24,915^A0N,70,70^FD{{modelNumber}}^FS
+^FO24,815^A0N,35,35^FDMODEL #^FS
+^FO24,855^A0N,70,70^FD{{modelNumber}}^FS
 
-^FO24,1010^A0N,35,35^FDSUBMITTED BY^FS
-^FO24,1055^A0N,70,70^FD{{submittedBy}}^FS
+^FO24,925^A0N,35,35^FDSUBMITTED BY^FS
+^FO24,965^A0N,70,70^FD{{submittedBy}}^FS
 
-^FO24,1150^A0N,35,35^FDVENDOR RA^FS
-^FO24,1195^A0N,70,70^FD{{vendorRaNumber}}^FS
+^FO24,1035^A0N,35,35^FDVENDOR RA^FS
+^FO24,1075^A0N,70,70^FD{{vendorRaNumber}}^FS
 
 ^XZ`;
 
@@ -615,7 +615,7 @@ export default function MarsLabelClient() {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-2 mb-20 pr-12">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-16 pr-12">
                   {(
                     [
                       { k: "Order", v: safeField(fields.orderNumber) },
@@ -636,14 +636,14 @@ export default function MarsLabelClient() {
 
                 {/* Decorative barcode strip */}
                 <div
-                  className="absolute right-4 bottom-3 w-8 h-28 rounded-l border border-r-0 border-[#aaa]"
+                  className="absolute right-2 bottom-20 w-8 h-28 rounded-l border border-r-0 border-[#aaa]"
                   style={{
                     background:
                       "repeating-linear-gradient(180deg,#111 0px,#111 2px,#fff 2px,#fff 4px,#111 4px,#111 5px,#fff 5px,#fff 8px,#111 8px,#111 12px,#fff 12px,#fff 14px)",
                   }}
                 />
                 <div
-                  className="absolute right-14 bottom-4 font-mono text-[0.6rem] tracking-widest text-[#333]"
+                  className="absolute right-12 bottom-20 font-mono text-[0.6rem] tracking-widest text-[#333]"
                   style={{ writingMode: "vertical-rl", textOrientation: "mixed" }}
                 >
                   {safeField(fields.submissionNumber)}

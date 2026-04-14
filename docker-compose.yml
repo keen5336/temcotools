@@ -1,7 +1,7 @@
 services:
   db:
-    image: postgres:15-alpine
-    restart: always
+    image: postgres@sha256:1d1095b0503145be79c79239372aefadfacf6b7c33c9245bbf99ce4b6b89c737
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ops_tools
       POSTGRES_PASSWORD: password
@@ -21,9 +21,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
-        SESSION_SECRET: ${SESSION_SECRET:-changeme-at-least-32-characters-long}
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
@@ -38,6 +36,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/signin || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       temco_net:
         aliases:
