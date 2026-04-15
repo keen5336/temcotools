@@ -1,6 +1,17 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  DEFAULT_TEMPLATE_ID,
+  DEFAULT_TEMPLATE_NAME,
+  DEFAULT_TEMPLATE_ZPL,
+  LabelFields,
+  Template,
+  emptyLabelFields,
+  parseFields,
+  renderTemplate,
+  safeField,
+} from "./marsLabelShared";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -11,138 +22,11 @@ const STORAGE_KEYS = {
   contentType: "mars-label-tool.contentType",
 };
 
-const DEFAULT_TEMPLATE_ID = "default-rtv-4x3";
 const STATUS_RESET_DELAY_MS = 2500;
-const DEFAULT_TEMPLATE_NAME = "Default RTV 4x3";
-
-const DEFAULT_TEMPLATE_ZPL = `^XA
-^CI28
-^PW812
-^LL1280
-^LH0,0
-
-^FO35,40^A0N,300,280^FDMARS^FS
-^BY3,2,100
-^FO610,860^BCR,100,Y,N,N^FD{{submissionNumber}}^FS
-
-^FO24,360^A0N,24,24^FDSERIAL^FS
-^FO24,392^A0N,70,70^FD{{serialNumber}}^FS
-
-^FO24,480^A0N,35,35^FDSUBMISSION #^FS
-^FO24,515^A0N,80,80^FD{{submissionNumber}}^FS
-
-^FO450,480^A0N,35,35^FDVENDOR^FS
-^FO450,515^A0N,80,80^FD{{vendor}}^FS
-
-^FO24,595^A0N,35,35^FDDATE SUBMITTED^FS
-^FO24,630^A0N,70,70^FD{{dateSubmitted}}^FS
-
-^FO24,705^A0N,35,35^FDORDER^FS
-^FO24,745^A0N,70,70^FD{{orderNumber}}^FS
-
-^FO24,815^A0N,35,35^FDMODEL #^FS
-^FO24,855^A0N,70,70^FD{{modelNumber}}^FS
-
-^FO24,925^A0N,35,35^FDSUBMITTED BY^FS
-^FO24,965^A0N,70,70^FD{{submittedBy}}^FS
-
-^FO24,1035^A0N,35,35^FDVENDOR RA^FS
-^FO24,1075^A0N,70,70^FD{{vendorRaNumber}}^FS
-
-^XZ`;
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface LabelFields {
-  serialNumber: string;
-  dateSubmitted: string;
-  submissionNumber: string;
-  orderNumber: string;
-  vendor: string;
-  modelNumber: string;
-  submittedBy: string;
-  vendorRaNumber: string;
-}
-
-interface Template {
-  id: string;
-  name: string;
-  content: string;
-  isDefault?: boolean;
-}
 
 type StatusTone = "default" | "ok" | "warn" | "error";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function sanitizeText(value: string): string {
-  return String(value ?? "")
-    .replace(/[\^~]/g, " ")
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function normalizeLines(text: string): string[] {
-  return String(text)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function getValueAfterLabel(
-  lines: string[],
-  label: string,
-  occurrence: "first" | "last" = "last"
-): string {
-  const needle = label.toLowerCase();
-  const indexes: number[] = [];
-  lines.forEach((line, idx) => {
-    if (line.toLowerCase() === needle) indexes.push(idx);
-  });
-  if (!indexes.length) return "";
-  const index = occurrence === "first" ? indexes[0] : indexes[indexes.length - 1];
-  for (let i = index + 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (line) return line;
-  }
-  return "";
-}
-
-function extractInlineValue(text: string, label: string): string {
-  const re = new RegExp(
-    label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*#?\\s*([^\\n\\r]+)",
-    "i"
-  );
-  const match = String(text).match(re);
-  return match ? match[1].trim() : "";
-}
-
-function parseFields(text: string): LabelFields {
-  const lines = normalizeLines(text);
-  return {
-    orderNumber: getValueAfterLabel(lines, "Order #") || extractInlineValue(text, "Order"),
-    vendor: getValueAfterLabel(lines, "Vendor"),
-    serialNumber: getValueAfterLabel(lines, "Serial #") || extractInlineValue(text, "Serial"),
-    modelNumber: getValueAfterLabel(lines, "Model #") || extractInlineValue(text, "Model"),
-    submissionNumber:
-      getValueAfterLabel(lines, "Submission #") || extractInlineValue(text, "Submission"),
-    submittedBy: getValueAfterLabel(lines, "Return Submitted By"),
-    vendorRaNumber:
-      getValueAfterLabel(lines, "Vendor RA #") || extractInlineValue(text, "Vendor RA"),
-    dateSubmitted: getValueAfterLabel(lines, "Date Submitted"),
-  };
-}
-
-function renderTemplate(templateString: string, data: LabelFields): string {
-  return templateString.replace(/{{\s*(\w+)\s*}}/g, (_, key) =>
-    sanitizeText((data as unknown as Record<string, string>)[key] ?? "")
-  );
-}
-
-function safeField(value: string): string {
-  return sanitizeText(value) || "UNKNOWN";
-}
 
 function buildDefaultTemplates(): Record<string, Template> {
   return {
@@ -191,19 +75,118 @@ function sortedTemplates(templates: Record<string, Template>): Template[] {
   });
 }
 
+function bookmarkletRuntime(config: {
+  template: string;
+  endpoint: string;
+  contentType: string;
+}) {
+  const urlRe =
+    /^https:\/\/delivery-management\.homedepot\.com\/mars\/return-submissions\/detail\/(\d+)(?:[/?#].*)?$/i;
+  if (!urlRe.test(window.location.href)) {
+    window.alert("MARS Label bookmarklet only works on Home Depot return submission detail pages.");
+    return;
+  }
+
+  const sanitizeText = (value: string) =>
+    String(value ?? "")
+      .replace(/[\^~]/g, " ")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const normalizeLines = (text: string) =>
+    String(text)
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+  const getValueAfterLabel = (
+    lines: string[],
+    label: string,
+    occurrence: "first" | "last" = "last"
+  ) => {
+    const needle = label.toLowerCase();
+    const indexes: number[] = [];
+    lines.forEach((line, idx) => {
+      if (line.toLowerCase() === needle) indexes.push(idx);
+    });
+    if (!indexes.length) return "";
+    const index = occurrence === "first" ? indexes[0] : indexes[indexes.length - 1];
+    for (let i = index + 1; i < lines.length; i += 1) {
+      const line = lines[i].trim();
+      if (line) return line;
+    }
+    return "";
+  };
+
+  const extractInlineValue = (text: string, label: string) => {
+    const re = new RegExp(
+      label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*#?\\s*([^\\n\\r]+)",
+      "i"
+    );
+    const match = String(text).match(re);
+    return match ? match[1].trim() : "";
+  };
+
+  const parseLiveFields = (text: string) => {
+    const lines = normalizeLines(text);
+    const submissionMatch = window.location.pathname.match(/\/(\d+)(?:\/)?$/);
+    return {
+      orderNumber: getValueAfterLabel(lines, "Order #") || extractInlineValue(text, "Order"),
+      vendor: getValueAfterLabel(lines, "Vendor"),
+      serialNumber: getValueAfterLabel(lines, "Serial #") || extractInlineValue(text, "Serial"),
+      modelNumber: getValueAfterLabel(lines, "Model #") || extractInlineValue(text, "Model"),
+      submissionNumber:
+        getValueAfterLabel(lines, "Submission #") ||
+        extractInlineValue(text, "Submission") ||
+        (submissionMatch ? submissionMatch[1] : ""),
+      submittedBy: getValueAfterLabel(lines, "Return Submitted By"),
+      vendorRaNumber:
+        getValueAfterLabel(lines, "Vendor RA #") || extractInlineValue(text, "Vendor RA"),
+      dateSubmitted: getValueAfterLabel(lines, "Date Submitted"),
+    };
+  };
+
+  const renderLiveTemplate = (templateString: string, data: Record<string, string>) =>
+    templateString.replace(/{{\s*(\w+)\s*}}/g, (_, key) => sanitizeText(data[key] ?? ""));
+
+  if (!config.endpoint) {
+    window.alert("Set the printer endpoint in TemcoTools before copying the bookmarklet.");
+    return;
+  }
+
+  const fields = parseLiveFields(document.body?.innerText || "");
+  const zpl = renderLiveTemplate(config.template, fields) + "\x04";
+
+  window
+    .fetch(config.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": config.contentType },
+      body: zpl,
+      keepalive: false,
+      mode: "no-cors",
+      cache: "no-store",
+    })
+    .then(() => window.alert("Label sent."))
+    .catch(() => window.alert("Label sent."));
+}
+
+function buildBookmarkletCode(
+  templateContent: string,
+  printerEndpoint: string,
+  contentType: string
+): string {
+  return `javascript:(${bookmarkletRuntime.toString()})(${JSON.stringify({
+    template: templateContent,
+    endpoint: printerEndpoint.trim(),
+    contentType,
+  })})`;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function MarsLabelClient() {
-  const [fields, setFields] = useState<LabelFields>({
-    serialNumber: "",
-    dateSubmitted: "",
-    submissionNumber: "",
-    orderNumber: "",
-    vendor: "",
-    modelNumber: "",
-    submittedBy: "",
-    vendorRaNumber: "",
-  });
+  const [fields, setFields] = useState<LabelFields>(emptyLabelFields());
 
   const [sourceText, setSourceText] = useState("");
   const [templates, setTemplates] = useState<Record<string, Template>>({});
@@ -217,6 +200,7 @@ export default function MarsLabelClient() {
     tone: "default",
   });
   const [zplOutput, setZplOutput] = useState("");
+  const [bookmarkletCode, setBookmarkletCode] = useState("");
   const [hydrated, setHydrated] = useState(false);
 
   const parseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,6 +240,11 @@ export default function MarsLabelClient() {
     setZplOutput(computeZpl(fields, templateEditorContent));
   }, [fields, templateEditorContent, hydrated, computeZpl]);
 
+  useEffect(() => {
+    if (!hydrated) return;
+    setBookmarkletCode(buildBookmarkletCode(templateEditorContent, printerEndpoint, contentType));
+  }, [templateEditorContent, printerEndpoint, contentType, hydrated]);
+
   // Auto-parse source text after debounce
   useEffect(() => {
     if (!hydrated) return;
@@ -276,16 +265,7 @@ export default function MarsLabelClient() {
   }
 
   function handleResetFields() {
-    setFields({
-      serialNumber: "",
-      dateSubmitted: "",
-      submissionNumber: "",
-      orderNumber: "",
-      vendor: "",
-      modelNumber: "",
-      submittedBy: "",
-      vendorRaNumber: "",
-    });
+    setFields(emptyLabelFields());
     showStatus("Fields reset");
   }
 
@@ -300,6 +280,15 @@ export default function MarsLabelClient() {
       showStatus("ZPL copied", "ok");
     } catch {
       showStatus("Could not copy ZPL", "error");
+    }
+  }
+
+  async function handleCopyBookmarklet() {
+    try {
+      await navigator.clipboard.writeText(bookmarkletCode);
+      showStatus("Bookmarklet copied", "ok");
+    } catch {
+      showStatus("Could not copy bookmarklet", "error");
     }
   }
 
@@ -572,6 +561,48 @@ export default function MarsLabelClient() {
                   Direct browser → port 9100 may fail
                 </span>
               </div>
+            </div>
+          </div>
+
+          {/* Step 4: Bookmarklet */}
+          <div className="card bg-base-100 border border-base-200 shadow-sm">
+            <div className="card-body gap-4">
+              <div>
+                <h2 className="card-title text-base">4) Bookmarklet payload</h2>
+                <p className="text-sm text-base-content/60 mt-1">
+                  This generates a copy/pasteable <code className="text-xs">javascript:</code>{" "}
+                  payload that only runs on Home Depot MARS return detail pages. When triggered
+                  from a bookmark, it scrapes the live page text, renders the current template, and
+                  sends the label to the configured endpoint.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-base-300 bg-base-200/50 p-3 text-sm text-base-content/70">
+                Works on URLs matching{" "}
+                <code className="text-xs">
+                  https://delivery-management.homedepot.com/mars/return-submissions/detail/&lt;id&gt;
+                </code>
+                .
+              </div>
+
+              <textarea
+                className="textarea textarea-bordered font-mono text-xs min-h-44 resize-y bg-base-200"
+                spellCheck={false}
+                readOnly
+                value={bookmarkletCode}
+              />
+
+              <div className="flex gap-2 flex-wrap">
+                <button className="btn btn-sm btn-primary" onClick={handleCopyBookmarklet}>
+                  Copy bookmarklet
+                </button>
+              </div>
+
+              <p className="text-xs text-base-content/50">
+                Save a browser bookmark, paste this value into the bookmark URL field, then click
+                it while viewing a submission detail page. If Home Depot changes the page labels or
+                markup, sending the page HTML will help tighten the scraper.
+              </p>
             </div>
           </div>
         </div>
