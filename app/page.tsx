@@ -7,6 +7,12 @@ export default async function HomePage() {
 
   const tools = [
     {
+      name: "MARS Tracking",
+      href: "/tools/mars",
+      description:
+        "Import MARS spreadsheets, browse current units, run audits, and reconcile discrepancies.",
+    },
+    {
       name: "MARS Label Tool",
       href: "/tools/rtv-label",
       description: "Generate and print MARS return shipping labels.",

@@ -31,6 +31,9 @@ export default function NavBar({ session }: NavBarProps) {
           TemcoTools
         </Link>
         <div className="hidden sm:flex gap-1 ml-2">
+          <Link href="/tools/mars" className="btn btn-ghost btn-sm">
+            MARS Tracking
+          </Link>
           <Link href="/tools/rtv-label" className="btn btn-ghost btn-sm">
             MARS Label
           </Link>

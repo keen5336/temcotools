@@ -7,15 +7,19 @@ datasource db {
 }
 
 model User {
-  id          String    @id @default(cuid())
-  username    String    @unique
-  displayName String
-  pinHash     String
-  role        Role      @default(user)
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  lastLoginAt DateTime?
+  id                  String             @id @default(cuid())
+  username            String             @unique
+  displayName         String
+  pinHash             String
+  role                Role               @default(user)
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  lastLoginAt         DateTime?
+  marsImportBatches   MarsImportBatch[]
+  marsEvents          MarsEvent[]
+  marsAuditSessions   MarsAuditSession[]
+  marsAuditScans      MarsAuditScan[]
 }
 
 model Pipeline {
@@ -24,6 +28,79 @@ model Pipeline {
   steps     Json     @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model MarsImportBatch {
+  id             String     @id @default(cuid())
+  filename       String
+  uploadedByUserId String?
+  uploadedAt     DateTime   @default(now())
+  rowCount       Int        @default(0)
+  insertedCount  Int        @default(0)
+  updatedCount   Int        @default(0)
+  skippedCount   Int        @default(0)
+  notes          String?
+  uploadedByUser User?      @relation(fields: [uploadedByUserId], references: [id])
+  marsUnits      MarsUnit[]
+}
+
+model MarsUnit {
+  id                     String           @id @default(cuid())
+  requestNumber          String           @unique
+  orderNumber            String?
+  vendor                 String?
+  serialNumber           String?
+  modelNumber            String?
+  vendorRaNumber         String?
+  dateRequested          DateTime?
+  requestStatus          String?
+  returnStatus           String?
+  replacementNeeded      String?
+  staged                 Boolean          @default(false)
+  lastImportedAt         DateTime?
+  lastScannedAt          DateTime?
+  lastAuditSeenAt        DateTime?
+  lastKnownImportBatchId String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  lastKnownImportBatch   MarsImportBatch? @relation(fields: [lastKnownImportBatchId], references: [id])
+  marsEvents             MarsEvent[]
+  marsAuditScans         MarsAuditScan[]
+}
+
+model MarsEvent {
+  id         String   @id @default(cuid())
+  marsUnitId String
+  type       String
+  payload    Json
+  userId     String?
+  createdAt  DateTime @default(now())
+  marsUnit   MarsUnit @relation(fields: [marsUnitId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id])
+}
+
+model MarsAuditSession {
+  id              String          @id @default(cuid())
+  startedByUserId String?
+  startedAt       DateTime        @default(now())
+  completedAt     DateTime?
+  notes           String?
+  startedByUser   User?           @relation(fields: [startedByUserId], references: [id])
+  marsAuditScans  MarsAuditScan[]
+}
+
+model MarsAuditScan {
+  id                 String           @id @default(cuid())
+  auditSessionId     String
+  scannedValue       String
+  marsUnitId         String?
+  matched            Boolean          @default(false)
+  duplicateInSession Boolean          @default(false)
+  userId             String?
+  createdAt          DateTime         @default(now())
+  auditSession       MarsAuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade)
+  marsUnit           MarsUnit?        @relation(fields: [marsUnitId], references: [id])
+  user               User?            @relation(fields: [userId], references: [id])
 }
 
 enum Role {

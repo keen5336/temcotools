@@ -1,0 +1,278 @@
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db";
+
+const STALE_AUDIT_THRESHOLD_DAYS = 14;
+
+const RECONCILIATION_UNIT_SELECT = {
+  id: true,
+  requestNumber: true,
+  vendor: true,
+  serialNumber: true,
+  modelNumber: true,
+  requestStatus: true,
+  returnStatus: true,
+  staged: true,
+  lastImportedAt: true,
+  lastAuditSeenAt: true,
+  lastKnownImportBatchId: true,
+} as const satisfies Prisma.MarsUnitSelect;
+
+const LATEST_AUDIT_SCAN_SELECT = {
+  id: true,
+  scannedValue: true,
+  matched: true,
+  duplicateInSession: true,
+  createdAt: true,
+  marsUnitId: true,
+  auditSessionId: true,
+  marsUnit: {
+    select: RECONCILIATION_UNIT_SELECT,
+  },
+} as const satisfies Prisma.MarsAuditScanSelect;
+
+type ReconciliationUnit = Prisma.MarsUnitGetPayload<{
+  select: typeof RECONCILIATION_UNIT_SELECT;
+}>;
+
+type LatestAuditScan = Prisma.MarsAuditScanGetPayload<{
+  select: typeof LATEST_AUDIT_SCAN_SELECT;
+}>;
+
+export interface ReconciliationUnitRow {
+  requestNumber: string;
+  vendor: string | null;
+  serialNumber: string | null;
+  modelNumber: string | null;
+  requestStatus: string | null;
+  returnStatus: string | null;
+  staged: boolean;
+  lastImportedAt: Date | null;
+  lastAuditSeenAt: Date | null;
+  reason: string;
+}
+
+export interface UnknownScanRow {
+  scanId: string;
+  scannedValue: string;
+  createdAt: Date;
+  auditSessionId: string;
+  duplicateInSession: boolean;
+}
+
+export interface MarsReconciliationResult {
+  strictMode: true;
+  latestImportBatch: {
+    id: string;
+    filename: string;
+    uploadedAt: Date;
+  } | null;
+  latestCompletedAudit: {
+    id: string;
+    startedAt: Date;
+    completedAt: Date | null;
+  } | null;
+  summary: {
+    expectedMissing: number;
+    physicallyPresentButUnexpected: number;
+    staged: number;
+    unknownScans: number;
+    staleUnits: number;
+    matched: number;
+  };
+  expectedMissing: ReconciliationUnitRow[];
+  physicallyPresentButUnexpected: ReconciliationUnitRow[];
+  staged: ReconciliationUnitRow[];
+  unknownScans: UnknownScanRow[];
+  staleUnits: ReconciliationUnitRow[];
+  matched: ReconciliationUnitRow[];
+}
+
+export async function getMarsReconciliation(): Promise<MarsReconciliationResult> {
+  const [latestImportBatch, latestCompletedAudit, stagedUnits] = await Promise.all([
+    prisma.marsImportBatch.findFirst({
+      orderBy: { uploadedAt: "desc" },
+      select: {
+        id: true,
+        filename: true,
+        uploadedAt: true,
+      },
+    }),
+    prisma.marsAuditSession.findFirst({
+      where: {
+        completedAt: {
+          not: null,
+        },
+      },
+      orderBy: { completedAt: "desc" },
+      select: {
+        id: true,
+        startedAt: true,
+        completedAt: true,
+      },
+    }),
+    prisma.marsUnit.findMany({
+      where: { staged: true },
+      select: RECONCILIATION_UNIT_SELECT,
+      orderBy: { requestNumber: "asc" },
+    }),
+  ]);
+
+  const latestSnapshotUnits = latestImportBatch
+    ? await prisma.marsUnit.findMany({
+        where: { lastKnownImportBatchId: latestImportBatch.id },
+        select: RECONCILIATION_UNIT_SELECT,
+        orderBy: { requestNumber: "asc" },
+      })
+    : [];
+
+  const latestAuditScans = latestCompletedAudit
+    ? await prisma.marsAuditScan.findMany({
+        where: { auditSessionId: latestCompletedAudit.id },
+        select: LATEST_AUDIT_SCAN_SELECT,
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
+
+  const latestAuditSeenByUnitId = new Map<string, LatestAuditScan>();
+  const unknownScans: UnknownScanRow[] = [];
+
+  for (const scan of latestAuditScans) {
+    if (!scan.marsUnitId || !scan.marsUnit) {
+      unknownScans.push({
+        scanId: scan.id,
+        scannedValue: scan.scannedValue,
+        createdAt: scan.createdAt,
+        auditSessionId: scan.auditSessionId,
+        duplicateInSession: scan.duplicateInSession,
+      });
+      continue;
+    }
+
+    if (!latestAuditSeenByUnitId.has(scan.marsUnitId)) {
+      latestAuditSeenByUnitId.set(scan.marsUnitId, scan);
+    }
+  }
+
+  const latestSnapshotByUnitId = new Map(latestSnapshotUnits.map((unit) => [unit.id, unit] as const));
+  const expectedMissing: ReconciliationUnitRow[] = [];
+  const matched: ReconciliationUnitRow[] = [];
+
+  for (const unit of latestSnapshotUnits) {
+    const seenScan = latestAuditSeenByUnitId.get(unit.id);
+    const expected = isExpectedInWarehouse(unit);
+
+    if (expected && !seenScan) {
+      expectedMissing.push(toUnitRow(unit, "Expected in warehouse but not seen in the latest completed audit."));
+      continue;
+    }
+
+    if (expected && seenScan) {
+      matched.push(toUnitRow(unit, "Expected in warehouse and confirmed in the latest completed audit."));
+    }
+  }
+
+  const physicallyPresentButUnexpected: ReconciliationUnitRow[] = [];
+  for (const scan of latestAuditSeenByUnitId.values()) {
+    const unit = scan.marsUnit;
+    if (!unit) {
+      continue;
+    }
+
+    if (!latestSnapshotByUnitId.has(unit.id)) {
+      physicallyPresentButUnexpected.push(
+        toUnitRow(unit, "Seen in the latest completed audit but missing from the latest import snapshot.")
+      );
+      continue;
+    }
+
+    if (!isExpectedInWarehouse(unit)) {
+      physicallyPresentButUnexpected.push(
+        toUnitRow(unit, "Seen in the latest completed audit but imported statuses indicate it should not still be in warehouse.")
+      );
+    }
+  }
+
+  const staleThreshold = new Date(Date.now() - STALE_AUDIT_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+  const staleUnits = latestSnapshotUnits
+    .filter((unit) => !unit.lastAuditSeenAt || unit.lastAuditSeenAt < staleThreshold)
+    .map((unit) =>
+      toUnitRow(
+        unit,
+        unit.lastAuditSeenAt
+          ? `Last audit sighting is older than ${STALE_AUDIT_THRESHOLD_DAYS} days.`
+          : "Unit has not been seen in any completed audit yet."
+      )
+    );
+
+  const staged = stagedUnits.map((unit) =>
+    toUnitRow(unit, "Local staged flag is active for this unit.")
+  );
+
+  return {
+    strictMode: true,
+    latestImportBatch,
+    latestCompletedAudit,
+    summary: {
+      expectedMissing: expectedMissing.length,
+      physicallyPresentButUnexpected: physicallyPresentButUnexpected.length,
+      staged: staged.length,
+      unknownScans: unknownScans.length,
+      staleUnits: staleUnits.length,
+      matched: matched.length,
+    },
+    expectedMissing,
+    physicallyPresentButUnexpected,
+    staged,
+    unknownScans,
+    staleUnits,
+    matched,
+  };
+}
+
+export function isExpectedInWarehouse(unit: {
+  requestStatus: string | null;
+  returnStatus: string | null;
+}) {
+  const requestStatus = normalizeStatus(unit.requestStatus);
+  const returnStatus = normalizeStatus(unit.returnStatus);
+
+  const terminalTerms = [
+    "closed",
+    "complete",
+    "completed",
+    "shipped",
+    "cancelled",
+    "canceled",
+    "returned",
+    "disposed",
+    "received",
+    "pickedup",
+    "picked up",
+  ];
+
+  const combined = `${requestStatus} ${returnStatus}`.trim();
+  if (!combined) {
+    return true;
+  }
+
+  return !terminalTerms.some((term) => combined.includes(term));
+}
+
+function normalizeStatus(value: string | null) {
+  return value?.toLowerCase().replace(/\s+/g, " ").trim() ?? "";
+}
+
+function toUnitRow(unit: ReconciliationUnit, reason: string): ReconciliationUnitRow {
+  return {
+    requestNumber: unit.requestNumber,
+    vendor: unit.vendor,
+    serialNumber: unit.serialNumber,
+    modelNumber: unit.modelNumber,
+    requestStatus: unit.requestStatus,
+    returnStatus: unit.returnStatus,
+    staged: unit.staged,
+    lastImportedAt: unit.lastImportedAt,
+    lastAuditSeenAt: unit.lastAuditSeenAt,
+    reason,
+  };
+}
