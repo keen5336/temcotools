@@ -1,179 +1,241 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import type { MarsAuditSummary, MarsAuditScanResult } from "@/lib/mars/audit";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import type { SubmittedAuditSessionSummary } from "@/lib/mars/audit";
 
-interface ActiveAuditSession {
+interface MarsAuditClientProps {
+  initialHistory: SubmittedAuditSessionSummary[];
+}
+
+interface LocalAuditDraft {
   id: string;
+  deviceId: string;
   startedAt: string;
+  scans: LocalAuditScan[];
 }
 
-interface CompletedAuditSession {
-  id: string;
-  completedAt: string;
+interface LocalAuditScan {
+  value: string;
+  scannedAt: string;
+  duplicate: boolean;
 }
 
-const EMPTY_SUMMARY: MarsAuditSummary = {
-  totalScans: 0,
-  matchedScans: 0,
-  duplicateScans: 0,
-  unknownScans: 0,
-};
+const DRAFT_STORAGE_KEY = "mars_audit_local_draft_v1";
+const DEVICE_STORAGE_KEY = "mars_audit_device_id_v1";
 
-export default function MarsAuditClient() {
-  const [auditSession, setAuditSession] = useState<ActiveAuditSession | null>(null);
-  const [summary, setSummary] = useState<MarsAuditSummary>(EMPTY_SUMMARY);
+export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps) {
+  const router = useRouter();
+  const [draft, setDraft] = useState<LocalAuditDraft | null>(null);
+  const [history, setHistory] = useState(initialHistory);
   const [scanValue, setScanValue] = useState("");
-  const [lastResult, setLastResult] = useState<MarsAuditScanResult | null>(null);
-  const [completedSession, setCompletedSession] = useState<CompletedAuditSession | null>(null);
+  const [lastScanned, setLastScanned] = useState<LocalAuditScan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [isPending, startTransition] = useTransition();
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (auditSession) {
-      inputRef.current?.focus();
+    const deviceId = loadOrCreateDeviceId();
+    const savedDraft = loadDraft();
+
+    if (savedDraft && savedDraft.deviceId === deviceId) {
+      setDraft(savedDraft);
+      setLastScanned(savedDraft.scans[0] ?? null);
     }
-  }, [auditSession, lastResult]);
+
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    if (draft) {
+      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      inputRef.current?.focus();
+      return;
+    }
+
+    window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+  }, [draft, ready]);
+
+  const summary = useMemo(() => {
+    const scans = draft?.scans ?? [];
+    const duplicateScans = scans.filter((scan) => scan.duplicate).length;
+
+    return {
+      totalScans: scans.length,
+      duplicateScans,
+      uniqueScans: scans.length - duplicateScans,
+    };
+  }, [draft]);
 
   function handleStartAudit() {
-    startTransition(async () => {
-      setError(null);
-      setCompletedSession(null);
-      setLastResult(null);
-      setSummary(EMPTY_SUMMARY);
+    const deviceId = loadOrCreateDeviceId();
+    const nextDraft: LocalAuditDraft = {
+      id: crypto.randomUUID(),
+      deviceId,
+      startedAt: new Date().toISOString(),
+      scans: [],
+    };
 
-      const response = await fetch("/api/mars/audit/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const payload = (await response.json()) as
-        | { ok: true; auditSession: ActiveAuditSession }
-        | { ok: false; error: string };
+    setError(null);
+    setScanValue("");
+    setLastScanned(null);
+    setDraft(nextDraft);
+  }
 
-      if (!response.ok || !payload.ok) {
-        setError("error" in payload ? payload.error : "Failed to start audit session.");
-        return;
-      }
-
-      setAuditSession(payload.auditSession);
-      setScanValue("");
-    });
+  function handleDiscardDraft() {
+    setDraft(null);
+    setLastScanned(null);
+    setScanValue("");
+    setError(null);
   }
 
   function handleSubmitScan(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!auditSession || !scanValue.trim()) {
+    if (!draft) {
+      setError("Start an audit on this device before scanning.");
       return;
     }
 
-    const currentValue = scanValue;
+    const normalized = normalizeScanValue(scanValue);
+    if (!normalized) {
+      return;
+    }
+
+    const duplicate = draft.scans.some((scan) => scan.value === normalized);
+    const scan: LocalAuditScan = {
+      value: normalized,
+      scannedAt: new Date().toISOString(),
+      duplicate,
+    };
+
+    setError(null);
     setScanValue("");
+    setLastScanned(scan);
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            scans: [scan, ...current.scans],
+          }
+        : current
+    );
+  }
+
+  function handleSubmitAudit() {
+    if (!draft || !draft.scans.length) {
+      setError("This audit has no scans to submit.");
+      return;
+    }
 
     startTransition(async () => {
       setError(null);
 
-      const response = await fetch("/api/mars/audit/scan", {
+      const response = await fetch("/api/mars/audit/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          auditSessionId: auditSession.id,
-          scannedValue: currentValue,
+          localAuditId: draft.id,
+          deviceId: draft.deviceId,
+          startedAt: draft.startedAt,
+          completedAt: new Date().toISOString(),
+          scans: [...draft.scans].reverse().map((scan) => scan.value),
         }),
       });
-      const payload = (await response.json()) as
-        | ({ ok: true } & MarsAuditScanResult)
-        | { ok: false; error: string };
 
-      if (!response.ok || !payload.ok) {
-        setError("error" in payload ? payload.error : "Failed to record scan.");
-        setScanValue(currentValue);
-        return;
-      }
-
-      setLastResult(payload);
-      setSummary(payload.summary);
-    });
-  }
-
-  function handleCompleteAudit() {
-    if (!auditSession) {
-      return;
-    }
-
-    startTransition(async () => {
-      setError(null);
-
-      const response = await fetch("/api/mars/audit/complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ auditSessionId: auditSession.id }),
-      });
       const payload = (await response.json()) as
         | {
             ok: true;
-            session: CompletedAuditSession;
-            summary: MarsAuditSummary;
+            session: {
+              id: string;
+              startedAt: string;
+              completedAt: string | null;
+            };
+            summary: {
+              totalScans: number;
+              matchedScans: number;
+              duplicateScans: number;
+              unknownScans: number;
+            };
           }
         | { ok: false; error: string };
 
       if (!response.ok || !payload.ok) {
-        setError("error" in payload ? payload.error : "Failed to complete audit session.");
+        setError("error" in payload ? payload.error : "Failed to submit audit.");
         return;
       }
 
-      setCompletedSession(payload.session);
-      setSummary(payload.summary);
-      setAuditSession(null);
+      const completedAt = payload.session.completedAt ?? new Date().toISOString();
+      const nextHistoryItem: SubmittedAuditSessionSummary = {
+        id: payload.session.id,
+        startedAt: new Date(payload.session.startedAt),
+        completedAt: new Date(completedAt),
+        scanCount: payload.summary.totalScans,
+        summary: payload.summary,
+        startedBy: null,
+        deviceId: draft.deviceId,
+        localAuditId: draft.id,
+        importBatchId: null,
+        importFilename: null,
+      };
+
+      setHistory((current) => [nextHistoryItem, ...current]);
+      setDraft(null);
+      setLastScanned(null);
       setScanValue("");
+      router.push(`/tools/mars/audit/${encodeURIComponent(payload.session.id)}`);
+      router.refresh();
     });
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <CounterCard label="Total" value={summary.totalScans} />
-        <CounterCard label="Matched" value={summary.matchedScans} tone="success" />
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <CounterCard label="Total Scans" value={summary.totalScans} tone="default" />
+        <CounterCard label="Unique" value={summary.uniqueScans} tone="success" />
         <CounterCard label="Duplicates" value={summary.duplicateScans} tone="warning" />
-        <CounterCard label="Unknown" value={summary.unknownScans} tone="error" />
       </div>
 
       <section className="card bg-base-100 border border-base-200 shadow-sm">
-        <div className="card-body gap-4">
+        <div className="card-body gap-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="card-title">Audit Session</h2>
-              {auditSession ? (
+              <h2 className="card-title">Scanner Draft</h2>
+              {draft ? (
                 <p className="text-sm text-base-content/70">
-                  Session {auditSession.id.slice(0, 8)} started{" "}
-                  {new Date(auditSession.startedAt).toLocaleString()}
-                </p>
-              ) : completedSession ? (
-                <p className="text-sm text-base-content/70">
-                  Last session completed {new Date(completedSession.completedAt).toLocaleString()}
+                  Local draft {draft.id.slice(0, 8)} started {formatDate(draft.startedAt)}. Stored
+                  on this device until submitted.
                 </p>
               ) : (
                 <p className="text-sm text-base-content/70">
-                  Start a session to begin wedge-driven audit scanning.
+                  Start an audit to begin scanning locally on this Zebra device.
                 </p>
               )}
             </div>
 
             <div className="flex flex-wrap gap-2">
               <button
-                className="btn btn-primary btn-lg"
+                className="btn btn-primary"
                 onClick={handleStartAudit}
-                disabled={Boolean(auditSession) || isPending}
+                disabled={Boolean(draft) || isPending || !ready}
               >
                 Start Audit
               </button>
               <button
-                className="btn btn-outline btn-lg"
-                onClick={handleCompleteAudit}
-                disabled={!auditSession || isPending}
+                className="btn btn-outline"
+                onClick={handleDiscardDraft}
+                disabled={!draft || isPending}
               >
-                Finish Audit
+                Discard Draft
+              </button>
+              <button
+                className="btn btn-accent"
+                onClick={handleSubmitAudit}
+                disabled={!draft || !draft.scans.length || isPending}
+              >
+                Submit Audit
               </button>
             </div>
           </div>
@@ -186,20 +248,38 @@ export default function MarsAuditClient() {
                 type="text"
                 value={scanValue}
                 onChange={(event) => setScanValue(event.target.value)}
-                placeholder={auditSession ? "Scan barcode or enter request number" : "Start an audit first"}
-                className="input input-bordered input-lg w-full text-xl"
-                disabled={!auditSession || isPending}
+                placeholder={draft ? "Scan barcode or enter request number" : "Start an audit first"}
+                className="input input-bordered input-lg w-full text-2xl font-semibold"
+                disabled={!draft || isPending}
                 autoFocus
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
               />
             </label>
             <button
               type="submit"
-              className="btn btn-accent btn-lg w-full sm:w-auto"
-              disabled={!auditSession || !scanValue.trim() || isPending}
+              className="btn btn-lg w-full sm:w-auto"
+              disabled={!draft || !scanValue.trim() || isPending}
             >
-              Record Scan
+              Add Scan
             </button>
           </form>
+
+          {lastScanned ? (
+            <div className={`rounded-2xl border p-5 ${lastScanned.duplicate ? "border-warning/40 bg-warning/10" : "border-success/40 bg-success/10"}`}>
+              <p className="text-xs uppercase tracking-[0.2em] opacity-70 mb-2">Most Recent Scan</p>
+              <p className="text-4xl font-semibold tracking-wide">{lastScanned.value}</p>
+              <p className="mt-2 text-sm opacity-80">
+                {lastScanned.duplicate ? "Duplicate in this local audit draft." : "Stored locally on this device."}
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-base-300 p-5 text-base-content/60">
+              The last scanned request number will stay prominent here so the operator can confirm
+              it was captured.
+            </div>
+          )}
 
           {error ? (
             <div className="alert alert-error">
@@ -209,53 +289,95 @@ export default function MarsAuditClient() {
         </div>
       </section>
 
-      <section className="card bg-base-100 border border-base-200 shadow-sm">
-        <div className="card-body">
-          <h2 className="card-title">Last Scan Result</h2>
-          {lastResult ? (
-            <div className={`rounded-2xl border p-5 ${resultStyles(lastResult.result)}`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] opacity-70">Status</p>
-                  <p className="text-2xl font-semibold">{resultLabel(lastResult.result)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-xs uppercase tracking-[0.2em] opacity-70">Scanned</p>
-                  <p className="text-xl font-semibold">{lastResult.scannedValue}</p>
-                </div>
-              </div>
-
-              {lastResult.unit ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-4 text-sm">
-                  <FeedbackField label="Vendor" value={lastResult.unit.vendor} />
-                  <FeedbackField label="Serial" value={lastResult.unit.serialNumber} />
-                  <FeedbackField label="Model" value={lastResult.unit.modelNumber} />
-                  <FeedbackField label="Request Status" value={lastResult.unit.requestStatus} />
-                  <FeedbackField label="Return Status" value={lastResult.unit.returnStatus} />
-                  <FeedbackField
-                    label="Staged"
-                    value={lastResult.unit.staged ? "Yes" : "No"}
-                  />
-                  <FeedbackField
-                    label="Last Seen"
-                    value={formatDate(lastResult.unit.lastAuditSeenAt)}
-                  />
-                  <FeedbackField
-                    label="Duplicate"
-                    value={lastResult.duplicateInSession ? "Yes" : "No"}
-                  />
-                </div>
+      <section className="card bg-base-100 border border-base-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-base-200">
+          <h2 className="text-lg font-semibold text-base-content">Current Draft Scans</h2>
+          <p className="text-sm text-base-content/70 mt-1">
+            Newest scan first. This list is saved in local storage and can be resumed on this
+            device.
+          </p>
+        </div>
+        <div className="max-h-[420px] overflow-auto">
+          <table className="table table-zebra">
+            <thead>
+              <tr>
+                <th>Scanned Value</th>
+                <th>Time</th>
+                <th>Duplicate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {draft?.scans.length ? (
+                draft.scans.map((scan, index) => (
+                  <tr key={`${scan.scannedAt}-${scan.value}-${index}`}>
+                    <td className={`font-medium ${index === 0 ? "text-lg" : ""}`}>{scan.value}</td>
+                    <td>{formatDate(scan.scannedAt)}</td>
+                    <td>{scan.duplicate ? "Yes" : "No"}</td>
+                  </tr>
+                ))
               ) : (
-                <p className="mt-4 text-sm opacity-80">
-                  No matching MARS unit was found for this scan.
-                </p>
+                <tr>
+                  <td colSpan={3} className="text-center text-base-content/60 py-8">
+                    No local scans yet.
+                  </td>
+                </tr>
               )}
-            </div>
-          ) : (
-            <p className="text-sm text-base-content/60">
-              No scans recorded yet for this page session.
-            </p>
-          )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="card bg-base-100 border border-base-200 shadow-sm overflow-hidden">
+        <div className="px-5 py-4 border-b border-base-200">
+          <h2 className="text-lg font-semibold text-base-content">Audit History</h2>
+          <p className="text-sm text-base-content/70 mt-1">
+            Completed audits can be reopened as report/detail pages.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="table table-zebra">
+            <thead>
+              <tr>
+                <th>Audit</th>
+                <th>Completed</th>
+                <th>Scans</th>
+                <th>Matched</th>
+                <th>Unknown</th>
+                <th>Duplicates</th>
+                <th>Import Snapshot</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.length ? (
+                history.map((audit) => (
+                  <tr key={audit.id}>
+                    <td className="font-medium">{audit.id.slice(0, 8)}</td>
+                    <td>{formatDate(audit.completedAt)}</td>
+                    <td>{audit.scanCount}</td>
+                    <td>{audit.summary.matchedScans}</td>
+                    <td>{audit.summary.unknownScans}</td>
+                    <td>{audit.summary.duplicateScans}</td>
+                    <td>{audit.importFilename ?? "—"}</td>
+                    <td>
+                      <Link
+                        href={`/tools/mars/audit/${encodeURIComponent(audit.id)}`}
+                        className="btn btn-xs btn-outline"
+                      >
+                        Open Report
+                      </Link>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={8} className="text-center text-base-content/60 py-8">
+                    No completed audits yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>
@@ -269,13 +391,12 @@ function CounterCard({
 }: {
   label: string;
   value: number;
-  tone?: "default" | "success" | "warning" | "error";
+  tone?: "default" | "success" | "warning";
 }) {
   const tones = {
     default: "border-base-200 bg-base-100",
     success: "border-success/30 bg-success/10",
     warning: "border-warning/30 bg-warning/10",
-    error: "border-error/30 bg-error/10",
   };
 
   return (
@@ -286,39 +407,37 @@ function CounterCard({
   );
 }
 
-function FeedbackField({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div className="rounded-xl border border-current/10 bg-white/40 px-3 py-2">
-      <p className="text-xs uppercase tracking-wide opacity-60">{label}</p>
-      <p className="font-medium">{value || "—"}</p>
-    </div>
-  );
-}
+function loadDraft(): LocalAuditDraft | null {
+  const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+  if (!raw) return null;
 
-function resultLabel(result: MarsAuditScanResult["result"]) {
-  switch (result) {
-    case "matched":
-      return "Matched";
-    case "matched_staged":
-      return "Matched + Staged";
-    case "duplicate":
-      return "Duplicate";
-    case "unknown":
-      return "Unknown";
+  try {
+    const parsed = JSON.parse(raw) as LocalAuditDraft;
+    if (
+      typeof parsed.id !== "string" ||
+      typeof parsed.deviceId !== "string" ||
+      typeof parsed.startedAt !== "string" ||
+      !Array.isArray(parsed.scans)
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
-function resultStyles(result: MarsAuditScanResult["result"]) {
-  switch (result) {
-    case "matched":
-      return "border-success/30 bg-success/10 text-success-content";
-    case "matched_staged":
-      return "border-info/30 bg-info/15 text-info-content";
-    case "duplicate":
-      return "border-warning/30 bg-warning/15 text-warning-content";
-    case "unknown":
-      return "border-error/30 bg-error/15 text-error-content";
-  }
+function loadOrCreateDeviceId() {
+  const existing = window.localStorage.getItem(DEVICE_STORAGE_KEY);
+  if (existing) return existing;
+
+  const created = crypto.randomUUID();
+  window.localStorage.setItem(DEVICE_STORAGE_KEY, created);
+  return created;
+}
+
+function normalizeScanValue(value: string) {
+  return value.trim().replace(/\s+/g, "");
 }
 
 function formatDate(value: string | Date | null) {
