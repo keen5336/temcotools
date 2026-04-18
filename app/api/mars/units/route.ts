@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { listMarsUnits, parseStagedFilter } from "@/lib/mars/inventory";
+import {
+  listMarsUnits,
+  parseMarsUnitSortField,
+  parseReturnStatusMode,
+  parseSortDirection,
+  parseStagedFilter,
+} from "@/lib/mars/inventory";
 
 export const runtime = "nodejs";
 
@@ -19,11 +25,46 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const q = searchParams.get("q");
+  const requestNumber = searchParams.get("requestNumber");
+  const orderNumber = searchParams.get("orderNumber");
+  const vendor = searchParams.get("vendor");
+  const serialNumber = searchParams.get("serialNumber");
+  const modelNumber = searchParams.get("modelNumber");
+  const vendorRaNumber = searchParams.get("vendorRaNumber");
+  const requestStatus = searchParams.get("requestStatus");
+  const returnStatus = searchParams.get("returnStatus");
+  const replacementNeeded = searchParams.get("replacementNeeded");
   const staged = parseStagedFilter(searchParams.get("staged"));
+  const returnStatusMode = parseReturnStatusMode(searchParams.get("returnStatusMode"));
+  const dateRequestedOn = searchParams.get("dateRequestedOn");
+  const lastImportedOn = searchParams.get("lastImportedOn");
+  const lastAuditSeenOn = searchParams.get("lastAuditSeenOn");
+  const sortBy = parseMarsUnitSortField(searchParams.get("sortBy"));
+  const sortDirection = parseSortDirection(searchParams.get("sortDirection"));
   const page = Number(searchParams.get("page") ?? "1");
   const limit = Number(searchParams.get("limit") ?? "25");
 
-  const result = await listMarsUnits({ q, staged, page, limit });
+  const result = await listMarsUnits({
+    q,
+    requestNumber,
+    orderNumber,
+    vendor,
+    serialNumber,
+    modelNumber,
+    vendorRaNumber,
+    requestStatus,
+    returnStatus,
+    replacementNeeded,
+    staged,
+    returnStatusMode,
+    dateRequestedOn,
+    lastImportedOn,
+    lastAuditSeenOn,
+    sortBy,
+    sortDirection,
+    page,
+    limit,
+  });
 
   return NextResponse.json({ ok: true, ...result });
 }
