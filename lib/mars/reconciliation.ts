@@ -221,11 +221,23 @@ export function isExpectedInWarehouse(unit: {
     return true;
   }
 
-  return !["shipped", "received"].some((term) => returnStatus.includes(term));
+  if (hasExplicitNegativeStatus(returnStatus)) {
+    return true;
+  }
+
+  return !hasUnexpectedWarehouseStatus(returnStatus);
 }
 
 function normalizeStatus(value: string | null) {
   return value?.toLowerCase().replace(/\s+/g, " ").trim() ?? "";
+}
+
+function hasExplicitNegativeStatus(returnStatus: string) {
+  return ["not shipped", "not received", "unshipped"].some((term) => returnStatus.includes(term));
+}
+
+function hasUnexpectedWarehouseStatus(returnStatus: string) {
+  return ["shipped", "received"].some((term) => returnStatus === term || returnStatus.startsWith(`${term} `));
 }
 
 function toUnitRow(unit: ReconciliationUnit, reason: string): ReconciliationUnitRow {
