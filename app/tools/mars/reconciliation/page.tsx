@@ -10,11 +10,11 @@ export default async function MarsReconciliationPage() {
   return (
     <div className="min-h-screen bg-base-200">
       <NavBar session={session} />
-      <main className="max-w-[1500px] mx-auto px-4 py-8">
+      <main className="max-w-[1600px] mx-auto px-4 py-8">
         <h1 className="text-2xl font-semibold text-base-content mb-1">MARS Reconciliation</h1>
         <p className="text-base-content/70 mb-6">
-          Strict-mode comparison of the latest imported MARS snapshot, current local state, and
-          the latest completed audit evidence.
+          Comparison of the latest imported MARS snapshot against the latest completed audit,
+          focused on what should be here and what should not be here.
         </p>
         <MarsNav />
 
@@ -43,7 +43,7 @@ export default async function MarsReconciliationPage() {
           />
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
           <CountCard label="Expected Missing" value={data.summary.expectedMissing} tone="error" />
           <CountCard
             label="Present Unexpected"
@@ -52,20 +52,49 @@ export default async function MarsReconciliationPage() {
           />
           <CountCard label="Staged" value={data.summary.staged} tone="info" />
           <CountCard label="Unknown Scans" value={data.summary.unknownScans} tone="warning" />
-          <CountCard label="Stale Units" value={data.summary.staleUnits} tone="warning" />
           <CountCard label="Matched" value={data.summary.matched} tone="success" />
         </div>
 
         <div className="space-y-6">
-          <UnitSection title="Expected Missing" rows={data.expectedMissing} />
-          <UnitSection
+          <CollapsibleSection
+            title="Expected Missing"
+            subtitle={`${data.expectedMissing.length} items expected to be here but not seen`}
+          >
+            <UnitSection rows={data.expectedMissing} emptyMessage="No expected-missing items." />
+          </CollapsibleSection>
+
+          <CollapsibleSection
             title="Physically Present but Unexpected"
-            rows={data.physicallyPresentButUnexpected}
-          />
-          <UnitSection title="Staged" rows={data.staged} />
-          <UnknownScanSection rows={data.unknownScans} />
-          <UnitSection title="Stale Units" rows={data.staleUnits} />
-          <UnitSection title="Matched" rows={data.matched} />
+            subtitle={`${data.physicallyPresentButUnexpected.length} items seen that should not still be here or were not in the import`}
+          >
+            <UnitSection
+              rows={data.physicallyPresentButUnexpected}
+              emptyMessage="No unexpected-present items."
+            />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Unknown Scans"
+            subtitle={`${data.unknownScans.length} scanned values that were not found in the imported master list`}
+          >
+            <UnknownScanSection rows={data.unknownScans} />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Staged"
+            subtitle={`${data.staged.length} locally staged items`}
+            defaultOpen={false}
+          >
+            <UnitSection rows={data.staged} emptyMessage="No staged items." />
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="Matched"
+            subtitle={`${data.matched.length} expected items that were confirmed in the latest audit`}
+            defaultOpen={false}
+          >
+            <UnitSection rows={data.matched} emptyMessage="No matched items." />
+          </CollapsibleSection>
         </div>
       </main>
     </div>
@@ -114,71 +143,97 @@ function CountCard({
   );
 }
 
-function UnitSection({
+function CollapsibleSection({
   title,
-  rows,
+  subtitle,
+  children,
+  defaultOpen = true,
 }: {
   title: string;
-  rows: Array<{
-    requestNumber: string;
-    vendor: string | null;
-    serialNumber: string | null;
-    requestStatus: string | null;
-    returnStatus: string | null;
-    staged: boolean;
-    lastAuditSeenAt: Date | null;
-    reason: string;
-  }>;
+  subtitle: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
 }) {
   return (
-    <section className="rounded-2xl border border-base-200 bg-base-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-base-200">
-        <h2 className="text-lg font-semibold text-base-content">{title}</h2>
-        <p className="text-sm text-base-content/70 mt-1">{rows.length} units</p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="table table-zebra">
-          <thead>
-            <tr>
-              <th>Request</th>
-              <th>Vendor</th>
-              <th>Serial</th>
-              <th>Request Status</th>
-              <th>Return Status</th>
-              <th>Staged</th>
-              <th>Last Audit Seen</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length ? (
-              rows.map((row) => (
-                <tr key={`${title}-${row.requestNumber}`}>
-                  <td className="font-medium">{row.requestNumber}</td>
-                  <td>{row.vendor ?? "—"}</td>
-                  <td>{row.serialNumber ?? "—"}</td>
-                  <td>{row.requestStatus ?? "—"}</td>
-                  <td>{row.returnStatus ?? "—"}</td>
-                  <td>
-                    <span className={`badge ${row.staged ? "badge-info" : "badge-ghost"}`}>
-                      {row.staged ? "Staged" : "No"}
-                    </span>
-                  </td>
-                  <td>{row.lastAuditSeenAt ? new Date(row.lastAuditSeenAt).toLocaleString() : "—"}</td>
-                  <td className="max-w-md whitespace-normal">{row.reason}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={8} className="text-center text-base-content/60 py-8">
-                  No units in this bucket.
+    <details
+      className="rounded-2xl border border-base-200 bg-base-100 shadow-sm overflow-hidden"
+      open={defaultOpen}
+    >
+      <summary className="cursor-pointer list-none px-5 py-4 border-b border-base-200 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-base-content">{title}</h2>
+          <p className="text-sm text-base-content/70 mt-1">{subtitle}</p>
+        </div>
+        <span className="text-sm text-base-content/50">Show / Hide</span>
+      </summary>
+      <div>{children}</div>
+    </details>
+  );
+}
+
+function UnitSection({
+  rows,
+  emptyMessage,
+}: {
+  title?: string;
+  rows: Array<{
+    requestNumber: string;
+    orderNumber: string | null;
+    vendor: string | null;
+    serialNumber: string | null;
+    modelNumber: string | null;
+    dateRequested: Date | null;
+    returnStatus: string | null;
+    staged: boolean;
+    reason: string;
+  }>;
+  emptyMessage: string;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="table table-zebra">
+        <thead>
+          <tr>
+            <th>Request #</th>
+            <th>H# / Order</th>
+            <th>Date Requested</th>
+            <th>Vendor</th>
+            <th>Serial</th>
+            <th>MS# / Model</th>
+            <th>Return Status</th>
+            <th>Staged</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((row) => (
+              <tr key={`${row.requestNumber}-${row.reason}`}>
+                <td className="font-medium">{row.requestNumber}</td>
+                <td>{row.orderNumber ?? "—"}</td>
+                <td>{formatDateOnly(row.dateRequested)}</td>
+                <td>{row.vendor ?? "—"}</td>
+                <td>{row.serialNumber ?? "—"}</td>
+                <td>{row.modelNumber ?? "—"}</td>
+                <td>{row.returnStatus ?? "—"}</td>
+                <td>
+                  <span className={`badge ${row.staged ? "badge-info" : "badge-ghost"}`}>
+                    {row.staged ? "Staged" : "No"}
+                  </span>
                 </td>
+                <td className="max-w-md whitespace-normal">{row.reason}</td>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={9} className="text-center text-base-content/60 py-8">
+                {emptyMessage}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -194,41 +249,40 @@ function UnknownScanSection({
   }>;
 }) {
   return (
-    <section className="rounded-2xl border border-base-200 bg-base-100 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-base-200">
-        <h2 className="text-lg font-semibold text-base-content">Unknown Scans</h2>
-        <p className="text-sm text-base-content/70 mt-1">{rows.length} scans</p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="table table-zebra">
-          <thead>
-            <tr>
-              <th>Scanned Value</th>
-              <th>Scanned At</th>
-              <th>Audit Session</th>
-              <th>Duplicate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length ? (
-              rows.map((row) => (
-                <tr key={row.scanId}>
-                  <td className="font-medium">{row.scannedValue}</td>
-                  <td>{new Date(row.createdAt).toLocaleString()}</td>
-                  <td>{row.auditSessionId.slice(0, 8)}</td>
-                  <td>{row.duplicateInSession ? "Yes" : "No"}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td colSpan={4} className="text-center text-base-content/60 py-8">
-                  No unknown scans in the latest completed audit.
-                </td>
+    <div className="overflow-x-auto">
+      <table className="table table-zebra">
+        <thead>
+          <tr>
+            <th>Scanned Value</th>
+            <th>Scanned At</th>
+            <th>Audit</th>
+            <th>Scanned Twice+</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((row) => (
+              <tr key={row.scanId}>
+                <td className="font-medium">{row.scannedValue}</td>
+                <td>{new Date(row.createdAt).toLocaleString()}</td>
+                <td>{row.auditSessionId.slice(0, 8)}</td>
+                <td>{row.duplicateInSession ? "Yes" : "No"}</td>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={4} className="text-center text-base-content/60 py-8">
+                No unknown scans in the latest completed audit.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
+}
+
+function formatDateOnly(value: string | Date | null) {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString();
 }

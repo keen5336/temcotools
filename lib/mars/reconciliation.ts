@@ -1,15 +1,14 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
-const STALE_AUDIT_THRESHOLD_DAYS = 14;
-
 const RECONCILIATION_UNIT_SELECT = {
   id: true,
   requestNumber: true,
+  orderNumber: true,
   vendor: true,
   serialNumber: true,
   modelNumber: true,
-  requestStatus: true,
+  dateRequested: true,
   returnStatus: true,
   staged: true,
   lastImportedAt: true,
@@ -40,10 +39,11 @@ type LatestAuditScan = Prisma.MarsAuditScanGetPayload<{
 
 export interface ReconciliationUnitRow {
   requestNumber: string;
+  orderNumber: string | null;
   vendor: string | null;
   serialNumber: string | null;
   modelNumber: string | null;
-  requestStatus: string | null;
+  dateRequested: Date | null;
   returnStatus: string | null;
   staged: boolean;
   lastImportedAt: Date | null;
@@ -76,14 +76,12 @@ export interface MarsReconciliationResult {
     physicallyPresentButUnexpected: number;
     staged: number;
     unknownScans: number;
-    staleUnits: number;
     matched: number;
   };
   expectedMissing: ReconciliationUnitRow[];
   physicallyPresentButUnexpected: ReconciliationUnitRow[];
   staged: ReconciliationUnitRow[];
   unknownScans: UnknownScanRow[];
-  staleUnits: ReconciliationUnitRow[];
   matched: ReconciliationUnitRow[];
 }
 
@@ -192,18 +190,6 @@ export async function getMarsReconciliation(): Promise<MarsReconciliationResult>
     }
   }
 
-  const staleThreshold = new Date(Date.now() - STALE_AUDIT_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
-  const staleUnits = latestSnapshotUnits
-    .filter((unit) => !unit.lastAuditSeenAt || unit.lastAuditSeenAt < staleThreshold)
-    .map((unit) =>
-      toUnitRow(
-        unit,
-        unit.lastAuditSeenAt
-          ? `Last audit sighting is older than ${STALE_AUDIT_THRESHOLD_DAYS} days.`
-          : "Unit has not been seen in any completed audit yet."
-      )
-    );
-
   const staged = stagedUnits.map((unit) =>
     toUnitRow(unit, "Local staged flag is active for this unit.")
   );
@@ -217,20 +203,17 @@ export async function getMarsReconciliation(): Promise<MarsReconciliationResult>
       physicallyPresentButUnexpected: physicallyPresentButUnexpected.length,
       staged: staged.length,
       unknownScans: unknownScans.length,
-      staleUnits: staleUnits.length,
       matched: matched.length,
     },
     expectedMissing,
     physicallyPresentButUnexpected,
     staged,
     unknownScans,
-    staleUnits,
     matched,
   };
 }
 
 export function isExpectedInWarehouse(unit: {
-  requestStatus: string | null;
   returnStatus: string | null;
 }) {
   const returnStatus = normalizeStatus(unit.returnStatus);
@@ -248,10 +231,11 @@ function normalizeStatus(value: string | null) {
 function toUnitRow(unit: ReconciliationUnit, reason: string): ReconciliationUnitRow {
   return {
     requestNumber: unit.requestNumber,
+    orderNumber: unit.orderNumber,
     vendor: unit.vendor,
     serialNumber: unit.serialNumber,
     modelNumber: unit.modelNumber,
-    requestStatus: unit.requestStatus,
+    dateRequested: unit.dateRequested,
     returnStatus: unit.returnStatus,
     staged: unit.staged,
     lastImportedAt: unit.lastImportedAt,

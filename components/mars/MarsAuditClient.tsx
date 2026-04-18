@@ -30,7 +30,20 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
   const [draft, setDraft] = useState<LocalAuditDraft | null>(null);
   const [history, setHistory] = useState(initialHistory);
   const [scanValue, setScanValue] = useState("");
+  const [quickSightingValue, setQuickSightingValue] = useState("");
   const [lastScanned, setLastScanned] = useState<LocalAuditScan | null>(null);
+  const [lastSighted, setLastSighted] = useState<{
+    seenAt: string;
+    unit: {
+      requestNumber: string;
+      orderNumber: string | null;
+      vendor: string | null;
+      serialNumber: string | null;
+      modelNumber: string | null;
+      dateRequested: string | null;
+      returnStatus: string | null;
+    };
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -195,7 +208,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <CounterCard label="Total Scans" value={summary.totalScans} tone="default" />
         <CounterCard label="Unique" value={summary.uniqueScans} tone="success" />
-        <CounterCard label="Duplicates" value={summary.duplicateScans} tone="warning" />
+        <CounterCard label="Scanned Twice+" value={summary.duplicateScans} tone="warning" />
       </div>
 
       <section className="card bg-base-100 border border-base-200 shadow-sm">
@@ -289,6 +302,93 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
         </div>
       </section>
 
+      <section className="card bg-base-100 border border-base-200 shadow-sm">
+        <div className="card-body gap-4">
+          <div>
+            <h2 className="card-title">Quick Sighting</h2>
+            <p className="text-sm text-base-content/70">
+              Record one item as seen without opening a full audit. Scan or type the Request
+              Number and it will update that item&apos;s last-seen timestamps immediately.
+            </p>
+          </div>
+
+          <form
+            className="flex flex-col sm:flex-row gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const requestNumber = normalizeScanValue(quickSightingValue);
+              if (!requestNumber) {
+                return;
+              }
+
+              startTransition(async () => {
+                setError(null);
+
+                const response = await fetch("/api/mars/audit/sighting", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ requestNumber }),
+                });
+
+                const payload = (await response.json()) as
+                  | {
+                      ok: true;
+                      seenAt: string;
+                      unit: {
+                        requestNumber: string;
+                        orderNumber: string | null;
+                        vendor: string | null;
+                        serialNumber: string | null;
+                        modelNumber: string | null;
+                        dateRequested: string | null;
+                        returnStatus: string | null;
+                      };
+                    }
+                  | { ok: false; error: string };
+
+                if (!response.ok || !payload.ok) {
+                  setError("error" in payload ? payload.error : "Failed to record item sighting.");
+                  return;
+                }
+
+                setQuickSightingValue("");
+                setLastSighted(payload);
+              });
+            }}
+          >
+            <input
+              type="text"
+              value={quickSightingValue}
+              onChange={(event) => setQuickSightingValue(event.target.value)}
+              placeholder="Scan or enter one request number"
+              className="input input-bordered input-lg flex-1"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              disabled={isPending}
+            />
+            <button
+              type="submit"
+              className="btn btn-secondary btn-lg"
+              disabled={!quickSightingValue.trim() || isPending}
+            >
+              Record Sighting
+            </button>
+          </form>
+
+          {lastSighted ? (
+            <div className="rounded-2xl border border-info/30 bg-info/10 p-4 text-sm">
+              <p className="font-semibold text-base-content">{lastSighted.unit.requestNumber}</p>
+              <p className="text-base-content/70">
+                Seen {formatDate(lastSighted.seenAt)} | H# {lastSighted.unit.orderNumber ?? "—"} |
+                Vendor {lastSighted.unit.vendor ?? "—"} | Serial {lastSighted.unit.serialNumber ?? "—"} |
+                Model {lastSighted.unit.modelNumber ?? "—"} | Return Status {lastSighted.unit.returnStatus ?? "—"}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
       <section className="card bg-base-100 border border-base-200 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-base-200">
           <h2 className="text-lg font-semibold text-base-content">Current Draft Scans</h2>
@@ -312,7 +412,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
                   <tr key={`${scan.scannedAt}-${scan.value}-${index}`}>
                     <td className={`font-medium ${index === 0 ? "text-lg" : ""}`}>{scan.value}</td>
                     <td>{formatDate(scan.scannedAt)}</td>
-                    <td>{scan.duplicate ? "Yes" : "No"}</td>
+                  <td>{scan.duplicate ? "Scanned more than once" : "No"}</td>
                   </tr>
                 ))
               ) : (
@@ -343,7 +443,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
                 <th>Scans</th>
                 <th>Matched</th>
                 <th>Unknown</th>
-                <th>Duplicates</th>
+                <th>Scanned Twice+</th>
                 <th>Import Snapshot</th>
                 <th></th>
               </tr>

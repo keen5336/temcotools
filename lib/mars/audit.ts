@@ -5,10 +5,11 @@ import { isExpectedInWarehouse } from "@/lib/mars/reconciliation";
 const AUDIT_FEEDBACK_UNIT_SELECT = {
   id: true,
   requestNumber: true,
+  orderNumber: true,
   vendor: true,
   serialNumber: true,
   modelNumber: true,
-  requestStatus: true,
+  dateRequested: true,
   returnStatus: true,
   staged: true,
   lastScannedAt: true,
@@ -39,10 +40,11 @@ const AUDIT_DETAIL_SESSION_SELECT = {
         select: {
           id: true,
           requestNumber: true,
+          orderNumber: true,
           vendor: true,
           serialNumber: true,
           modelNumber: true,
-          requestStatus: true,
+          dateRequested: true,
           returnStatus: true,
           staged: true,
           lastImportedAt: true,
@@ -129,10 +131,11 @@ export interface SubmittedAuditSessionSummary {
 
 export interface AuditUnitRow {
   requestNumber: string;
+  orderNumber: string | null;
   vendor: string | null;
   serialNumber: string | null;
   modelNumber: string | null;
-  requestStatus: string | null;
+  dateRequested: Date | null;
   returnStatus: string | null;
   staged: boolean;
   lastImportedAt: Date | null;
@@ -158,10 +161,11 @@ export interface MarsAuditDetail {
     createdAt: Date;
     unit: {
       requestNumber: string;
+      orderNumber: string | null;
       vendor: string | null;
       serialNumber: string | null;
       modelNumber: string | null;
-      requestStatus: string | null;
+      dateRequested: Date | null;
       returnStatus: string | null;
       staged: boolean;
     } | null;
@@ -360,6 +364,54 @@ export async function submitMarsAuditSession(options: {
   });
 }
 
+export async function recordMarsUnitSighting(options: {
+  requestNumber: string;
+  userId?: string | null;
+}) {
+  const normalizedValue = normalizeAuditScanValue(options.requestNumber);
+  if (!normalizedValue) {
+    throw new Error("Request number is required.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const unit = await tx.marsUnit.findUnique({
+      where: { requestNumber: normalizedValue },
+      select: AUDIT_FEEDBACK_UNIT_SELECT,
+    });
+
+    if (!unit) {
+      throw new Error("MARS unit not found in the current import.");
+    }
+
+    const seenAt = new Date();
+    const updated = await tx.marsUnit.update({
+      where: { id: unit.id },
+      data: {
+        lastScannedAt: seenAt,
+        lastAuditSeenAt: seenAt,
+      },
+      select: AUDIT_FEEDBACK_UNIT_SELECT,
+    });
+
+    await tx.marsEvent.create({
+      data: {
+        marsUnitId: unit.id,
+        type: "manual_seen",
+        userId: options.userId ?? null,
+        payload: {
+          requestNumber: normalizedValue,
+          seenAt,
+        },
+      },
+    });
+
+    return {
+      seenAt,
+      unit: updated,
+    };
+  });
+}
+
 export async function listSubmittedMarsAuditSessions(
   limit = 20
 ): Promise<SubmittedAuditSessionSummary[]> {
@@ -405,10 +457,11 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
         select: {
           id: true,
           requestNumber: true,
+          orderNumber: true,
           vendor: true,
           serialNumber: true,
           modelNumber: true,
-          requestStatus: true,
+          dateRequested: true,
           returnStatus: true,
           staged: true,
           lastImportedAt: true,
@@ -510,13 +563,14 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
       matched: scan.matched,
       duplicateInSession: scan.duplicateInSession,
       createdAt: scan.createdAt,
-      unit: scan.marsUnit
+          unit: scan.marsUnit
         ? {
             requestNumber: scan.marsUnit.requestNumber,
+            orderNumber: scan.marsUnit.orderNumber,
             vendor: scan.marsUnit.vendor,
             serialNumber: scan.marsUnit.serialNumber,
             modelNumber: scan.marsUnit.modelNumber,
-            requestStatus: scan.marsUnit.requestStatus,
+            dateRequested: scan.marsUnit.dateRequested,
             returnStatus: scan.marsUnit.returnStatus,
             staged: scan.marsUnit.staged,
           }
@@ -704,10 +758,11 @@ function parseOptionalDate(value: string | null | undefined): Date | null {
 function toAuditUnitRow(
   unit: {
     requestNumber: string;
+    orderNumber: string | null;
     vendor: string | null;
     serialNumber: string | null;
     modelNumber: string | null;
-    requestStatus: string | null;
+    dateRequested: Date | null;
     returnStatus: string | null;
     staged: boolean;
     lastImportedAt: Date | null;
@@ -717,10 +772,11 @@ function toAuditUnitRow(
 ): AuditUnitRow {
   return {
     requestNumber: unit.requestNumber,
+    orderNumber: unit.orderNumber,
     vendor: unit.vendor,
     serialNumber: unit.serialNumber,
     modelNumber: unit.modelNumber,
-    requestStatus: unit.requestStatus,
+    dateRequested: unit.dateRequested,
     returnStatus: unit.returnStatus,
     staged: unit.staged,
     lastImportedAt: unit.lastImportedAt,
