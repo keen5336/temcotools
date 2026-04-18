@@ -233,29 +233,12 @@ export function isExpectedInWarehouse(unit: {
   requestStatus: string | null;
   returnStatus: string | null;
 }) {
-  const requestStatus = normalizeStatus(unit.requestStatus);
   const returnStatus = normalizeStatus(unit.returnStatus);
-
-  const terminalTerms = [
-    "closed",
-    "complete",
-    "completed",
-    "shipped",
-    "cancelled",
-    "canceled",
-    "returned",
-    "disposed",
-    "received",
-    "pickedup",
-    "picked up",
-  ];
-
-  const combined = `${requestStatus} ${returnStatus}`.trim();
-  if (!combined) {
+  if (!returnStatus) {
     return true;
   }
 
-  return !terminalTerms.some((term) => combined.includes(term));
+  return !["shipped", "received"].some((term) => returnStatus.includes(term));
 }
 
 function normalizeStatus(value: string | null) {
