@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type {
+  MarsUnitFilterOptions,
   MarsUnitListItem,
   MarsUnitSortField,
   SortDirection,
