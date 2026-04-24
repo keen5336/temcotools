@@ -59,6 +59,7 @@ model MarsUnit {
   returnStatus           String?
   replacementNeeded      String?
   staged                 Boolean          @default(false)
+  localStatus            String           @default("active")
   archivedAt             DateTime?
   archivedReason         String?
   presentInLatestImport  Boolean          @default(true)

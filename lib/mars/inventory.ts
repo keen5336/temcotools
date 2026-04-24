@@ -14,6 +14,7 @@ const MARS_UNIT_LIST_SELECT = {
   returnStatus: true,
   replacementNeeded: true,
   staged: true,
+  localStatus: true,
   archivedAt: true,
   archivedReason: true,
   presentInLatestImport: true,
@@ -302,6 +303,7 @@ const MARS_UNIT_DETAIL_SELECT = {
   returnStatus: true,
   replacementNeeded: true,
   staged: true,
+  localStatus: true,
   archivedAt: true,
   archivedReason: true,
   presentInLatestImport: true,
@@ -447,16 +449,19 @@ function buildMarsUnitsWhere(options: ListMarsUnitsOptions): Prisma.MarsUnitWher
 export async function getMarsOperationalOverview() {
   const latestImportBatch = await getLatestMarsImportBatch();
 
-  const [activeUnits, archivedUnits, stagedUnits, missingFromLatestImport, notSeenInAudit, shippedOrReceived, recentProblems] =
+  const [activeUnits, archivedUnits, stagedUnits, deletedUnits, notSeenInAudit, shippedOrReceived, recentProblems] =
     await Promise.all([
-      prisma.marsUnit.count({ where: { archivedAt: null, presentInLatestImport: true } }),
+      prisma.marsUnit.count({
+        where: { archivedAt: null, presentInLatestImport: true, localStatus: "active" },
+      }),
       prisma.marsUnit.count({ where: { archivedAt: { not: null } } }),
       prisma.marsUnit.count({ where: { archivedAt: null, staged: true } }),
-      prisma.marsUnit.count({ where: { archivedAt: null, presentInLatestImport: false } }),
+      prisma.marsUnit.count({ where: { localStatus: "deleted" } }),
       prisma.marsUnit.count({
         where: {
           archivedAt: null,
           presentInLatestImport: true,
+          localStatus: "active",
           lastAuditSeenAt: null,
         },
       }),
@@ -464,6 +469,7 @@ export async function getMarsOperationalOverview() {
         where: {
           archivedAt: null,
           presentInLatestImport: true,
+          localStatus: "active",
           OR: [
             { returnStatus: { equals: "shipped", mode: "insensitive" } },
             { returnStatus: { equals: "received", mode: "insensitive" } },
@@ -488,6 +494,7 @@ export async function getMarsOperationalOverview() {
           modelNumber: true,
           returnStatus: true,
           staged: true,
+          localStatus: true,
           presentInLatestImport: true,
           missingFromLatestImportAt: true,
           lastAuditSeenAt: true,
@@ -503,7 +510,7 @@ export async function getMarsOperationalOverview() {
       activeUnits,
       archivedUnits,
       stagedUnits,
-      missingFromLatestImport,
+      deletedUnits,
       notSeenInAudit,
       shippedOrReceived,
     },
@@ -516,13 +523,14 @@ export async function getMarsOperationalOverview() {
 
 function deriveProblemReason(unit: {
   staged: boolean;
+  localStatus: string;
   presentInLatestImport: boolean;
   missingFromLatestImportAt: Date | null;
   lastAuditSeenAt: Date | null;
   returnStatus: string | null;
 }) {
-  if (!unit.presentInLatestImport || unit.missingFromLatestImportAt) {
-    return "Missing from the latest MARS import and needs review.";
+  if (unit.localStatus === "deleted" || !unit.presentInLatestImport || unit.missingFromLatestImportAt) {
+    return "Deleted from MARS and archived locally.";
   }
   if (unit.returnStatus?.toLowerCase() === "received" || unit.returnStatus?.toLowerCase() === "shipped") {
     return "MARS says this item has already moved out of the warehouse.";

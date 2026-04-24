@@ -237,61 +237,65 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
 
   return (
     <div className="space-y-5">
-      <section className="card bg-base-100 border border-base-200 shadow-sm">
-        <div className="card-body gap-4">
-          <div className="flex flex-col lg:flex-row gap-3">
-            <label className="form-control">
-              <span className="label-text mb-2">Search</span>
-              <input
-                type="search"
-                value={filters.q}
-                onChange={(event) => updateFilter("q", event.target.value)}
-                placeholder="Request, serial, vendor, model, order, or vendor RA"
-                className="input input-bordered w-full"
-              />
-            </label>
-            <label className="form-control lg:w-40">
-              <span className="label-text mb-2">Rows</span>
-              <select
-                className="select select-bordered"
-                value={String(pageSize)}
-                onChange={(event) => {
-                  setPage(1);
-                  setPageSize(Number(event.target.value));
-                }}
-              >
-                <option value="25">25</option>
-                <option value="50">50</option>
-                <option value="100">100</option>
-                <option value="200">200</option>
-              </select>
-            </label>
-
-            <div className="form-control">
-              <span className="label-text mb-2">Columns</span>
-              <details className="dropdown">
-                <summary className="btn btn-outline justify-between">
-                  {visibleColumns.length} visible
-                </summary>
-                <div className="dropdown-content z-[1] mt-2 w-72 rounded-box border border-base-200 bg-base-100 p-3 shadow-lg">
-                  <div className="grid grid-cols-1 gap-2">
-                    {ALL_COLUMNS.map((column) => (
-                      <label key={column.id} className="label cursor-pointer justify-start gap-3">
-                        <input
-                          type="checkbox"
-                          className="checkbox checkbox-sm"
-                          checked={visibleColumns.includes(column.id)}
-                          onChange={() => toggleColumn(column.id)}
-                        />
-                        <span className="label-text">{column.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </details>
+      <section className="space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
+          <label className="form-control flex-1">
+            <span className="label-text mb-2">Search</span>
+            <input
+              type="search"
+              value={filters.q}
+              onChange={(event) => updateFilter("q", event.target.value)}
+              placeholder="Request, serial, vendor, model, order, or vendor RA"
+              className="input input-bordered w-full"
+            />
+          </label>
+          <label className="form-control lg:w-36">
+            <span className="label-text mb-2">Rows</span>
+            <select
+              className="select select-bordered"
+              value={String(pageSize)}
+              onChange={(event) => {
+                setPage(1);
+                setPageSize(Number(event.target.value));
+              }}
+            >
+              <option value="25">25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+            </select>
+          </label>
+          <details className="dropdown dropdown-end">
+            <summary className="btn btn-outline">Columns</summary>
+            <div className="dropdown-content z-[1] mt-2 w-72 rounded-box border border-base-200 bg-base-100 p-3 shadow-lg">
+              <div className="grid grid-cols-1 gap-2">
+                {ALL_COLUMNS.map((column) => (
+                  <label key={column.id} className="label cursor-pointer justify-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="checkbox checkbox-sm"
+                      checked={visibleColumns.includes(column.id)}
+                      onChange={() => toggleColumn(column.id)}
+                    />
+                    <span className="label-text">{column.label}</span>
+                  </label>
+                ))}
+              </div>
             </div>
-          </div>
+          </details>
+          <button
+            className="btn btn-ghost"
+            onClick={() => setVisibleColumns(DEFAULT_VISIBLE_COLUMNS)}
+          >
+            Reset Columns
+          </button>
+        </div>
 
+        <details className="rounded-lg border border-base-200 bg-base-100">
+          <summary className="cursor-pointer list-none px-4 py-3 font-medium">
+            Filters
+          </summary>
+          <div className="border-t border-base-200 p-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
             <label className="form-control">
               <span className="label-text mb-2">Request Status</span>
@@ -356,28 +360,23 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
               </button>
             </div>
           </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-base-content/70">
-            <p>
-              Showing {data.items.length} of {data.totalCount} units
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <span>{isPending ? "Refreshing..." : `Page ${data.page} of ${data.totalPages}`}</span>
-              <button
-                className="btn btn-xs btn-ghost"
-                onClick={() => setVisibleColumns(DEFAULT_VISIBLE_COLUMNS)}
-              >
-                Reset columns
-              </button>
-            </div>
           </div>
+        </details>
 
-          {error ? (
-            <div className="alert alert-error">
-              <span>{error}</span>
-            </div>
-          ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-base-content/70">
+          <p>
+            Showing {data.items.length} of {data.totalCount} units
+          </p>
+          <div>
+            {isPending ? "Refreshing..." : `Page ${data.page} of ${data.totalPages}`}
+          </div>
         </div>
+
+        {error ? (
+          <div className="alert alert-error">
+            <span>{error}</span>
+          </div>
+        ) : null}
       </section>
 
       <section className="card bg-base-100 border border-base-200 shadow-sm overflow-hidden">

@@ -48,6 +48,7 @@ const MARS_UNIT_IMPORT_SELECT = {
   requestStatus: true,
   returnStatus: true,
   replacementNeeded: true,
+  localStatus: true,
 } as const satisfies Prisma.MarsUnitSelect;
 
 export interface MarsImportedFields {
@@ -83,6 +84,7 @@ type MarsUnitImportData = {
   requestStatus: string | null;
   returnStatus: string | null;
   replacementNeeded: string | null;
+  localStatus: string;
   presentInLatestImport: boolean;
   missingFromLatestImportAt: Date | null;
   lastImportedAt: Date;
@@ -181,13 +183,22 @@ export async function importMarsWorkbook({
       }
 
       const meaningfullyChanged = hasMeaningfulImportedChanges(existing, row);
+      const restoredFromDeleted = existing.localStatus === "deleted";
 
       await tx.marsUnit.update({
         where: { id: existing.id },
-        data: importData,
+        data: {
+          ...importData,
+          ...(restoredFromDeleted
+            ? {
+                archivedAt: null,
+                archivedReason: null,
+              }
+            : {}),
+        },
       });
 
-      if (meaningfullyChanged) {
+      if (meaningfullyChanged || restoredFromDeleted) {
         updatedCount += 1;
 
         await tx.marsEvent.create({
@@ -195,7 +206,11 @@ export async function importMarsWorkbook({
             marsUnitId: existing.id,
             type: "imported",
             userId: uploadedByUserId ?? null,
-            payload: buildImportEventPayload(batch.id, "updated", row),
+            payload: buildImportEventPayload(
+              batch.id,
+              restoredFromDeleted ? "restored" : "updated",
+              row
+            ),
           },
         });
       }
@@ -212,6 +227,7 @@ export async function importMarsWorkbook({
         requestStatus: importData.requestStatus,
         returnStatus: importData.returnStatus,
         replacementNeeded: importData.replacementNeeded,
+        localStatus: importData.localStatus,
       });
     }
 
@@ -238,18 +254,22 @@ export async function importMarsWorkbook({
         data: {
           presentInLatestImport: false,
           missingFromLatestImportAt: importedAt,
+          localStatus: "deleted",
+          archivedAt: importedAt,
+          archivedReason: "Deleted from MARS.",
         },
       });
 
       await tx.marsEvent.createMany({
         data: unitsMissingFromLatestImport.map((unit) => ({
           marsUnitId: unit.id,
-          type: "missing_from_latest_import",
+          type: "deleted_from_mars",
           userId: uploadedByUserId ?? null,
           payload: {
             batchId: batch.id,
             requestNumber: unit.requestNumber,
-            missingFromLatestImportAt: importedAt.toISOString(),
+            deletedAt: importedAt.toISOString(),
+            archivedAt: importedAt.toISOString(),
           },
         })),
       });
@@ -447,6 +467,7 @@ function buildMarsUnitImportData(
     requestStatus: row.requestStatus,
     returnStatus: row.returnStatus,
     replacementNeeded: row.replacementNeeded,
+    localStatus: "active",
     presentInLatestImport: true,
     missingFromLatestImportAt: null,
     lastImportedAt: importedAt,
@@ -476,7 +497,7 @@ function areImportedValuesEqual(
 
 function buildImportEventPayload(
   batchId: string,
-  action: "inserted" | "updated",
+  action: "inserted" | "updated" | "restored",
   row: ParsedMarsRow
 ) {
   return {

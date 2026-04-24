@@ -51,6 +51,7 @@ const AUDIT_DETAIL_SESSION_SELECT = {
           dateRequested: true,
           returnStatus: true,
           staged: true,
+          localStatus: true,
           lastImportedAt: true,
           lastAuditSeenAt: true,
           lastKnownImportBatchId: true,
@@ -857,6 +858,7 @@ async function buildAuditReport(
           dateRequested: true,
           returnStatus: true,
           staged: true,
+          localStatus: true,
           lastImportedAt: true,
           lastAuditSeenAt: true,
         },
@@ -938,7 +940,9 @@ async function buildAuditReport(
       physicallyPresentButUnexpected.push(
         toAuditUnitRow(
           unit,
-          "Seen in this audit but missing from the import snapshot used for this session."
+          unit.localStatus === "deleted"
+            ? "Seen in this audit but this submission was deleted from MARS and archived locally."
+            : "Seen in this audit but missing from the import snapshot used for this session."
         )
       );
       continue;
@@ -1036,6 +1040,7 @@ function toAuditUnitRow(
     dateRequested: Date | null;
     returnStatus: string | null;
     staged: boolean;
+    localStatus?: string;
     lastImportedAt: Date | null;
     lastAuditSeenAt: Date | null;
   },

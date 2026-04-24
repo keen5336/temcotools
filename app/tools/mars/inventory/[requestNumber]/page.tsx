@@ -30,10 +30,9 @@ export default async function MarsInventoryDetailPage({
     ["Return Status", unit.returnStatus],
     ["Replacement Needed", unit.replacementNeeded],
     ["Staged", unit.staged ? "Yes" : "No"],
+    ["Local Status", formatLocalStatus(unit.localStatus)],
     ["Archived", unit.archivedAt ? "Yes" : "No"],
     ["Archive Reason", unit.archivedReason],
-    ["Present In Latest Import", unit.presentInLatestImport ? "Yes" : "No"],
-    ["Missing From Latest Import At", formatDate(unit.missingFromLatestImportAt)],
     ["Last Imported", formatDate(unit.lastImportedAt)],
     ["Last Scanned", formatDate(unit.lastScannedAt)],
     ["Last Audit Seen", formatDate(unit.lastAuditSeenAt)],
@@ -192,4 +191,9 @@ function formatDate(value: string | Date | null, includeTime = true) {
 
   const date = new Date(value);
   return includeTime ? date.toLocaleString() : date.toLocaleDateString();
+}
+
+function formatLocalStatus(value: string) {
+  if (value === "deleted") return "Deleted";
+  return "Active";
 }
