@@ -185,6 +185,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
         id: payload.session.id,
         startedAt: new Date(payload.session.startedAt),
         completedAt: new Date(completedAt),
+        lastAmendedAt: new Date(completedAt),
         scanCount: payload.summary.totalScans,
         summary: payload.summary,
         startedBy: null,
@@ -429,9 +430,9 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
 
       <section className="card bg-base-100 border border-base-200 shadow-sm overflow-hidden">
         <div className="px-5 py-4 border-b border-base-200">
-          <h2 className="text-lg font-semibold text-base-content">Audit History</h2>
+          <h2 className="text-lg font-semibold text-base-content">Recent Audit Sessions</h2>
           <p className="text-sm text-base-content/70 mt-1">
-            Completed audits can be reopened as report/detail pages.
+            Open a session to amend scans, make manual corrections, and generate saved reports.
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -439,7 +440,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
             <thead>
               <tr>
                 <th>Audit</th>
-                <th>Completed</th>
+                <th>Submitted</th>
                 <th>Scans</th>
                 <th>Matched</th>
                 <th>Unknown</th>
@@ -464,7 +465,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
                         href={`/tools/mars/audit/${encodeURIComponent(audit.id)}`}
                         className="btn btn-xs btn-outline"
                       >
-                        Open Report
+                        Open Session
                       </Link>
                     </td>
                   </tr>

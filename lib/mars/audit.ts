@@ -20,6 +20,9 @@ const AUDIT_DETAIL_SESSION_SELECT = {
   id: true,
   startedAt: true,
   completedAt: true,
+  lastAmendedAt: true,
+  createdAt: true,
+  updatedAt: true,
   notes: true,
   startedByUser: {
     select: {
@@ -34,6 +37,7 @@ const AUDIT_DETAIL_SESSION_SELECT = {
       scannedValue: true,
       matched: true,
       duplicateInSession: true,
+      manualEntry: true,
       createdAt: true,
       marsUnitId: true,
       marsUnit: {
@@ -54,6 +58,29 @@ const AUDIT_DETAIL_SESSION_SELECT = {
       },
     },
   },
+  marsAuditReports: {
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: {
+      id: true,
+      label: true,
+      createdAt: true,
+      summary: true,
+      payload: true,
+      generatedByUser: {
+        select: {
+          displayName: true,
+          username: true,
+        },
+      },
+      importBatch: {
+        select: {
+          id: true,
+          filename: true,
+          uploadedAt: true,
+        },
+      },
+    },
+  },
   _count: {
     select: {
       marsAuditScans: true,
@@ -65,6 +92,7 @@ const AUDIT_LIST_SESSION_SELECT = {
   id: true,
   startedAt: true,
   completedAt: true,
+  lastAmendedAt: true,
   notes: true,
   startedByUser: {
     select: {
@@ -120,6 +148,7 @@ export interface SubmittedAuditSessionSummary {
   id: string;
   startedAt: Date;
   completedAt: Date | null;
+  lastAmendedAt: Date | null;
   scanCount: number;
   summary: MarsAuditSummary;
   startedBy: string | null;
@@ -158,6 +187,7 @@ export interface MarsAuditDetail {
     scannedValue: string;
     matched: boolean;
     duplicateInSession: boolean;
+    manualEntry: boolean;
     createdAt: Date;
     unit: {
       requestNumber: string;
@@ -170,25 +200,72 @@ export interface MarsAuditDetail {
       staged: boolean;
     } | null;
   }>;
-  report: {
-    importBatch: {
-      id: string;
-      filename: string;
-      uploadedAt: Date;
-    } | null;
-    summary: {
-      expectedMissing: number;
-      physicallyPresentButUnexpected: number;
-      unknownScans: number;
-      duplicates: number;
-      matched: number;
-    };
-    expectedMissing: AuditUnitRow[];
-    physicallyPresentButUnexpected: AuditUnitRow[];
-    unknownScans: AuditUnknownScanRow[];
-    duplicates: AuditUnknownScanRow[];
-    matched: AuditUnitRow[];
+  currentReport: MarsAuditReportPayload;
+  savedReports: MarsSavedAuditReport[];
+}
+
+export interface MarsAuditReportPayload {
+  importBatch: {
+    id: string;
+    filename: string;
+    uploadedAt: Date;
+  } | null;
+  summary: {
+    expectedMissing: number;
+    physicallyPresentButUnexpected: number;
+    unknownScans: number;
+    duplicates: number;
+    matched: number;
   };
+  expectedMissing: AuditUnitRow[];
+  physicallyPresentButUnexpected: AuditUnitRow[];
+  unknownScans: AuditUnknownScanRow[];
+  duplicates: AuditUnknownScanRow[];
+  matched: AuditUnitRow[];
+}
+
+export interface MarsSavedAuditReport {
+  id: string;
+  label: string | null;
+  createdAt: Date;
+  generatedBy: string | null;
+  importBatch: {
+    id: string;
+    filename: string;
+    uploadedAt: Date;
+  } | null;
+  summary: MarsAuditReportPayload["summary"];
+  payload: MarsAuditReportPayload;
+}
+
+interface BuiltAuditReport {
+  payload: MarsAuditReportPayload;
+  importBatchId: string | null;
+}
+
+interface MarsAuditScanRecordInput {
+  auditSessionId: string;
+  scannedValue: string;
+  userId?: string | null;
+  manualEntry?: boolean;
+}
+
+interface MarsAuditScanRecord {
+  id: string;
+  scannedValue: string;
+  matched: boolean;
+  duplicateInSession: boolean;
+  manualEntry: boolean;
+  createdAt: Date;
+  unit: AuditFeedbackUnit | null;
+}
+
+export interface MarsAuditReportGenerationResult {
+  reportId: string;
+  auditSessionId: string;
+  label: string | null;
+  createdAt: Date;
+  payload: MarsAuditReportPayload;
 }
 
 interface AuditSessionMetadata {
@@ -241,15 +318,12 @@ export async function recordMarsAuditScan(options: {
       throw new Error("Audit session not found.");
     }
 
-    if (session.completedAt) {
-      throw new Error("Audit session is already completed.");
-    }
-
     const result = await processAuditScan(tx, {
       auditSessionId: options.auditSessionId,
       scannedValue: normalizedValue,
       userId: options.userId ?? null,
       createdAt: new Date(),
+      manualEntry: false,
     });
 
     const summary = await getMarsAuditSummary(tx, options.auditSessionId);
@@ -282,7 +356,10 @@ export async function completeMarsAuditSession(options: { auditSessionId: string
     const completedAt = session.completedAt ?? new Date();
     const updated = await tx.marsAuditSession.update({
       where: { id: options.auditSessionId },
-      data: { completedAt },
+      data: {
+        completedAt,
+        lastAmendedAt: new Date(),
+      },
       select: {
         id: true,
         startedAt: true,
@@ -338,6 +415,7 @@ export async function submitMarsAuditSession(options: {
         startedByUserId: options.userId ?? null,
         startedAt,
         completedAt,
+        lastAmendedAt: completedAt,
         notes: JSON.stringify(metadata),
       },
       select: {
@@ -355,6 +433,7 @@ export async function submitMarsAuditSession(options: {
         scannedValue,
         userId: options.userId ?? null,
         createdAt: new Date(createdAtCursor),
+        manualEntry: false,
       });
       createdAtCursor += 1;
     }
@@ -429,6 +508,130 @@ export async function listSubmittedMarsAuditSessions(
   return sessions.map(toSubmittedAuditSessionSummary);
 }
 
+export async function addMarsAuditScan(
+  options: MarsAuditScanRecordInput
+): Promise<MarsAuditScanRecord & { summary: MarsAuditSummary }> {
+  const normalizedValue = normalizeAuditScanValue(options.scannedValue);
+  if (!normalizedValue) {
+    throw new Error("Scanned value is required.");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.marsAuditSession.findUnique({
+      where: { id: options.auditSessionId },
+      select: { id: true },
+    });
+
+    if (!session) {
+      throw new Error("Audit session not found.");
+    }
+
+    const result = await processAuditScan(tx, {
+      auditSessionId: options.auditSessionId,
+      scannedValue: normalizedValue,
+      userId: options.userId ?? null,
+      createdAt: new Date(),
+      manualEntry: options.manualEntry ?? true,
+    });
+
+    await tx.marsAuditSession.update({
+      where: { id: options.auditSessionId },
+      data: { lastAmendedAt: new Date() },
+    });
+
+    const summary = await getMarsAuditSummary(tx, options.auditSessionId);
+
+    return {
+      id: result.scanId,
+      scannedValue: result.scannedValue,
+      matched: result.matched,
+      duplicateInSession: result.duplicateInSession,
+      manualEntry: result.manualEntry,
+      createdAt: result.createdAt,
+      unit: result.unit,
+      summary,
+    };
+  });
+}
+
+export async function deleteMarsAuditScan(options: {
+  auditSessionId: string;
+  scanId: string;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const scan = await tx.marsAuditScan.findFirst({
+      where: {
+        id: options.scanId,
+        auditSessionId: options.auditSessionId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!scan) {
+      throw new Error("Audit scan not found.");
+    }
+
+    await tx.marsAuditScan.delete({
+      where: { id: options.scanId },
+    });
+
+    await recomputeDuplicateFlags(tx, options.auditSessionId);
+    await tx.marsAuditSession.update({
+      where: { id: options.auditSessionId },
+      data: { lastAmendedAt: new Date() },
+    });
+
+    return {
+      scanId: options.scanId,
+      summary: await getMarsAuditSummary(tx, options.auditSessionId),
+    };
+  });
+}
+
+export async function generateMarsAuditReport(options: {
+  auditSessionId: string;
+  userId?: string | null;
+  label?: string | null;
+}): Promise<MarsAuditReportGenerationResult> {
+  return prisma.$transaction(async (tx) => {
+    const session = await tx.marsAuditSession.findUnique({
+      where: { id: options.auditSessionId },
+      select: { id: true },
+    });
+
+    if (!session) {
+      throw new Error("Audit session not found.");
+    }
+
+    const built = await buildAuditReport(tx, options.auditSessionId);
+    const report = await tx.marsAuditReport.create({
+      data: {
+        auditSessionId: options.auditSessionId,
+        importBatchId: built.importBatchId,
+        generatedByUserId: options.userId ?? null,
+        label: options.label?.trim() || null,
+        summary: built.payload.summary,
+        payload: built.payload as unknown as Prisma.InputJsonValue,
+      },
+      select: {
+        id: true,
+        label: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      reportId: report.id,
+      auditSessionId: options.auditSessionId,
+      label: report.label,
+      createdAt: report.createdAt,
+      payload: built.payload,
+    };
+  });
+}
+
 export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAuditDetail | null> {
   const session = await prisma.marsAuditSession.findUnique({
     where: { id: auditSessionId },
@@ -439,9 +642,199 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
     return null;
   }
 
+  const built = await buildAuditReport(prisma, auditSessionId);
+
+  return {
+    session: toSubmittedAuditSessionSummary(session),
+    scans: session.marsAuditScans.map((scan) => ({
+      id: scan.id,
+      scannedValue: scan.scannedValue,
+      matched: scan.matched,
+      duplicateInSession: scan.duplicateInSession,
+      manualEntry: scan.manualEntry,
+      createdAt: scan.createdAt,
+      unit: scan.marsUnit
+        ? {
+            requestNumber: scan.marsUnit.requestNumber,
+            orderNumber: scan.marsUnit.orderNumber,
+            vendor: scan.marsUnit.vendor,
+            serialNumber: scan.marsUnit.serialNumber,
+            modelNumber: scan.marsUnit.modelNumber,
+            dateRequested: scan.marsUnit.dateRequested,
+            returnStatus: scan.marsUnit.returnStatus,
+            staged: scan.marsUnit.staged,
+          }
+        : null,
+    })),
+    currentReport: built.payload,
+    savedReports: session.marsAuditReports.map((report) => ({
+      id: report.id,
+      label: report.label,
+      createdAt: report.createdAt,
+      generatedBy:
+        report.generatedByUser?.displayName ?? report.generatedByUser?.username ?? null,
+      importBatch: report.importBatch,
+      summary: report.summary as unknown as MarsAuditReportPayload["summary"],
+      payload: report.payload as unknown as MarsAuditReportPayload,
+    })),
+  };
+}
+
+async function processAuditScan(
+  tx: Prisma.TransactionClient,
+  options: {
+    auditSessionId: string;
+    scannedValue: string;
+    userId: string | null;
+    createdAt: Date;
+    manualEntry: boolean;
+  }
+) {
+  const duplicateCount = await tx.marsAuditScan.count({
+    where: {
+      auditSessionId: options.auditSessionId,
+      scannedValue: options.scannedValue,
+    },
+  });
+
+  const duplicateInSession = duplicateCount > 0;
+  const matchedUnit = await tx.marsUnit.findUnique({
+    where: { requestNumber: options.scannedValue },
+    select: AUDIT_FEEDBACK_UNIT_SELECT,
+  });
+
+  const scan = await tx.marsAuditScan.create({
+    data: {
+      auditSessionId: options.auditSessionId,
+      scannedValue: options.scannedValue,
+      marsUnitId: matchedUnit?.id ?? null,
+      matched: Boolean(matchedUnit),
+      duplicateInSession,
+      manualEntry: options.manualEntry,
+      userId: options.userId,
+      createdAt: options.createdAt,
+    },
+    select: {
+      id: true,
+      scannedValue: true,
+      matched: true,
+      duplicateInSession: true,
+      createdAt: true,
+    },
+  });
+
+  let unit = matchedUnit;
+
+  if (matchedUnit) {
+    unit = await tx.marsUnit.update({
+      where: { id: matchedUnit.id },
+      data: {
+        lastScannedAt: options.createdAt,
+        lastAuditSeenAt: options.createdAt,
+      },
+      select: AUDIT_FEEDBACK_UNIT_SELECT,
+    });
+
+    await tx.marsEvent.create({
+      data: {
+        marsUnitId: matchedUnit.id,
+        type: "audit_seen",
+        userId: options.userId,
+        payload: {
+          auditSessionId: options.auditSessionId,
+          scannedValue: options.scannedValue,
+          duplicateInSession,
+        },
+      },
+    });
+  }
+
+  return {
+    scanId: scan.id,
+    scannedValue: scan.scannedValue,
+    matched: scan.matched,
+    duplicateInSession: scan.duplicateInSession,
+    manualEntry: options.manualEntry,
+    createdAt: scan.createdAt,
+    unit: unit ?? null,
+  };
+}
+
+async function recomputeDuplicateFlags(
+  tx: Prisma.TransactionClient,
+  auditSessionId: string
+) {
+  const scans = await tx.marsAuditScan.findMany({
+    where: { auditSessionId },
+    select: {
+      id: true,
+      scannedValue: true,
+      createdAt: true,
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  });
+
+  const seen = new Set<string>();
+  for (const scan of scans) {
+    const duplicateInSession = seen.has(scan.scannedValue);
+    seen.add(scan.scannedValue);
+
+    await tx.marsAuditScan.update({
+      where: { id: scan.id },
+      data: { duplicateInSession },
+    });
+  }
+}
+
+async function getMarsAuditSummary(
+  tx: Prisma.TransactionClient,
+  auditSessionId: string
+): Promise<MarsAuditSummary> {
+  const [totalScans, matchedScans, duplicateScans, unknownScans] = await Promise.all([
+    tx.marsAuditScan.count({ where: { auditSessionId } }),
+    tx.marsAuditScan.count({ where: { auditSessionId, matched: true } }),
+    tx.marsAuditScan.count({ where: { auditSessionId, duplicateInSession: true } }),
+    tx.marsAuditScan.count({ where: { auditSessionId, matched: false } }),
+  ]);
+
+  return {
+    totalScans,
+    matchedScans,
+    duplicateScans,
+    unknownScans,
+  };
+}
+
+function deriveAuditResult(
+  matched: boolean,
+  duplicateInSession: boolean,
+  unit: AuditFeedbackUnit | null
+): MarsAuditScanResult["result"] {
+  if (duplicateInSession) {
+    return "duplicate";
+  }
+  if (!matched || !unit) {
+    return "unknown";
+  }
+  return unit.staged ? "matched_staged" : "matched";
+}
+
+async function buildAuditReport(
+  db: Prisma.TransactionClient | typeof prisma,
+  auditSessionId: string
+): Promise<BuiltAuditReport> {
+  const session = await db.marsAuditSession.findUnique({
+    where: { id: auditSessionId },
+    select: AUDIT_DETAIL_SESSION_SELECT,
+  });
+
+  if (!session) {
+    throw new Error("Audit session not found.");
+  }
+
   const metadata = parseAuditSessionMetadata(session.notes);
   const importBatch = metadata?.importBatchId
-    ? await prisma.marsImportBatch.findUnique({
+    ? await db.marsImportBatch.findUnique({
         where: { id: metadata.importBatchId },
         select: {
           id: true,
@@ -452,7 +845,7 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
     : null;
 
   const snapshotUnits = importBatch
-    ? await prisma.marsUnit.findMany({
+    ? await db.marsUnit.findMany({
         where: { lastKnownImportBatchId: importBatch.id },
         select: {
           id: true,
@@ -543,40 +936,27 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
 
     if (!snapshotByUnitId.has(unit.id)) {
       physicallyPresentButUnexpected.push(
-        toAuditUnitRow(unit, "Seen in this audit but missing from the import snapshot used at submission.")
+        toAuditUnitRow(
+          unit,
+          "Seen in this audit but missing from the import snapshot used for this session."
+        )
       );
       continue;
     }
 
     if (!isExpectedInWarehouse(unit)) {
       physicallyPresentButUnexpected.push(
-        toAuditUnitRow(unit, "Seen in this audit but imported statuses indicate it should not still be in warehouse.")
+        toAuditUnitRow(
+          unit,
+          "Seen in this audit but imported statuses indicate it should not still be in warehouse."
+        )
       );
     }
   }
 
   return {
-    session: toSubmittedAuditSessionSummary(session),
-    scans: session.marsAuditScans.map((scan) => ({
-      id: scan.id,
-      scannedValue: scan.scannedValue,
-      matched: scan.matched,
-      duplicateInSession: scan.duplicateInSession,
-      createdAt: scan.createdAt,
-          unit: scan.marsUnit
-        ? {
-            requestNumber: scan.marsUnit.requestNumber,
-            orderNumber: scan.marsUnit.orderNumber,
-            vendor: scan.marsUnit.vendor,
-            serialNumber: scan.marsUnit.serialNumber,
-            modelNumber: scan.marsUnit.modelNumber,
-            dateRequested: scan.marsUnit.dateRequested,
-            returnStatus: scan.marsUnit.returnStatus,
-            staged: scan.marsUnit.staged,
-          }
-        : null,
-    })),
-    report: {
+    importBatchId: importBatch?.id ?? null,
+    payload: {
       importBatch,
       summary: {
         expectedMissing: expectedMissing.length,
@@ -594,116 +974,6 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
   };
 }
 
-async function processAuditScan(
-  tx: Prisma.TransactionClient,
-  options: {
-    auditSessionId: string;
-    scannedValue: string;
-    userId: string | null;
-    createdAt: Date;
-  }
-) {
-  const duplicateCount = await tx.marsAuditScan.count({
-    where: {
-      auditSessionId: options.auditSessionId,
-      scannedValue: options.scannedValue,
-    },
-  });
-
-  const duplicateInSession = duplicateCount > 0;
-  const matchedUnit = await tx.marsUnit.findUnique({
-    where: { requestNumber: options.scannedValue },
-    select: AUDIT_FEEDBACK_UNIT_SELECT,
-  });
-
-  const scan = await tx.marsAuditScan.create({
-    data: {
-      auditSessionId: options.auditSessionId,
-      scannedValue: options.scannedValue,
-      marsUnitId: matchedUnit?.id ?? null,
-      matched: Boolean(matchedUnit),
-      duplicateInSession,
-      userId: options.userId,
-      createdAt: options.createdAt,
-    },
-    select: {
-      id: true,
-      scannedValue: true,
-      matched: true,
-      duplicateInSession: true,
-      createdAt: true,
-    },
-  });
-
-  let unit = matchedUnit;
-
-  if (matchedUnit) {
-    unit = await tx.marsUnit.update({
-      where: { id: matchedUnit.id },
-      data: {
-        lastScannedAt: options.createdAt,
-        lastAuditSeenAt: options.createdAt,
-      },
-      select: AUDIT_FEEDBACK_UNIT_SELECT,
-    });
-
-    await tx.marsEvent.create({
-      data: {
-        marsUnitId: matchedUnit.id,
-        type: "audit_seen",
-        userId: options.userId,
-        payload: {
-          auditSessionId: options.auditSessionId,
-          scannedValue: options.scannedValue,
-          duplicateInSession,
-        },
-      },
-    });
-  }
-
-  return {
-    scanId: scan.id,
-    scannedValue: scan.scannedValue,
-    matched: scan.matched,
-    duplicateInSession: scan.duplicateInSession,
-    createdAt: scan.createdAt,
-    unit: unit ?? null,
-  };
-}
-
-async function getMarsAuditSummary(
-  tx: Prisma.TransactionClient,
-  auditSessionId: string
-): Promise<MarsAuditSummary> {
-  const [totalScans, matchedScans, duplicateScans, unknownScans] = await Promise.all([
-    tx.marsAuditScan.count({ where: { auditSessionId } }),
-    tx.marsAuditScan.count({ where: { auditSessionId, matched: true } }),
-    tx.marsAuditScan.count({ where: { auditSessionId, duplicateInSession: true } }),
-    tx.marsAuditScan.count({ where: { auditSessionId, matched: false } }),
-  ]);
-
-  return {
-    totalScans,
-    matchedScans,
-    duplicateScans,
-    unknownScans,
-  };
-}
-
-function deriveAuditResult(
-  matched: boolean,
-  duplicateInSession: boolean,
-  unit: AuditFeedbackUnit | null
-): MarsAuditScanResult["result"] {
-  if (duplicateInSession) {
-    return "duplicate";
-  }
-  if (!matched || !unit) {
-    return "unknown";
-  }
-  return unit.staged ? "matched_staged" : "matched";
-}
-
 function toSubmittedAuditSessionSummary(
   session: AuditDetailSessionRecord | AuditListSessionRecord
 ): SubmittedAuditSessionSummary {
@@ -713,6 +983,7 @@ function toSubmittedAuditSessionSummary(
     id: session.id,
     startedAt: session.startedAt,
     completedAt: session.completedAt,
+    lastAmendedAt: session.lastAmendedAt ?? null,
     scanCount: session._count.marsAuditScans,
     summary: {
       totalScans: session._count.marsAuditScans,

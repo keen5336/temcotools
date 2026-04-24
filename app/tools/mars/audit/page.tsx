@@ -14,8 +14,8 @@ export default async function MarsAuditPage() {
       <main className="max-w-6xl mx-auto px-4 py-8">
         <h1 className="text-2xl font-semibold text-base-content mb-1">MARS Audit</h1>
         <p className="text-base-content/70 mb-6">
-          Zebra-scanner audit capture with device-local draft storage, resumable sessions, and
-          completed audit history.
+          Capture scans from the Zebra, submit them into an amendable audit session, and generate
+          saved reports only when the session is ready.
         </p>
         <MarsNav />
         <MarsAuditClient initialHistory={auditHistory} />

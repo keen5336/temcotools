@@ -51,6 +51,8 @@ interface FilterState {
   returnStatus: string;
   replacementNeeded: string;
   staged: "all" | "true" | "false";
+  archived: "false" | "true";
+  needsAttentionOnly: boolean;
   returnStatusMode: MarsReturnStatusMode;
   dateRequestedOn: string;
   lastImportedOn: string;
@@ -69,6 +71,8 @@ const DEFAULT_FILTERS: FilterState = {
   returnStatus: "",
   replacementNeeded: "",
   staged: "all",
+  archived: "false",
+  needsAttentionOnly: true,
   returnStatusMode: "exclude_received",
   dateRequestedOn: "",
   lastImportedOn: "",
@@ -153,6 +157,8 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
       pushParam(searchParams, "lastImportedOn", filters.lastImportedOn);
       pushParam(searchParams, "lastAuditSeenOn", filters.lastAuditSeenOn);
       if (filters.staged !== "all") searchParams.set("staged", filters.staged);
+      searchParams.set("archived", filters.archived);
+      if (filters.needsAttentionOnly) searchParams.set("needsAttentionOnly", "true");
       searchParams.set("returnStatusMode", filters.returnStatusMode);
       searchParams.set("sortBy", sortBy);
       searchParams.set("sortDirection", sortDirection);
@@ -202,6 +208,34 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
       items: current.items.map((item) =>
         item.requestNumber === requestNumber ? payload.unit : item
       ),
+    }));
+  }
+
+  async function handleArchive(requestNumber: string, archived: boolean) {
+    const response = await fetch(`/api/mars/unit/${encodeURIComponent(requestNumber)}/archive`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived }),
+    });
+
+    const payload = (await response.json()) as
+      | { ok: true; unit: MarsUnitListItem }
+      | { ok: false; error: string };
+
+    if (!response.ok || !payload.ok) {
+      setError("error" in payload ? payload.error : "Failed to update archive state.");
+      return;
+    }
+
+    setError(null);
+    setData((current) => ({
+      ...current,
+      items:
+        filters.archived === "false" && archived
+          ? current.items.filter((item) => item.requestNumber !== requestNumber)
+          : current.items.map((item) =>
+              item.requestNumber === requestNumber ? payload.unit : item
+            ),
     }));
   }
 
@@ -266,6 +300,31 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
                 <option value="received_only">Received Only</option>
               </select>
             </label>
+
+            <div className="flex flex-col justify-end gap-3">
+              <label className="label cursor-pointer justify-start gap-3">
+                <input
+                  type="checkbox"
+                  className="checkbox checkbox-sm"
+                  checked={filters.needsAttentionOnly}
+                  onChange={(event) => updateFilter("needsAttentionOnly", event.target.checked)}
+                />
+                <span className="label-text">Needs attention only</span>
+              </label>
+              <label className="form-control">
+                <span className="label-text mb-2">Inventory Scope</span>
+                <select
+                  className="select select-bordered"
+                  value={filters.archived}
+                  onChange={(event) =>
+                    updateFilter("archived", event.target.value as FilterState["archived"])
+                  }
+                >
+                  <option value="false">Working Inventory</option>
+                  <option value="true">Archived Units</option>
+                </select>
+              </label>
+            </div>
 
             <div className="form-control">
               <span className="label-text mb-2">Columns</span>
@@ -356,13 +415,20 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
                         {renderCell(column.id, item, handleToggle)}
                       </td>
                     ))}
-                    <td>
+                    <td className="space-x-2">
                       <Link
                         href={`/tools/mars/inventory/${encodeURIComponent(item.requestNumber)}`}
                         className="btn btn-xs btn-outline"
                       >
                         Details
                       </Link>
+                      <button
+                        type="button"
+                        className={`btn btn-xs ${item.archivedAt ? "btn-secondary" : "btn-ghost"}`}
+                        onClick={() => handleArchive(item.requestNumber, !item.archivedAt)}
+                      >
+                        {item.archivedAt ? "Unarchive" : "Archive"}
+                      </button>
                     </td>
                   </tr>
                 ))

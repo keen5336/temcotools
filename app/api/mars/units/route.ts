@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import {
   listMarsUnits,
+  parseArchivedFilter,
   parseMarsUnitSortField,
   parseReturnStatusMode,
   parseSortDirection,
@@ -35,7 +36,9 @@ export async function GET(req: NextRequest) {
   const returnStatus = searchParams.get("returnStatus");
   const replacementNeeded = searchParams.get("replacementNeeded");
   const staged = parseStagedFilter(searchParams.get("staged"));
+  const archived = parseArchivedFilter(searchParams.get("archived"));
   const returnStatusMode = parseReturnStatusMode(searchParams.get("returnStatusMode"));
+  const needsAttentionOnly = searchParams.get("needsAttentionOnly") === "true";
   const dateRequestedOn = searchParams.get("dateRequestedOn");
   const lastImportedOn = searchParams.get("lastImportedOn");
   const lastAuditSeenOn = searchParams.get("lastAuditSeenOn");
@@ -56,6 +59,8 @@ export async function GET(req: NextRequest) {
     returnStatus,
     replacementNeeded,
     staged,
+    archived,
+    needsAttentionOnly,
     returnStatusMode,
     dateRequestedOn,
     lastImportedOn,

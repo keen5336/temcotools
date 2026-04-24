@@ -18,8 +18,9 @@ export default async function MarsInventoryPage() {
       <main className="max-w-[1400px] mx-auto px-4 py-8">
         <h1 className="text-2xl font-semibold text-base-content mb-1">MARS Inventory</h1>
         <p className="text-base-content/70 mb-6">
-          Browse the latest imported MARS units, filter and sort the working inventory, and manage
-          local staged state. Received return-status items are hidden by default.
+          Focus on the working inventory by default. Archived units stay out of the main view
+          unless you explicitly switch to them, and the default filter favors units that still need
+          attention.
         </p>
         <MarsNav />
         <MarsInventoryClient initialResponse={{ ok: true, ...initialResponse }} />

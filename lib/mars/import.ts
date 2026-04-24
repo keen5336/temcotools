@@ -83,6 +83,8 @@ type MarsUnitImportData = {
   requestStatus: string | null;
   returnStatus: string | null;
   replacementNeeded: string | null;
+  presentInLatestImport: boolean;
+  missingFromLatestImportAt: Date | null;
   lastImportedAt: Date;
   lastKnownImportBatchId: string;
 };
@@ -149,6 +151,7 @@ export async function importMarsWorkbook({
 
     let insertedCount = 0;
     let updatedCount = 0;
+    const importedRequestNumbers = new Set(parsed.rows.map((row) => row.requestNumber));
 
     for (const row of parsed.rows) {
       const importData = buildMarsUnitImportData(row, importedAt, batch.id);
@@ -209,6 +212,46 @@ export async function importMarsWorkbook({
         requestStatus: importData.requestStatus,
         returnStatus: importData.returnStatus,
         replacementNeeded: importData.replacementNeeded,
+      });
+    }
+
+    const unitsMissingFromLatestImport = await tx.marsUnit.findMany({
+      where: {
+        presentInLatestImport: true,
+        requestNumber: {
+          notIn: Array.from(importedRequestNumbers),
+        },
+      },
+      select: {
+        id: true,
+        requestNumber: true,
+      },
+    });
+
+    if (unitsMissingFromLatestImport.length) {
+      await tx.marsUnit.updateMany({
+        where: {
+          id: {
+            in: unitsMissingFromLatestImport.map((unit) => unit.id),
+          },
+        },
+        data: {
+          presentInLatestImport: false,
+          missingFromLatestImportAt: importedAt,
+        },
+      });
+
+      await tx.marsEvent.createMany({
+        data: unitsMissingFromLatestImport.map((unit) => ({
+          marsUnitId: unit.id,
+          type: "missing_from_latest_import",
+          userId: uploadedByUserId ?? null,
+          payload: {
+            batchId: batch.id,
+            requestNumber: unit.requestNumber,
+            missingFromLatestImportAt: importedAt.toISOString(),
+          },
+        })),
       });
     }
 
@@ -404,6 +447,8 @@ function buildMarsUnitImportData(
     requestStatus: row.requestStatus,
     returnStatus: row.returnStatus,
     replacementNeeded: row.replacementNeeded,
+    presentInLatestImport: true,
+    missingFromLatestImportAt: null,
     lastImportedAt: importedAt,
     lastKnownImportBatchId: batchId,
   };

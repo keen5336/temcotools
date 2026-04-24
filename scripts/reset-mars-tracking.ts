@@ -18,6 +18,7 @@ async function main() {
 
     await prisma.$transaction(async (tx) => {
       await tx.marsAuditScan.deleteMany({});
+      await tx.marsAuditReport.deleteMany({});
       await tx.marsAuditSession.deleteMany({});
       await tx.marsEvent.deleteMany({});
       await tx.marsUnit.deleteMany({});
@@ -28,6 +29,7 @@ async function main() {
 
     const deleted = {
       auditScans: countsBefore.auditScans - countsAfter.auditScans,
+      auditReports: countsBefore.auditReports - countsAfter.auditReports,
       auditSessions: countsBefore.auditSessions - countsAfter.auditSessions,
       marsEvents: countsBefore.marsEvents - countsAfter.marsEvents,
       marsUnits: countsBefore.marsUnits - countsAfter.marsUnits,
@@ -41,8 +43,9 @@ async function main() {
 }
 
 async function getCounts(prisma: PrismaClient) {
-  const [auditScans, auditSessions, marsEvents, marsUnits, importBatches] = await Promise.all([
+  const [auditScans, auditReports, auditSessions, marsEvents, marsUnits, importBatches] = await Promise.all([
     prisma.marsAuditScan.count(),
+    prisma.marsAuditReport.count(),
     prisma.marsAuditSession.count(),
     prisma.marsEvent.count(),
     prisma.marsUnit.count(),
@@ -51,6 +54,7 @@ async function getCounts(prisma: PrismaClient) {
 
   return {
     auditScans,
+    auditReports,
     auditSessions,
     marsEvents,
     marsUnits,

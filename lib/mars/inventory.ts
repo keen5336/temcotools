@@ -14,6 +14,10 @@ const MARS_UNIT_LIST_SELECT = {
   returnStatus: true,
   replacementNeeded: true,
   staged: true,
+  archivedAt: true,
+  archivedReason: true,
+  presentInLatestImport: true,
+  missingFromLatestImportAt: true,
   lastImportedAt: true,
   lastAuditSeenAt: true,
   lastScannedAt: true,
@@ -52,6 +56,8 @@ export interface ListMarsUnitsOptions {
   returnStatus?: string | null;
   replacementNeeded?: string | null;
   staged?: boolean | null;
+  archived?: boolean | null;
+  needsAttentionOnly?: boolean | null;
   returnStatusMode?: MarsReturnStatusMode | null;
   dateRequestedOn?: string | null;
   lastImportedOn?: string | null;
@@ -100,6 +106,12 @@ const DEFAULT_SORT_BY: MarsUnitSortField = "requestNumber";
 const DEFAULT_SORT_DIRECTION: SortDirection = "asc";
 
 export function parseStagedFilter(value: string | null): boolean | null {
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
+}
+
+export function parseArchivedFilter(value: string | null): boolean | null {
   if (value === "true") return true;
   if (value === "false") return false;
   return null;
@@ -225,6 +237,58 @@ export async function setMarsUnitStaged(options: {
   });
 }
 
+export async function setMarsUnitArchived(options: {
+  requestNumber: string;
+  archived: boolean;
+  reason?: string | null;
+  userId?: string | null;
+}) {
+  return prisma.$transaction(async (tx) => {
+    const unit = await tx.marsUnit.findUnique({
+      where: { requestNumber: options.requestNumber },
+      select: {
+        id: true,
+        requestNumber: true,
+        archivedAt: true,
+        archivedReason: true,
+      },
+    });
+
+    if (!unit) {
+      return null;
+    }
+
+    const archivedAt = options.archived ? new Date() : null;
+    const archivedReason = options.archived ? options.reason?.trim() || "Archived from the working inventory." : null;
+
+    const updated = await tx.marsUnit.update({
+      where: { requestNumber: options.requestNumber },
+      data: {
+        archivedAt,
+        archivedReason,
+      },
+      select: MARS_UNIT_LIST_SELECT,
+    });
+
+    await tx.marsEvent.create({
+      data: {
+        marsUnitId: unit.id,
+        type: options.archived ? "archived" : "unarchived",
+        userId: options.userId ?? null,
+        payload: {
+          requestNumber: unit.requestNumber,
+          previousArchivedAt: unit.archivedAt?.toISOString() ?? null,
+          previousArchivedReason: unit.archivedReason,
+          archivedAt: archivedAt?.toISOString() ?? null,
+          archivedReason,
+        },
+      },
+    });
+
+    return updated;
+  });
+}
+
 const MARS_UNIT_DETAIL_SELECT = {
   id: true,
   requestNumber: true,
@@ -238,6 +302,10 @@ const MARS_UNIT_DETAIL_SELECT = {
   returnStatus: true,
   replacementNeeded: true,
   staged: true,
+  archivedAt: true,
+  archivedReason: true,
+  presentInLatestImport: true,
+  missingFromLatestImportAt: true,
   lastImportedAt: true,
   lastScannedAt: true,
   lastAuditSeenAt: true,
@@ -311,11 +379,16 @@ export async function getMarsUnitDetail(requestNumber: string): Promise<MarsUnit
 function buildMarsUnitsWhere(options: ListMarsUnitsOptions): Prisma.MarsUnitWhereInput {
   const q = options.q?.trim();
   const staged = options.staged ?? null;
+  const archived = options.archived ?? false;
   const returnStatusMode = options.returnStatusMode ?? DEFAULT_RETURN_STATUS_MODE;
   const and: Prisma.MarsUnitWhereInput[] = [];
 
   if (typeof staged === "boolean") {
     and.push({ staged });
+  }
+
+  if (typeof archived === "boolean") {
+    and.push(archived ? { archivedAt: { not: null } } : { archivedAt: null });
   }
 
   if (q) {
@@ -355,7 +428,112 @@ function buildMarsUnitsWhere(options: ListMarsUnitsOptions): Prisma.MarsUnitWher
     and.push({ returnStatus: { equals: "received", mode: "insensitive" } });
   }
 
+  if (options.needsAttentionOnly) {
+    and.push({
+      OR: [
+        { presentInLatestImport: false },
+        { missingFromLatestImportAt: { not: null } },
+        { staged: true },
+        { lastAuditSeenAt: null },
+        { returnStatus: { equals: "received", mode: "insensitive" } },
+        { returnStatus: { equals: "shipped", mode: "insensitive" } },
+      ],
+    });
+  }
+
   return and.length ? { AND: and } : {};
+}
+
+export async function getMarsOperationalOverview() {
+  const latestImportBatch = await getLatestMarsImportBatch();
+
+  const [activeUnits, archivedUnits, stagedUnits, missingFromLatestImport, notSeenInAudit, shippedOrReceived, recentProblems] =
+    await Promise.all([
+      prisma.marsUnit.count({ where: { archivedAt: null, presentInLatestImport: true } }),
+      prisma.marsUnit.count({ where: { archivedAt: { not: null } } }),
+      prisma.marsUnit.count({ where: { archivedAt: null, staged: true } }),
+      prisma.marsUnit.count({ where: { archivedAt: null, presentInLatestImport: false } }),
+      prisma.marsUnit.count({
+        where: {
+          archivedAt: null,
+          presentInLatestImport: true,
+          lastAuditSeenAt: null,
+        },
+      }),
+      prisma.marsUnit.count({
+        where: {
+          archivedAt: null,
+          presentInLatestImport: true,
+          OR: [
+            { returnStatus: { equals: "shipped", mode: "insensitive" } },
+            { returnStatus: { equals: "received", mode: "insensitive" } },
+          ],
+        },
+      }),
+      prisma.marsUnit.findMany({
+        where: {
+          archivedAt: null,
+          OR: [
+            { presentInLatestImport: false },
+            { lastAuditSeenAt: null },
+            { staged: true },
+            { returnStatus: { equals: "shipped", mode: "insensitive" } },
+            { returnStatus: { equals: "received", mode: "insensitive" } },
+          ],
+        },
+        select: {
+          requestNumber: true,
+          orderNumber: true,
+          vendor: true,
+          modelNumber: true,
+          returnStatus: true,
+          staged: true,
+          presentInLatestImport: true,
+          missingFromLatestImportAt: true,
+          lastAuditSeenAt: true,
+        },
+        orderBy: [{ lastImportedAt: "desc" }, { requestNumber: "asc" }],
+        take: 12,
+      }),
+    ]);
+
+  return {
+    latestImportBatch,
+    summary: {
+      activeUnits,
+      archivedUnits,
+      stagedUnits,
+      missingFromLatestImport,
+      notSeenInAudit,
+      shippedOrReceived,
+    },
+    recentProblems: recentProblems.map((unit) => ({
+      ...unit,
+      reason: deriveProblemReason(unit),
+    })),
+  };
+}
+
+function deriveProblemReason(unit: {
+  staged: boolean;
+  presentInLatestImport: boolean;
+  missingFromLatestImportAt: Date | null;
+  lastAuditSeenAt: Date | null;
+  returnStatus: string | null;
+}) {
+  if (!unit.presentInLatestImport || unit.missingFromLatestImportAt) {
+    return "Missing from the latest MARS import and needs review.";
+  }
+  if (unit.returnStatus?.toLowerCase() === "received" || unit.returnStatus?.toLowerCase() === "shipped") {
+    return "MARS says this item has already moved out of the warehouse.";
+  }
+  if (unit.staged) {
+    return "Still marked as staged locally.";
+  }
+  if (!unit.lastAuditSeenAt) {
+    return "Has not been confirmed by an audit yet.";
+  }
+  return "Needs review.";
 }
 
 function buildMarsUnitsOrderBy(options: ListMarsUnitsOptions): Prisma.MarsUnitOrderByWithRelationInput[] {

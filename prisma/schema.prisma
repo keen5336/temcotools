@@ -20,6 +20,7 @@ model User {
   marsEvents          MarsEvent[]
   marsAuditSessions   MarsAuditSession[]
   marsAuditScans      MarsAuditScan[]
+  marsAuditReports    MarsAuditReport[]
 }
 
 model Pipeline {
@@ -42,6 +43,7 @@ model MarsImportBatch {
   notes          String?
   uploadedByUser User?      @relation(fields: [uploadedByUserId], references: [id])
   marsUnits      MarsUnit[]
+  marsAuditReports MarsAuditReport[]
 }
 
 model MarsUnit {
@@ -57,6 +59,10 @@ model MarsUnit {
   returnStatus           String?
   replacementNeeded      String?
   staged                 Boolean          @default(false)
+  archivedAt             DateTime?
+  archivedReason         String?
+  presentInLatestImport  Boolean          @default(true)
+  missingFromLatestImportAt DateTime?
   lastImportedAt         DateTime?
   lastScannedAt          DateTime?
   lastAuditSeenAt        DateTime?
@@ -84,9 +90,13 @@ model MarsAuditSession {
   startedByUserId String?
   startedAt       DateTime        @default(now())
   completedAt     DateTime?
+  lastAmendedAt   DateTime?
   notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
   startedByUser   User?           @relation(fields: [startedByUserId], references: [id])
   marsAuditScans  MarsAuditScan[]
+  marsAuditReports MarsAuditReport[]
 }
 
 model MarsAuditScan {
@@ -96,11 +106,26 @@ model MarsAuditScan {
   marsUnitId         String?
   matched            Boolean          @default(false)
   duplicateInSession Boolean          @default(false)
+  manualEntry        Boolean          @default(false)
   userId             String?
   createdAt          DateTime         @default(now())
   auditSession       MarsAuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade)
   marsUnit           MarsUnit?        @relation(fields: [marsUnitId], references: [id])
   user               User?            @relation(fields: [userId], references: [id])
+}
+
+model MarsAuditReport {
+  id                String           @id @default(cuid())
+  auditSessionId    String
+  importBatchId     String?
+  generatedByUserId String?
+  label             String?
+  createdAt         DateTime         @default(now())
+  summary           Json
+  payload           Json
+  auditSession      MarsAuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade)
+  importBatch       MarsImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  generatedByUser   User?            @relation(fields: [generatedByUserId], references: [id])
 }
 
 enum Role {
