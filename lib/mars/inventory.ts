@@ -154,7 +154,7 @@ export function parseMarsUnitSortField(value: string | null): MarsUnitSortField 
 
 export async function listMarsUnits(options: ListMarsUnitsOptions): Promise<ListMarsUnitsResult> {
   const page = normalizePositiveInt(options.page, 1);
-  const limit = Math.min(normalizePositiveInt(options.limit, 25), 100);
+  const limit = Math.min(normalizePositiveInt(options.limit, 25), 200);
   const where = buildMarsUnitsWhere(options);
   const orderBy = buildMarsUnitsOrderBy(options);
 

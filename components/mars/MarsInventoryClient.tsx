@@ -3,8 +3,6 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type {
-  MarsReturnStatusMode,
-  MarsUnitFilterOptions,
   MarsUnitListItem,
   MarsUnitSortField,
   SortDirection,
@@ -41,42 +39,18 @@ type ColumnId =
 
 interface FilterState {
   q: string;
-  requestNumber: string;
-  orderNumber: string;
-  vendor: string;
-  serialNumber: string;
-  modelNumber: string;
-  vendorRaNumber: string;
   requestStatus: string;
   returnStatus: string;
-  replacementNeeded: string;
   staged: "all" | "true" | "false";
-  archived: "false" | "true";
-  needsAttentionOnly: boolean;
-  returnStatusMode: MarsReturnStatusMode;
-  dateRequestedOn: string;
-  lastImportedOn: string;
-  lastAuditSeenOn: string;
+  archived: boolean;
 }
 
 const DEFAULT_FILTERS: FilterState = {
   q: "",
-  requestNumber: "",
-  orderNumber: "",
-  vendor: "",
-  serialNumber: "",
-  modelNumber: "",
-  vendorRaNumber: "",
   requestStatus: "",
   returnStatus: "",
-  replacementNeeded: "",
   staged: "all",
-  archived: "false",
-  needsAttentionOnly: true,
-  returnStatusMode: "exclude_received",
-  dateRequestedOn: "",
-  lastImportedOn: "",
-  lastAuditSeenOn: "",
+  archived: false,
 };
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
@@ -115,6 +89,7 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [data, setData] = useState(initialResponse);
   const [page, setPage] = useState(initialResponse.page);
+  const [pageSize, setPageSize] = useState(initialResponse.limit);
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(DEFAULT_VISIBLE_COLUMNS);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -144,26 +119,14 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
     startTransition(async () => {
       const searchParams = new URLSearchParams();
       pushParam(searchParams, "q", filters.q);
-      pushParam(searchParams, "requestNumber", filters.requestNumber);
-      pushParam(searchParams, "orderNumber", filters.orderNumber);
-      pushParam(searchParams, "vendor", filters.vendor);
-      pushParam(searchParams, "serialNumber", filters.serialNumber);
-      pushParam(searchParams, "modelNumber", filters.modelNumber);
-      pushParam(searchParams, "vendorRaNumber", filters.vendorRaNumber);
       pushParam(searchParams, "requestStatus", filters.requestStatus);
       pushParam(searchParams, "returnStatus", filters.returnStatus);
-      pushParam(searchParams, "replacementNeeded", filters.replacementNeeded);
-      pushParam(searchParams, "dateRequestedOn", filters.dateRequestedOn);
-      pushParam(searchParams, "lastImportedOn", filters.lastImportedOn);
-      pushParam(searchParams, "lastAuditSeenOn", filters.lastAuditSeenOn);
       if (filters.staged !== "all") searchParams.set("staged", filters.staged);
-      searchParams.set("archived", filters.archived);
-      if (filters.needsAttentionOnly) searchParams.set("needsAttentionOnly", "true");
-      searchParams.set("returnStatusMode", filters.returnStatusMode);
+      searchParams.set("archived", String(filters.archived));
       searchParams.set("sortBy", sortBy);
       searchParams.set("sortDirection", sortDirection);
       searchParams.set("page", String(page));
-      searchParams.set("limit", String(initialResponse.limit));
+      searchParams.set("limit", String(pageSize));
 
       const response = await fetch(`/api/mars/units?${searchParams.toString()}`);
       const payload = (await response.json()) as MarsInventoryResponse | { error?: string };
@@ -176,7 +139,7 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
       setError(null);
       setData(payload);
     });
-  }, [filters, initialResponse.limit, page, sortBy, sortDirection]);
+  }, [filters, page, pageSize, sortBy, sortDirection]);
 
   const columnLookup = useMemo(
     () => new Map(ALL_COLUMNS.map((column) => [column.id, column] as const)),
@@ -231,7 +194,7 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
     setData((current) => ({
       ...current,
       items:
-        filters.archived === "false" && archived
+        !filters.archived && archived
           ? current.items.filter((item) => item.requestNumber !== requestNumber)
           : current.items.map((item) =>
               item.requestNumber === requestNumber ? payload.unit : item
@@ -255,6 +218,7 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
 
   function resetFilters() {
     setPage(1);
+    setPageSize(50);
     setSortBy("requestNumber");
     setSortDirection("asc");
     setFilters(DEFAULT_FILTERS);
@@ -274,9 +238,9 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
     <div className="space-y-5">
       <section className="card bg-base-100 border border-base-200 shadow-sm">
         <div className="card-body gap-4">
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_240px_240px] gap-4">
+          <div className="flex flex-col lg:flex-row gap-3">
             <label className="form-control">
-              <span className="label-text mb-2">Quick Search</span>
+              <span className="label-text mb-2">Search</span>
               <input
                 type="search"
                 value={filters.q}
@@ -285,46 +249,22 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
                 className="input input-bordered w-full"
               />
             </label>
-
-            <label className="form-control">
-              <span className="label-text mb-2">Return Status View</span>
+            <label className="form-control lg:w-40">
+              <span className="label-text mb-2">Rows</span>
               <select
                 className="select select-bordered"
-                value={filters.returnStatusMode}
-                onChange={(event) =>
-                  updateFilter("returnStatusMode", event.target.value as MarsReturnStatusMode)
-                }
+                value={String(pageSize)}
+                onChange={(event) => {
+                  setPage(1);
+                  setPageSize(Number(event.target.value));
+                }}
               >
-                <option value="exclude_received">Working Inventory</option>
-                <option value="all">All Return Statuses</option>
-                <option value="received_only">Received Only</option>
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
               </select>
             </label>
-
-            <div className="flex flex-col justify-end gap-3">
-              <label className="label cursor-pointer justify-start gap-3">
-                <input
-                  type="checkbox"
-                  className="checkbox checkbox-sm"
-                  checked={filters.needsAttentionOnly}
-                  onChange={(event) => updateFilter("needsAttentionOnly", event.target.checked)}
-                />
-                <span className="label-text">Needs attention only</span>
-              </label>
-              <label className="form-control">
-                <span className="label-text mb-2">Inventory Scope</span>
-                <select
-                  className="select select-bordered"
-                  value={filters.archived}
-                  onChange={(event) =>
-                    updateFilter("archived", event.target.value as FilterState["archived"])
-                  }
-                >
-                  <option value="false">Working Inventory</option>
-                  <option value="true">Archived Units</option>
-                </select>
-              </label>
-            </div>
 
             <div className="form-control">
               <span className="label-text mb-2">Columns</span>
@@ -351,15 +291,77 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
             </div>
           </div>
 
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+            <label className="form-control">
+              <span className="label-text mb-2">Request Status</span>
+              <select
+                className="select select-bordered"
+                value={filters.requestStatus}
+                onChange={(event) => updateFilter("requestStatus", event.target.value)}
+              >
+                <option value="">All</option>
+                {data.filterOptions.requestStatuses.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="form-control">
+              <span className="label-text mb-2">Return Status</span>
+              <select
+                className="select select-bordered"
+                value={filters.returnStatus}
+                onChange={(event) => updateFilter("returnStatus", event.target.value)}
+              >
+                <option value="">All</option>
+                {data.filterOptions.returnStatuses.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="form-control">
+              <span className="label-text mb-2">Staged</span>
+              <select
+                className="select select-bordered"
+                value={filters.staged}
+                onChange={(event) => updateFilter("staged", event.target.value as FilterState["staged"])}
+              >
+                <option value="all">All</option>
+                <option value="true">Staged</option>
+                <option value="false">Not staged</option>
+              </select>
+            </label>
+
+            <label className="form-control">
+              <span className="label-text mb-2">Archived</span>
+              <select
+                className="select select-bordered"
+                value={filters.archived ? "true" : "false"}
+                onChange={(event) => updateFilter("archived", event.target.value === "true")}
+              >
+                <option value="false">Hide Archived</option>
+                <option value="true">Show Archived</option>
+              </select>
+            </label>
+
+            <div className="flex items-end">
+              <button className="btn btn-outline w-full" onClick={resetFilters}>
+                Reset Filters
+              </button>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-base-content/70">
             <p>
               Showing {data.items.length} of {data.totalCount} units
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <span>{isPending ? "Refreshing..." : `Page ${data.page} of ${data.totalPages}`}</span>
-              <button className="btn btn-xs btn-ghost" onClick={resetFilters}>
-                Reset filters
-              </button>
               <button
                 className="btn btn-xs btn-ghost"
                 onClick={() => setVisibleColumns(DEFAULT_VISIBLE_COLUMNS)}
@@ -398,12 +400,6 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
                   </th>
                 ))}
                 <th>Actions</th>
-              </tr>
-              <tr>
-                {activeColumns.map((column) => (
-                  <th key={`${column.id}-filter`}>{renderFilterControl(column.id, filters, data.filterOptions, updateFilter)}</th>
-                ))}
-                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -512,117 +508,6 @@ function renderCell(
       return formatDate(item.lastAuditSeenAt);
     default:
       return "—";
-  }
-}
-
-function renderFilterControl(
-  columnId: ColumnId,
-  filters: FilterState,
-  filterOptions: MarsUnitFilterOptions,
-  updateFilter: <K extends keyof FilterState>(key: K, value: FilterState[K]) => void
-) {
-  switch (columnId) {
-    case "requestNumber":
-    case "orderNumber":
-    case "vendor":
-    case "serialNumber":
-    case "modelNumber":
-    case "vendorRaNumber":
-      return (
-        <input
-          type="text"
-          value={filters[columnId]}
-          onChange={(event) => updateFilter(columnId, event.target.value)}
-          className="input input-bordered input-xs w-full min-w-28"
-          placeholder="Filter"
-        />
-      );
-    case "requestStatus":
-      return (
-        <select
-          className="select select-bordered select-xs w-full min-w-32"
-          value={filters.requestStatus}
-          onChange={(event) => updateFilter("requestStatus", event.target.value)}
-        >
-          <option value="">All</option>
-          {filterOptions.requestStatuses.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
-      );
-    case "returnStatus":
-      return (
-        <select
-          className="select select-bordered select-xs w-full min-w-32"
-          value={filters.returnStatus}
-          onChange={(event) => updateFilter("returnStatus", event.target.value)}
-        >
-          <option value="">All</option>
-          {filterOptions.returnStatuses.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
-      );
-    case "replacementNeeded":
-      return (
-        <select
-          className="select select-bordered select-xs w-full min-w-28"
-          value={filters.replacementNeeded}
-          onChange={(event) => updateFilter("replacementNeeded", event.target.value)}
-        >
-          <option value="">All</option>
-          {filterOptions.replacementNeededOptions.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
-      );
-    case "staged":
-      return (
-        <select
-          className="select select-bordered select-xs w-full min-w-28"
-          value={filters.staged}
-          onChange={(event) => updateFilter("staged", event.target.value as FilterState["staged"])}
-        >
-          <option value="all">All</option>
-          <option value="true">Staged</option>
-          <option value="false">Not staged</option>
-        </select>
-      );
-    case "dateRequested":
-      return (
-        <input
-          type="date"
-          value={filters.dateRequestedOn}
-          onChange={(event) => updateFilter("dateRequestedOn", event.target.value)}
-          className="input input-bordered input-xs w-full min-w-36"
-        />
-      );
-    case "lastImportedAt":
-      return (
-        <input
-          type="date"
-          value={filters.lastImportedOn}
-          onChange={(event) => updateFilter("lastImportedOn", event.target.value)}
-          className="input input-bordered input-xs w-full min-w-36"
-        />
-      );
-    case "lastAuditSeenAt":
-      return (
-        <input
-          type="date"
-          value={filters.lastAuditSeenOn}
-          onChange={(event) => updateFilter("lastAuditSeenOn", event.target.value)}
-          className="input input-bordered input-xs w-full min-w-36"
-        />
-      );
-    default:
-      return null;
   }
 }
 
