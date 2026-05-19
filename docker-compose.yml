@@ -23,7 +23,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       ADMIN_FILE_MANAGER_ROOT: /data/admin-files
       DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
