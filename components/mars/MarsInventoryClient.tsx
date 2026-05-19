@@ -28,6 +28,7 @@ interface MarsInventoryClientProps {
 
 type ColumnId =
   | "requestNumber"
+  | "thdLink"
   | "operationalBucket"
   | "orderNumber"
   | "vendor"
@@ -70,6 +71,7 @@ export interface InventoryUrlState {
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "requestNumber",
+  "thdLink",
   "operationalBucket",
   "vendor",
   "serialNumber",
@@ -81,10 +83,11 @@ const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "lastAuditSeenAt",
 ];
 
-const COLUMN_STORAGE_KEY = "mars_inventory_visible_columns_v1";
+const COLUMN_STORAGE_KEY = "mars_inventory_visible_columns_v2";
 
 const ALL_COLUMNS: Array<{ id: ColumnId; label: string; sortField: MarsUnitSortField }> = [
   { id: "requestNumber", label: "Request", sortField: "requestNumber" },
+  { id: "thdLink", label: "THD", sortField: "requestNumber" },
   { id: "operationalBucket", label: "Workflow", sortField: "returnStatus" },
   { id: "orderNumber", label: "Order", sortField: "orderNumber" },
   { id: "vendor", label: "Vendor", sortField: "vendor" },
@@ -526,6 +529,17 @@ function renderCell(
           {item.requestNumber}
         </Link>
       );
+    case "thdLink":
+      return (
+        <a
+          href={getThdMarsUrl(item.requestNumber)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn btn-xs btn-outline"
+        >
+          Open
+        </a>
+      );
     case "operationalBucket":
       return (
         <span className={`badge ${bucketBadgeClass(item.operational.bucket)}`}>
@@ -566,6 +580,10 @@ function renderCell(
     default:
       return "—";
   }
+}
+
+function getThdMarsUrl(requestNumber: string) {
+  return `https://delivery-management.homedepot.com/mars/return-submissions/detail/${encodeURIComponent(requestNumber)}`;
 }
 
 function SortIndicator({ active, direction }: { active: boolean; direction: SortDirection }) {

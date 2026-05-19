@@ -18,8 +18,10 @@ export default async function MarsInventoryDetailPage({
     notFound();
   }
 
+  const thdMarsUrl = getThdMarsUrl(unit.requestNumber);
   const detailRows = [
     ["Request Number", unit.requestNumber],
+    ["THD", thdMarsUrl],
     ["Order Number", unit.orderNumber],
     ["Vendor", unit.vendor],
     ["Serial Number", unit.serialNumber],
@@ -53,9 +55,19 @@ export default async function MarsInventoryDetailPage({
               Full record detail for the imported MARS unit and Temco local activity.
             </p>
           </div>
-          <Link href="/tools/mars/inventory" className="btn btn-outline">
-            Back to Inventory
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={thdMarsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary"
+            >
+              Open in THD
+            </a>
+            <Link href="/tools/mars/inventory" className="btn btn-outline">
+              Back to Inventory
+            </Link>
+          </div>
         </div>
 
         <MarsNav />
@@ -70,7 +82,18 @@ export default async function MarsInventoryDetailPage({
                     <p className="text-xs uppercase tracking-[0.18em] text-base-content/50 mb-1">
                       {label}
                     </p>
-                    <p className="font-medium break-words">{value ?? "—"}</p>
+                    {label === "THD" && value ? (
+                      <a
+                        href={value}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="link link-primary font-medium break-words"
+                      >
+                        Open THD submission
+                      </a>
+                    ) : (
+                      <p className="font-medium break-words">{value ?? "—"}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -196,4 +219,8 @@ function formatDate(value: string | Date | null, includeTime = true) {
 function formatLocalStatus(value: string) {
   if (value === "deleted") return "Deleted";
   return "Active";
+}
+
+function getThdMarsUrl(requestNumber: string) {
+  return `https://delivery-management.homedepot.com/mars/return-submissions/detail/${encodeURIComponent(requestNumber)}`;
 }
