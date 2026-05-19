@@ -133,9 +133,25 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
 | `npm run bootstrap` | Create initial admin user (run once after first migration) |
+| `npm run --silent mcp` | Start the TemcoTools MCP server over stdio |
 | `npx prisma studio` | Open Prisma database GUI |
 | `npx prisma migrate dev` | Run pending migrations (dev) |
 | `npx prisma migrate deploy` | Run pending migrations (prod) |
+
+## MCP Server
+
+TemcoTools includes a read-only MCP server for MARS workflow inspection. It uses the same
+`DATABASE_URL` as the web app and exposes tools for workflow summaries, unit search, unit detail,
+problem units, and status-rule explanation.
+
+For MCP client configuration, prefer launching the binary directly so stdio stays protocol-clean:
+
+```bash
+./node_modules/.bin/tsx scripts/mcp-server.ts
+```
+
+The initial tool set is intentionally read-only. Local bucket override and problem-resolution tools
+should be added after the database has explicit fields for Temco-side resolutions.
 
 ## Docker Deployment
 
@@ -185,4 +201,3 @@ Ensure the `db` service is fully healthy before the `app` container initialises.
 ## License
 
 See [LICENSE](./LICENSE).
-
