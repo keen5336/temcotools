@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 export const MARS_OPERATIONAL_BUCKETS = [
   "awaiting_pickup",
   "pickup_cycle",
+  "denied",
   "shipped",
   "received",
   "problem",
@@ -20,6 +21,7 @@ export type MarsOperationalClassification = {
 export type MarsClassifiableUnit = {
   requestStatus?: string | null;
   returnStatus: string | null;
+  vendorRaNumber?: string | null;
   localStatus?: string | null;
   archivedAt?: Date | string | null;
   presentInLatestImport?: boolean | null;
@@ -31,6 +33,7 @@ export type MarsClassifiableUnit = {
 export const MARS_BUCKET_LABELS: Record<MarsOperationalBucket, string> = {
   awaiting_pickup: "Awaiting Pickup",
   pickup_cycle: "Pickup Cycle",
+  denied: "Denied",
   shipped: "Shipped",
   received: "Received / Archived",
   problem: "Problems",
@@ -47,8 +50,15 @@ export function classifyMarsUnit(
   options: { seenInAudit?: boolean | null } = {}
 ): MarsOperationalClassification {
   const marsStatus = normalizeStatus(unit.returnStatus);
+  const vendorRaNumber = normalizeStatus(unit.vendorRaNumber);
   const problemReasons: string[] = [];
   const seenInAudit = options.seenInAudit ?? false;
+
+  if (vendorRaNumber.includes("denied")) {
+    return toClassification("denied", true, [
+      "Vendor RA is marked DENIED; Home Depot removed the denied status, so this is tracked from Vendor RA.",
+    ]);
+  }
 
   if (unit.localStatus === "deleted" || unit.presentInLatestImport === false) {
     problemReasons.push("No longer present in the latest MARS import.");
@@ -113,10 +123,13 @@ export function getMarsBucketWhere(
   const removed = statusEquals(["removed from pickup"]);
   const awaiting = statusEquals(["awaiting pickup date", "awaiting pickup"]);
   const pickupCycle = statusEquals(["added to pickup", "rescheduled", "missed"]);
+  const deniedVendorRa = {
+    vendorRaNumber: { contains: "denied", mode: "insensitive" as const },
+  };
   const notProblemBase: Prisma.MarsUnitWhereInput = {
     localStatus: { not: "deleted" },
     presentInLatestImport: true,
-    NOT: [removed, notReceived],
+    NOT: [removed, notReceived, deniedVendorRa],
   };
   const awaitingPickup = { OR: [awaiting, notShipped] };
 
@@ -128,6 +141,14 @@ export function getMarsBucketWhere(
     case "pickup_cycle":
       return {
         AND: [notProblemBase, pickupCycle, { NOT: [shipped, received] }],
+      };
+    case "denied":
+      return {
+        AND: [
+          { localStatus: { not: "deleted" } },
+          { presentInLatestImport: true },
+          deniedVendorRa,
+        ],
       };
     case "shipped":
       return {
@@ -144,7 +165,7 @@ export function getMarsBucketWhere(
           removed,
           {
             AND: [
-              { NOT: [awaitingPickup, pickupCycle, shipped, received] },
+              { NOT: [awaitingPickup, pickupCycle, deniedVendorRa, shipped, received] },
             ],
           },
         ],

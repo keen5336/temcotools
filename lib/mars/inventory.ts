@@ -570,6 +570,11 @@ export async function getMarsWorkflowBucketSummaries(): Promise<MarsWorkflowBuck
       description: "Added, rescheduled, or missed pickup items.",
     },
     {
+      bucket: "denied",
+      label: "Denied",
+      description: "Vendor RA is marked DENIED and needs special handling.",
+    },
+    {
       bucket: "shipped",
       label: "Shipped",
       description: "Out of Temco control, awaiting vendor receipt.",

@@ -142,6 +142,7 @@ server.registerTool(
       rules: [
         "RECEIVED -> Received / Archived, not expected in warehouse.",
         "SHIPPED -> Shipped, not expected in warehouse.",
+        "Vendor RA containing DENIED -> Denied; this is a vendor workaround for Home Depot removing denied status.",
         "NOT RECEIVED -> Problems; verify pickup proof, BOL, or physical location.",
         "NOT SHIPPED and AWAITING PICKUP -> Awaiting Pickup, expected in warehouse.",
         "ADDED TO PICKUP, RESCHEDULED, MISSED -> Pickup Cycle, expected in warehouse.",

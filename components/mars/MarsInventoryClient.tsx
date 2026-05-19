@@ -104,6 +104,7 @@ const BUCKET_OPTIONS: Array<{ value: MarsOperationalBucket | ""; label: string }
   { value: "", label: "All Buckets" },
   { value: "awaiting_pickup", label: "Awaiting Pickup" },
   { value: "pickup_cycle", label: "Pickup Cycle" },
+  { value: "denied", label: "Denied" },
   { value: "shipped", label: "Shipped" },
   { value: "received", label: "Received / Archived" },
   { value: "problem", label: "Problems" },
@@ -580,6 +581,8 @@ function bucketBadgeClass(bucket: MarsOperationalBucket) {
       return "badge-success";
     case "pickup_cycle":
       return "badge-info";
+    case "denied":
+      return "badge-secondary";
     case "shipped":
       return "badge-warning";
     case "received":
