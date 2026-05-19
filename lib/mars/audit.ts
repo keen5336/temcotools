@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { isExpectedInWarehouse } from "@/lib/mars/reconciliation";
+import { classifyMarsUnit } from "@/lib/mars/classification";
 
 const AUDIT_FEEDBACK_UNIT_SELECT = {
   id: true,
@@ -918,23 +918,31 @@ async function buildAuditReport(
 
   for (const unit of snapshotUnits) {
     const seenScan = seenByUnitId.get(unit.id);
-    if (!isExpectedInWarehouse(unit)) {
+    const classification = classifyMarsUnit(unit, { seenInAudit: Boolean(seenScan) });
+    if (!classification.expectedInWarehouse) {
       continue;
     }
 
     if (!seenScan) {
       expectedMissing.push(
-        toAuditUnitRow(unit, "Expected in warehouse but not seen in this audit.")
+        toAuditUnitRow(
+          unit,
+          `${classification.label}: expected in warehouse but not seen in this audit.`
+        )
       );
       continue;
     }
 
-    matched.push(toAuditUnitRow(unit, "Expected in warehouse and confirmed by this audit."));
+    matched.push(
+      toAuditUnitRow(unit, `${classification.label}: expected in warehouse and confirmed by this audit.`)
+    );
   }
 
   const physicallyPresentButUnexpected: AuditUnitRow[] = [];
   for (const scan of seenByUnitId.values()) {
     const unit = scan.marsUnit;
+
+    const classification = classifyMarsUnit(unit, { seenInAudit: true });
 
     if (!snapshotByUnitId.has(unit.id)) {
       physicallyPresentButUnexpected.push(
@@ -948,11 +956,12 @@ async function buildAuditReport(
       continue;
     }
 
-    if (!isExpectedInWarehouse(unit)) {
+    if (!classification.expectedInWarehouse || classification.bucket === "problem") {
       physicallyPresentButUnexpected.push(
         toAuditUnitRow(
           unit,
-          "Seen in this audit but imported statuses indicate it should not still be in warehouse."
+          classification.problemReasons[0] ??
+            `${classification.label}: seen in this audit but not expected in warehouse.`
         )
       );
     }

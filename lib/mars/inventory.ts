@@ -1,5 +1,12 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import {
+  classifyMarsUnit,
+  getMarsBucketWhere,
+  parseMarsOperationalBucket,
+  type MarsOperationalBucket,
+  type MarsOperationalClassification,
+} from "@/lib/mars/classification";
 
 const MARS_UNIT_LIST_SELECT = {
   id: true,
@@ -39,7 +46,9 @@ const MARS_IMPORT_BATCH_SUMMARY_SELECT = {
 
 export type MarsUnitListItem = Prisma.MarsUnitGetPayload<{
   select: typeof MARS_UNIT_LIST_SELECT;
-}>;
+}> & {
+  operational: MarsOperationalClassification;
+};
 
 export type MarsImportBatchSummary = Prisma.MarsImportBatchGetPayload<{
   select: typeof MARS_IMPORT_BATCH_SUMMARY_SELECT;
@@ -59,6 +68,7 @@ export interface ListMarsUnitsOptions {
   staged?: boolean | null;
   archived?: boolean | null;
   needsAttentionOnly?: boolean | null;
+  bucket?: MarsOperationalBucket | null;
   returnStatusMode?: MarsReturnStatusMode | null;
   dateRequestedOn?: string | null;
   lastImportedOn?: string | null;
@@ -73,6 +83,13 @@ export interface MarsUnitFilterOptions {
   requestStatuses: string[];
   returnStatuses: string[];
   replacementNeededOptions: string[];
+}
+
+export interface MarsWorkflowBucketSummary {
+  bucket: MarsOperationalBucket;
+  label: string;
+  count: number;
+  description: string;
 }
 
 export interface ListMarsUnitsResult {
@@ -125,6 +142,9 @@ export function parseReturnStatusMode(value: string | null): MarsReturnStatusMod
   return DEFAULT_RETURN_STATUS_MODE;
 }
 
+export { parseMarsOperationalBucket };
+export type { MarsOperationalBucket };
+
 export function parseSortDirection(value: string | null): SortDirection {
   if (value === "desc") return "desc";
   return DEFAULT_SORT_DIRECTION;
@@ -159,7 +179,7 @@ export async function listMarsUnits(options: ListMarsUnitsOptions): Promise<List
   const where = buildMarsUnitsWhere(options);
   const orderBy = buildMarsUnitsOrderBy(options);
 
-  const [items, totalCount, filterOptions] = await Promise.all([
+  const [rawItems, totalCount, filterOptions] = await Promise.all([
     prisma.marsUnit.findMany({
       where,
       select: MARS_UNIT_LIST_SELECT,
@@ -170,6 +190,7 @@ export async function listMarsUnits(options: ListMarsUnitsOptions): Promise<List
     prisma.marsUnit.count({ where }),
     getMarsUnitFilterOptions(),
   ]);
+  const items = rawItems.map(withOperationalClassification);
 
   return {
     items,
@@ -234,7 +255,7 @@ export async function setMarsUnitStaged(options: {
       },
     });
 
-    return updated;
+    return withOperationalClassification(updated);
   });
 }
 
@@ -286,7 +307,7 @@ export async function setMarsUnitArchived(options: {
       },
     });
 
-    return updated;
+    return withOperationalClassification(updated);
   });
 }
 
@@ -389,7 +410,7 @@ function buildMarsUnitsWhere(options: ListMarsUnitsOptions): Prisma.MarsUnitWher
     and.push({ staged });
   }
 
-  if (typeof archived === "boolean") {
+  if (typeof archived === "boolean" && !options.bucket) {
     and.push(archived ? { archivedAt: { not: null } } : { archivedAt: null });
   }
 
@@ -419,14 +440,18 @@ function buildMarsUnitsWhere(options: ListMarsUnitsOptions): Prisma.MarsUnitWher
   pushDateMatch(and, "lastImportedAt", options.lastImportedOn);
   pushDateMatch(and, "lastAuditSeenAt", options.lastAuditSeenOn);
 
-  if (returnStatusMode === "exclude_received") {
+  if (options.bucket) {
+    and.push(getMarsBucketWhere(options.bucket));
+  }
+
+  if (!options.bucket && returnStatusMode === "exclude_received") {
     and.push({
       OR: [
         { returnStatus: null },
         { NOT: { returnStatus: { equals: "received", mode: "insensitive" } } },
       ],
     });
-  } else if (returnStatusMode === "received_only") {
+  } else if (!options.bucket && returnStatusMode === "received_only") {
     and.push({ returnStatus: { equals: "received", mode: "insensitive" } });
   }
 
@@ -446,10 +471,19 @@ function buildMarsUnitsWhere(options: ListMarsUnitsOptions): Prisma.MarsUnitWher
   return and.length ? { AND: and } : {};
 }
 
+function withOperationalClassification(
+  unit: Prisma.MarsUnitGetPayload<{ select: typeof MARS_UNIT_LIST_SELECT }>
+): MarsUnitListItem {
+  return {
+    ...unit,
+    operational: classifyMarsUnit(unit),
+  };
+}
+
 export async function getMarsOperationalOverview() {
   const latestImportBatch = await getLatestMarsImportBatch();
 
-  const [activeUnits, archivedUnits, stagedUnits, deletedUnits, notSeenInAudit, shippedOrReceived, recentProblems] =
+  const [activeUnits, archivedUnits, stagedUnits, deletedUnits, notSeenInAudit, shippedOrReceived, recentProblems, bucketCounts] =
     await Promise.all([
       prisma.marsUnit.count({
         where: { archivedAt: null, presentInLatestImport: true, localStatus: "active" },
@@ -502,6 +536,7 @@ export async function getMarsOperationalOverview() {
         orderBy: [{ lastImportedAt: "desc" }, { requestNumber: "asc" }],
         take: 12,
       }),
+      getMarsWorkflowBucketSummaries(),
     ]);
 
   return {
@@ -514,11 +549,55 @@ export async function getMarsOperationalOverview() {
       notSeenInAudit,
       shippedOrReceived,
     },
+    bucketCounts,
     recentProblems: recentProblems.map((unit) => ({
       ...unit,
       reason: deriveProblemReason(unit),
     })),
   };
+}
+
+export async function getMarsWorkflowBucketSummaries(): Promise<MarsWorkflowBucketSummary[]> {
+  const buckets: Array<Omit<MarsWorkflowBucketSummary, "count">> = [
+    {
+      bucket: "awaiting_pickup",
+      label: "Awaiting Pickup",
+      description: "Expected here, waiting for pickup scheduling.",
+    },
+    {
+      bucket: "pickup_cycle",
+      label: "Pickup Cycle",
+      description: "Added, rescheduled, or missed pickup items.",
+    },
+    {
+      bucket: "shipped",
+      label: "Shipped",
+      description: "Out of Temco control, awaiting vendor receipt.",
+    },
+    {
+      bucket: "received",
+      label: "Received / Archived",
+      description: "Vendor has received the unit or it is operationally complete.",
+    },
+    {
+      bucket: "problem",
+      label: "Problems",
+      description: "Contradictory evidence, removed/deleted, or unmapped statuses.",
+    },
+  ];
+
+  const counts = await Promise.all(
+    buckets.map((bucket) =>
+      prisma.marsUnit.count({
+        where: getMarsBucketWhere(bucket.bucket),
+      })
+    )
+  );
+
+  return buckets.map((bucket, index) => ({
+    ...bucket,
+    count: counts[index],
+  }));
 }
 
 function deriveProblemReason(unit: {

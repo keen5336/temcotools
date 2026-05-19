@@ -160,8 +160,8 @@ export default function MarsAuditWorkspaceClient({
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <CountCard label="Expected Missing" value={currentSummary.expectedMissing} tone="error" />
-            <CountCard label="Present Unexpected" value={currentSummary.physicallyPresentButUnexpected} tone="warning" />
+            <CountCard label="Expected Here, Missing" value={currentSummary.expectedMissing} tone="error" />
+            <CountCard label="Not Expected, Found" value={currentSummary.physicallyPresentButUnexpected} tone="warning" />
             <CountCard label="Unknown Scans" value={currentSummary.unknownScans} tone="warning" />
             <CountCard label="Scanned Twice+" value={currentSummary.duplicates} tone="warning" />
             <CountCard label="Matched" value={currentSummary.matched} tone="success" />
@@ -294,7 +294,7 @@ export default function MarsAuditWorkspaceClient({
                         Generated {formatDate(report.createdAt)} by {report.generatedBy ?? "Unknown"}
                       </p>
                       <p className="text-sm text-base-content/70 mt-2">
-                        Missing {report.summary.expectedMissing} | Unexpected {report.summary.physicallyPresentButUnexpected} | Unknown {report.summary.unknownScans}
+                        Missing {report.summary.expectedMissing} | Found unexpectedly {report.summary.physicallyPresentButUnexpected} | Unknown {report.summary.unknownScans}
                       </p>
                     </div>
                   ))}
@@ -309,7 +309,7 @@ export default function MarsAuditWorkspaceClient({
 
           <section className="card bg-base-100 border border-base-200 shadow-sm">
             <div className="card-body">
-              <h2 className="card-title">Latest Report Snapshot</h2>
+              <h2 className="card-title">Operational Audit Report</h2>
               <p className="text-sm text-base-content/70">
                 {latestSavedReport
                   ? `Most recent saved report: ${latestSavedReport.label || latestSavedReport.id.slice(0, 8)}`
@@ -317,9 +317,9 @@ export default function MarsAuditWorkspaceClient({
               </p>
 
               <div className="mt-3 space-y-3 text-sm">
-                <ReportList title="Expected Missing" rows={data.currentReport.expectedMissing.map((row) => row.requestNumber)} />
+                <ReportList title="Expected Here, Missing" rows={data.currentReport.expectedMissing.map((row) => row.requestNumber)} />
                 <ReportList
-                  title="Present Unexpected"
+                  title="Not Expected, Found"
                   rows={data.currentReport.physicallyPresentButUnexpected.map((row) => row.requestNumber)}
                 />
                 <ReportList title="Unknown Scans" rows={data.currentReport.unknownScans.map((row) => row.scannedValue)} />

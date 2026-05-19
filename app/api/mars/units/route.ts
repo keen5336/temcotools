@@ -4,6 +4,7 @@ import {
   listMarsUnits,
   parseArchivedFilter,
   parseMarsUnitSortField,
+  parseMarsOperationalBucket,
   parseReturnStatusMode,
   parseSortDirection,
   parseStagedFilter,
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
   const replacementNeeded = searchParams.get("replacementNeeded");
   const staged = parseStagedFilter(searchParams.get("staged"));
   const archived = parseArchivedFilter(searchParams.get("archived"));
+  const bucket = parseMarsOperationalBucket(searchParams.get("bucket"));
   const returnStatusMode = parseReturnStatusMode(searchParams.get("returnStatusMode"));
   const needsAttentionOnly = searchParams.get("needsAttentionOnly") === "true";
   const dateRequestedOn = searchParams.get("dateRequestedOn");
@@ -60,6 +62,7 @@ export async function GET(req: NextRequest) {
     replacementNeeded,
     staged,
     archived,
+    bucket,
     needsAttentionOnly,
     returnStatusMode,
     dateRequestedOn,

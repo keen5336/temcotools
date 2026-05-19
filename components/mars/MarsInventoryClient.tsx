@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type {
+  MarsOperationalBucket,
   MarsUnitFilterOptions,
   MarsUnitListItem,
   MarsUnitSortField,
@@ -21,10 +23,12 @@ interface MarsInventoryResponse {
 
 interface MarsInventoryClientProps {
   initialResponse: MarsInventoryResponse;
+  initialState?: Partial<InventoryUrlState>;
 }
 
 type ColumnId =
   | "requestNumber"
+  | "operationalBucket"
   | "orderNumber"
   | "vendor"
   | "serialNumber"
@@ -38,12 +42,13 @@ type ColumnId =
   | "lastImportedAt"
   | "lastAuditSeenAt";
 
-interface FilterState {
+export interface FilterState {
   q: string;
   requestStatus: string;
   returnStatus: string;
   staged: "all" | "true" | "false";
   archived: boolean;
+  bucket: MarsOperationalBucket | "";
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -52,10 +57,20 @@ const DEFAULT_FILTERS: FilterState = {
   returnStatus: "",
   staged: "all",
   archived: false,
+  bucket: "",
 };
+
+export interface InventoryUrlState {
+  filters: FilterState;
+  sortBy: MarsUnitSortField;
+  sortDirection: SortDirection;
+  page: number;
+  pageSize: number;
+}
 
 const DEFAULT_VISIBLE_COLUMNS: ColumnId[] = [
   "requestNumber",
+  "operationalBucket",
   "vendor",
   "serialNumber",
   "modelNumber",
@@ -70,6 +85,7 @@ const COLUMN_STORAGE_KEY = "mars_inventory_visible_columns_v1";
 
 const ALL_COLUMNS: Array<{ id: ColumnId; label: string; sortField: MarsUnitSortField }> = [
   { id: "requestNumber", label: "Request", sortField: "requestNumber" },
+  { id: "operationalBucket", label: "Workflow", sortField: "returnStatus" },
   { id: "orderNumber", label: "Order", sortField: "orderNumber" },
   { id: "vendor", label: "Vendor", sortField: "vendor" },
   { id: "serialNumber", label: "Serial", sortField: "serialNumber" },
@@ -84,13 +100,28 @@ const ALL_COLUMNS: Array<{ id: ColumnId; label: string; sortField: MarsUnitSortF
   { id: "lastAuditSeenAt", label: "Last Audit Seen", sortField: "lastAuditSeenAt" },
 ];
 
-export default function MarsInventoryClient({ initialResponse }: MarsInventoryClientProps) {
-  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
-  const [sortBy, setSortBy] = useState<MarsUnitSortField>("requestNumber");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+const BUCKET_OPTIONS: Array<{ value: MarsOperationalBucket | ""; label: string }> = [
+  { value: "", label: "All Buckets" },
+  { value: "awaiting_pickup", label: "Awaiting Pickup" },
+  { value: "pickup_cycle", label: "Pickup Cycle" },
+  { value: "shipped", label: "Shipped" },
+  { value: "received", label: "Received / Archived" },
+  { value: "problem", label: "Problems" },
+];
+
+export default function MarsInventoryClient({
+  initialResponse,
+  initialState,
+}: MarsInventoryClientProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const seededState = useMemo(() => mergeInitialState(initialState), [initialState]);
+  const [filters, setFilters] = useState<FilterState>(seededState.filters);
+  const [sortBy, setSortBy] = useState<MarsUnitSortField>(seededState.sortBy);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(seededState.sortDirection);
   const [data, setData] = useState(initialResponse);
-  const [page, setPage] = useState(initialResponse.page);
-  const [pageSize, setPageSize] = useState(initialResponse.limit);
+  const [page, setPage] = useState(seededState.page);
+  const [pageSize, setPageSize] = useState(seededState.pageSize);
   const [visibleColumns, setVisibleColumns] = useState<ColumnId[]>(DEFAULT_VISIBLE_COLUMNS);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -122,13 +153,15 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
       pushParam(searchParams, "q", filters.q);
       pushParam(searchParams, "requestStatus", filters.requestStatus);
       pushParam(searchParams, "returnStatus", filters.returnStatus);
+      pushParam(searchParams, "bucket", filters.bucket);
       if (filters.staged !== "all") searchParams.set("staged", filters.staged);
-      searchParams.set("archived", String(filters.archived));
+      if (!filters.bucket) searchParams.set("archived", String(filters.archived));
       searchParams.set("sortBy", sortBy);
       searchParams.set("sortDirection", sortDirection);
       searchParams.set("page", String(page));
       searchParams.set("limit", String(pageSize));
 
+      router.replace(`${pathname}?${searchParams.toString()}`, { scroll: false });
       const response = await fetch(`/api/mars/units?${searchParams.toString()}`);
       const payload = (await response.json()) as MarsInventoryResponse | { error?: string };
 
@@ -140,7 +173,7 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
       setError(null);
       setData(payload);
     });
-  }, [filters, page, pageSize, sortBy, sortDirection]);
+  }, [filters, page, pageSize, pathname, router, sortBy, sortDirection]);
 
   const columnLookup = useMemo(
     () => new Map(ALL_COLUMNS.map((column) => [column.id, column] as const)),
@@ -265,6 +298,22 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
               <option value="200">200</option>
             </select>
           </label>
+          <label className="form-control lg:w-56">
+            <span className="label-text mb-2">Workflow</span>
+            <select
+              className="select select-bordered"
+              value={filters.bucket}
+              onChange={(event) =>
+                updateFilter("bucket", event.target.value as FilterState["bucket"])
+              }
+            >
+              {BUCKET_OPTIONS.map((option) => (
+                <option key={option.value || "all"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <details className="dropdown dropdown-end">
             <summary className="btn btn-outline">Columns</summary>
             <div className="dropdown-content z-[1] mt-2 w-72 rounded-box border border-base-200 bg-base-100 p-3 shadow-lg">
@@ -348,6 +397,7 @@ export default function MarsInventoryClient({ initialResponse }: MarsInventoryCl
                 className="select select-bordered"
                 value={filters.archived ? "true" : "false"}
                 onChange={(event) => updateFilter("archived", event.target.value === "true")}
+                disabled={Boolean(filters.bucket)}
               >
                 <option value="false">Hide Archived</option>
                 <option value="true">Show Archived</option>
@@ -475,6 +525,12 @@ function renderCell(
           {item.requestNumber}
         </Link>
       );
+    case "operationalBucket":
+      return (
+        <span className={`badge ${bucketBadgeClass(item.operational.bucket)}`}>
+          {item.operational.label}
+        </span>
+      );
     case "orderNumber":
       return item.orderNumber ?? "—";
     case "vendor":
@@ -518,11 +574,39 @@ function SortIndicator({ active, direction }: { active: boolean; direction: Sort
   return <span>{direction === "asc" ? "↑" : "↓"}</span>;
 }
 
+function bucketBadgeClass(bucket: MarsOperationalBucket) {
+  switch (bucket) {
+    case "awaiting_pickup":
+      return "badge-success";
+    case "pickup_cycle":
+      return "badge-info";
+    case "shipped":
+      return "badge-warning";
+    case "received":
+      return "badge-ghost";
+    case "problem":
+      return "badge-error";
+  }
+}
+
 function pushParam(searchParams: URLSearchParams, key: string, value: string) {
   const trimmed = value.trim();
   if (trimmed) {
     searchParams.set(key, trimmed);
   }
+}
+
+function mergeInitialState(initialState: Partial<InventoryUrlState> | undefined): InventoryUrlState {
+  return {
+    filters: {
+      ...DEFAULT_FILTERS,
+      ...(initialState?.filters ?? {}),
+    },
+    sortBy: initialState?.sortBy ?? "requestNumber",
+    sortDirection: initialState?.sortDirection ?? "asc",
+    page: initialState?.page ?? 1,
+    pageSize: initialState?.pageSize ?? 50,
+  };
 }
 
 function formatDate(value: string | Date | null, includeTime = true) {
