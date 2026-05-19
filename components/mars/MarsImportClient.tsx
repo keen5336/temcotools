@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import type { MarsImportBatchSummary } from "@/lib/mars/inventory";
 import type { MarsImportSummary } from "@/lib/mars/import";
@@ -14,6 +15,7 @@ interface ImportFailure {
 }
 
 export default function MarsImportClient({ latestBatch }: MarsImportClientProps) {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<MarsImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +23,7 @@ export default function MarsImportClient({ latestBatch }: MarsImportClientProps)
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const form = event.currentTarget;
     if (!file) {
       setError("Select a spreadsheet file before importing.");
       return;
@@ -46,7 +49,8 @@ export default function MarsImportClient({ latestBatch }: MarsImportClientProps)
 
       setResult(payload);
       setFile(null);
-      event.currentTarget.reset();
+      form.reset();
+      router.refresh();
     });
   }
 
