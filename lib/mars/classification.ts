@@ -140,8 +140,6 @@ export function getMarsBucketWhere(
     case "problem":
       return {
         OR: [
-          { localStatus: "deleted" },
-          { presentInLatestImport: false },
           notReceived,
           removed,
           {
