@@ -50,6 +50,21 @@ services:
         aliases:
           - temcotools.internal
 
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    profiles:
+      - mcp
+    environment:
+      DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - temco_net
+
 networks:
   temco_net:
     driver: bridge

@@ -144,11 +144,22 @@ TemcoTools includes a read-only MCP server for MARS workflow inspection. It uses
 `DATABASE_URL` as the web app and exposes tools for workflow summaries, unit search, unit detail,
 problem units, and status-rule explanation.
 
-For MCP client configuration, prefer launching the binary directly so stdio stays protocol-clean:
+For MCP client configuration on a local checkout, prefer launching the binary directly so stdio
+stays protocol-clean:
 
 ```bash
 ./node_modules/.bin/tsx scripts/mcp-server.ts
 ```
+
+On the VPS, launch the stdio MCP server as its own Docker Compose service:
+
+```bash
+cd /srv/temcotools
+docker compose run --rm -T mcp
+```
+
+For an MCP client that connects over SSH, use that command as the remote stdio process. The MCP
+container joins the internal Compose network and talks to Postgres through the private `db` service.
 
 The initial tool set is intentionally read-only. Local bucket override and problem-resolution tools
 should be added after the database has explicit fields for Temco-side resolutions.
