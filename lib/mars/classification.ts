@@ -48,8 +48,7 @@ export function classifyMarsUnit(
 ): MarsOperationalClassification {
   const marsStatus = normalizeStatus(unit.returnStatus);
   const problemReasons: string[] = [];
-  const seenInAudit =
-    options.seenInAudit ?? hasRecentAuditEvidence(unit.lastAuditSeenAt, unit.lastImportedAt);
+  const seenInAudit = options.seenInAudit ?? false;
 
   if (unit.localStatus === "deleted" || unit.presentInLatestImport === false) {
     problemReasons.push("No longer present in the latest MARS import.");
@@ -87,7 +86,7 @@ export function classifyMarsUnit(
     return toClassification("problem", false, problemReasons);
   }
 
-  if (matchesAny(marsStatus, ["awaiting pickup"])) {
+  if (matchesAny(marsStatus, ["awaiting pickup", "not shipped"])) {
     return toClassification("awaiting_pickup", true, problemReasons);
   }
 
@@ -110,6 +109,7 @@ export function getMarsBucketWhere(
   const shipped = statusContains(["shipped"]);
   const received = statusContains(["received"]);
   const notReceived = statusContains(["not received"]);
+  const notShipped = statusContains(["not shipped"]);
   const removed = statusContains(["removed from pickup"]);
   const awaiting = statusContains(["awaiting pickup"]);
   const pickupCycle = statusContains(["added to pickup", "rescheduled", "missed"]);
@@ -118,27 +118,24 @@ export function getMarsBucketWhere(
     presentInLatestImport: true,
     NOT: [removed, notReceived],
   };
-  const physicallyContradicted: Prisma.MarsUnitWhereInput = {
-    lastAuditSeenAt: { not: null },
-    OR: [shipped, received],
-  };
+  const awaitingPickup = { OR: [awaiting, notShipped] };
 
   switch (bucket) {
     case "awaiting_pickup":
       return {
-        AND: [notProblemBase, awaiting, { NOT: [shipped, received, physicallyContradicted] }],
+        AND: [notProblemBase, awaitingPickup, { NOT: [shipped, received] }],
       };
     case "pickup_cycle":
       return {
-        AND: [notProblemBase, pickupCycle, { NOT: [shipped, received, physicallyContradicted] }],
+        AND: [notProblemBase, pickupCycle, { NOT: [shipped, received] }],
       };
     case "shipped":
       return {
-        AND: [notProblemBase, shipped, { NOT: [received, physicallyContradicted] }],
+        AND: [notProblemBase, shipped, { NOT: [received] }],
       };
     case "received":
       return {
-        AND: [notProblemBase, received, { NOT: [physicallyContradicted] }],
+        AND: [notProblemBase, received],
       };
     case "problem":
       return {
@@ -147,10 +144,9 @@ export function getMarsBucketWhere(
           { presentInLatestImport: false },
           notReceived,
           removed,
-          physicallyContradicted,
           {
             AND: [
-              { NOT: [awaiting, pickupCycle, shipped, received] },
+              { NOT: [awaitingPickup, pickupCycle, shipped, received] },
             ],
           },
         ],
@@ -193,15 +189,6 @@ function isReceivedStatus(status: string) {
 
 function isShippedStatus(status: string) {
   return /\bshipped\b/.test(status) && !matchesAny(status, ["not shipped"]);
-}
-
-function hasRecentAuditEvidence(
-  lastAuditSeenAt: MarsClassifiableUnit["lastAuditSeenAt"],
-  lastImportedAt: MarsClassifiableUnit["lastImportedAt"]
-) {
-  if (!lastAuditSeenAt) return false;
-  if (!lastImportedAt) return true;
-  return new Date(lastAuditSeenAt).getTime() >= new Date(lastImportedAt).getTime();
 }
 
 function displayStatus(unit: MarsClassifiableUnit) {

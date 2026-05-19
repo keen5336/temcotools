@@ -54,7 +54,11 @@ export default function MarsInventoryScreen({
         <Metric label="Shipped / Received" value={overview.summary.shippedOrReceived} tone="warning" />
         <Metric label="Archived" value={overview.summary.archivedUnits} tone="default" />
       </section>
-      <MarsInventoryClient initialResponse={{ ok: true, ...initialResponse }} initialState={initialState} />
+      <MarsInventoryClient
+        key={JSON.stringify(initialState)}
+        initialResponse={{ ok: true, ...initialResponse }}
+        initialState={initialState}
+      />
     </>
   );
 }
