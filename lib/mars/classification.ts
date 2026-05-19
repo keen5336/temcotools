@@ -106,13 +106,13 @@ export function classifyMarsUnit(
 export function getMarsBucketWhere(
   bucket: MarsOperationalBucket
 ): Prisma.MarsUnitWhereInput {
-  const shipped = statusContains(["shipped"]);
-  const received = statusContains(["received"]);
-  const notReceived = statusContains(["not received"]);
-  const notShipped = statusContains(["not shipped"]);
-  const removed = statusContains(["removed from pickup"]);
-  const awaiting = statusContains(["awaiting pickup"]);
-  const pickupCycle = statusContains(["added to pickup", "rescheduled", "missed"]);
+  const shipped = statusEquals(["shipped"]);
+  const received = statusEquals(["received"]);
+  const notReceived = statusEquals(["not received"]);
+  const notShipped = statusEquals(["not shipped"]);
+  const removed = statusEquals(["removed from pickup"]);
+  const awaiting = statusEquals(["awaiting pickup date", "awaiting pickup"]);
+  const pickupCycle = statusEquals(["added to pickup", "rescheduled", "missed"]);
   const notProblemBase: Prisma.MarsUnitWhereInput = {
     localStatus: { not: "deleted" },
     presentInLatestImport: true,
@@ -167,10 +167,10 @@ function toClassification(
   };
 }
 
-function statusContains(terms: string[]): Prisma.MarsUnitWhereInput {
+function statusEquals(terms: string[]): Prisma.MarsUnitWhereInput {
   return {
     OR: terms.map((term) => ({
-      returnStatus: { contains: term, mode: "insensitive" as const },
+      returnStatus: { equals: term, mode: "insensitive" as const },
     })),
   };
 }
