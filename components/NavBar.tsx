@@ -37,6 +37,9 @@ export default function NavBar({ session }: NavBarProps) {
           <Link href="/tools/rtv-label" className="btn btn-ghost btn-sm">
             MARS Label
           </Link>
+          <Link href="/tools/lpn-put-away" className="btn btn-ghost btn-sm">
+            LPN Put Away
+          </Link>
           <Link href="/tools/barcode-generator" className="btn btn-ghost btn-sm">
             Barcode Generator
           </Link>

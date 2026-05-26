@@ -24,6 +24,12 @@ export default async function HomePage() {
         "Build data transformation pipelines on CSV files and export formatted reports.",
     },
     {
+      name: "LPN Put Away",
+      href: "/tools/lpn-put-away",
+      description:
+        "Upload an LPN report and list Placing LPNs by received date.",
+    },
+    {
       name: "Barcode Generator",
       href: "/tools/barcode-generator",
       description: "Paste a list of values to generate and print a batch of barcodes.",
