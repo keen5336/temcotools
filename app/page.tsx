@@ -34,6 +34,11 @@ export default async function HomePage() {
       href: "/tools/barcode-generator",
       description: "Paste a list of values to generate and print a batch of barcodes.",
     },
+    {
+      name: "Scan Lists",
+      href: "/tools/scan-lists",
+      description: "Create named local scan sessions, save finished lists, and export them to CSV.",
+    },
   ];
 
   return (

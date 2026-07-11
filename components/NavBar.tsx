@@ -43,6 +43,9 @@ export default function NavBar({ session }: NavBarProps) {
           <Link href="/tools/barcode-generator" className="btn btn-ghost btn-sm">
             Barcode Generator
           </Link>
+          <Link href="/tools/scan-lists" className="btn btn-ghost btn-sm">
+            Scan Lists
+          </Link>
           {session.role === "admin" && (
             <Link href="/admin/files" className="btn btn-ghost btn-sm">
               File Manager

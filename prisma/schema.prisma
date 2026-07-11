@@ -21,6 +21,8 @@ model User {
   marsAuditSessions   MarsAuditSession[]
   marsAuditScans      MarsAuditScan[]
   marsAuditReports    MarsAuditReport[]
+  scanListSessions    ScanListSession[]
+  scanListItems       ScanListItem[]
 }
 
 model Pipeline {
@@ -127,6 +129,33 @@ model MarsAuditReport {
   auditSession      MarsAuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade)
   importBatch       MarsImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
   generatedByUser   User?            @relation(fields: [generatedByUserId], references: [id])
+}
+
+model ScanListSession {
+  id              String         @id @default(cuid())
+  localDraftId    String?        @unique
+  name            String
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  closedAt        DateTime?
+  archivedAt      DateTime?
+  createdByUser   User?          @relation(fields: [createdByUserId], references: [id])
+  items           ScanListItem[]
+
+  @@index([archivedAt, updatedAt])
+}
+
+model ScanListItem {
+  id              String          @id @default(cuid())
+  sessionId       String
+  scannedValue    String
+  scannedByUserId String?
+  createdAt       DateTime        @default(now())
+  session         ScanListSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  scannedByUser   User?           @relation(fields: [scannedByUserId], references: [id])
+
+  @@index([sessionId, createdAt])
 }
 
 enum Role {
