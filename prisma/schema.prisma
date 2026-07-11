@@ -7,22 +7,24 @@ datasource db {
 }
 
 model User {
-  id                  String             @id @default(cuid())
-  username            String             @unique
-  displayName         String
-  pinHash             String
-  role                Role               @default(user)
-  isActive            Boolean            @default(true)
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
-  lastLoginAt         DateTime?
-  marsImportBatches   MarsImportBatch[]
-  marsEvents          MarsEvent[]
-  marsAuditSessions   MarsAuditSession[]
-  marsAuditScans      MarsAuditScan[]
-  marsAuditReports    MarsAuditReport[]
-  scanListSessions    ScanListSession[]
-  scanListItems       ScanListItem[]
+  id                String             @id @default(cuid())
+  username          String             @unique
+  displayName       String
+  pinHash           String
+  role              Role               @default(user)
+  isActive          Boolean            @default(true)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  lastLoginAt       DateTime?
+  marsImportBatches MarsImportBatch[]
+  marsEvents        MarsEvent[]
+  marsAuditSessions MarsAuditSession[]
+  marsAuditScans    MarsAuditScan[]
+  marsAuditReports  MarsAuditReport[]
+  scanListSessions  ScanListSession[]
+  scanListItems     ScanListItem[]
+  pickWaves         PickWave[]
+  pickWaveScans     PickWaveScan[]
 }
 
 model Pipeline {
@@ -34,47 +36,47 @@ model Pipeline {
 }
 
 model MarsImportBatch {
-  id             String     @id @default(cuid())
-  filename       String
+  id               String            @id @default(cuid())
+  filename         String
   uploadedByUserId String?
-  uploadedAt     DateTime   @default(now())
-  rowCount       Int        @default(0)
-  insertedCount  Int        @default(0)
-  updatedCount   Int        @default(0)
-  skippedCount   Int        @default(0)
-  notes          String?
-  uploadedByUser User?      @relation(fields: [uploadedByUserId], references: [id])
-  marsUnits      MarsUnit[]
+  uploadedAt       DateTime          @default(now())
+  rowCount         Int               @default(0)
+  insertedCount    Int               @default(0)
+  updatedCount     Int               @default(0)
+  skippedCount     Int               @default(0)
+  notes            String?
+  uploadedByUser   User?             @relation(fields: [uploadedByUserId], references: [id])
+  marsUnits        MarsUnit[]
   marsAuditReports MarsAuditReport[]
 }
 
 model MarsUnit {
-  id                     String           @id @default(cuid())
-  requestNumber          String           @unique
-  orderNumber            String?
-  vendor                 String?
-  serialNumber           String?
-  modelNumber            String?
-  vendorRaNumber         String?
-  dateRequested          DateTime?
-  requestStatus          String?
-  returnStatus           String?
-  replacementNeeded      String?
-  staged                 Boolean          @default(false)
-  localStatus            String           @default("active")
-  archivedAt             DateTime?
-  archivedReason         String?
-  presentInLatestImport  Boolean          @default(true)
+  id                        String           @id @default(cuid())
+  requestNumber             String           @unique
+  orderNumber               String?
+  vendor                    String?
+  serialNumber              String?
+  modelNumber               String?
+  vendorRaNumber            String?
+  dateRequested             DateTime?
+  requestStatus             String?
+  returnStatus              String?
+  replacementNeeded         String?
+  staged                    Boolean          @default(false)
+  localStatus               String           @default("active")
+  archivedAt                DateTime?
+  archivedReason            String?
+  presentInLatestImport     Boolean          @default(true)
   missingFromLatestImportAt DateTime?
-  lastImportedAt         DateTime?
-  lastScannedAt          DateTime?
-  lastAuditSeenAt        DateTime?
-  lastKnownImportBatchId String?
-  createdAt              DateTime         @default(now())
-  updatedAt              DateTime         @updatedAt
-  lastKnownImportBatch   MarsImportBatch? @relation(fields: [lastKnownImportBatchId], references: [id])
-  marsEvents             MarsEvent[]
-  marsAuditScans         MarsAuditScan[]
+  lastImportedAt            DateTime?
+  lastScannedAt             DateTime?
+  lastAuditSeenAt           DateTime?
+  lastKnownImportBatchId    String?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+  lastKnownImportBatch      MarsImportBatch? @relation(fields: [lastKnownImportBatchId], references: [id])
+  marsEvents                MarsEvent[]
+  marsAuditScans            MarsAuditScan[]
 }
 
 model MarsEvent {
@@ -89,16 +91,16 @@ model MarsEvent {
 }
 
 model MarsAuditSession {
-  id              String          @id @default(cuid())
-  startedByUserId String?
-  startedAt       DateTime        @default(now())
-  completedAt     DateTime?
-  lastAmendedAt   DateTime?
-  notes           String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  startedByUser   User?           @relation(fields: [startedByUserId], references: [id])
-  marsAuditScans  MarsAuditScan[]
+  id               String            @id @default(cuid())
+  startedByUserId  String?
+  startedAt        DateTime          @default(now())
+  completedAt      DateTime?
+  lastAmendedAt    DateTime?
+  notes            String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  startedByUser    User?             @relation(fields: [startedByUserId], references: [id])
+  marsAuditScans   MarsAuditScan[]
   marsAuditReports MarsAuditReport[]
 }
 
@@ -156,6 +158,77 @@ model ScanListItem {
   scannedByUser   User?           @relation(fields: [scannedByUserId], references: [id])
 
   @@index([sessionId, createdAt])
+}
+
+model PickWave {
+  id              String                 @id @default(cuid())
+  name            String
+  sourceFilename  String
+  createdByUserId String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  archivedAt      DateTime?
+  createdByUser   User?                  @relation(fields: [createdByUserId], references: [id])
+  items           PickWaveItem[]
+  routeMappings   PickWaveRouteMapping[]
+  scans           PickWaveScan[]
+
+  @@index([archivedAt, createdAt])
+}
+
+model PickWaveItem {
+  id             String         @id @default(cuid())
+  pickWaveId     String
+  rowNumber      Int
+  routeNumber    String?
+  contact        String?
+  orderNumber    String?
+  lpn            String?
+  serialNumber   String?
+  trackingNumber String?
+  partNumber     String?
+  description    String?
+  scannedAt      DateTime?
+  createdAt      DateTime       @default(now())
+  pickWave       PickWave       @relation(fields: [pickWaveId], references: [id], onDelete: Cascade)
+  scans          PickWaveScan[]
+
+  @@unique([pickWaveId, rowNumber])
+  @@index([pickWaveId, scannedAt])
+  @@index([pickWaveId, lpn])
+  @@index([pickWaveId, serialNumber])
+  @@index([pickWaveId, trackingNumber])
+  @@index([pickWaveId, orderNumber])
+}
+
+model PickWaveRouteMapping {
+  id              String   @id @default(cuid())
+  pickWaveId      String
+  routeNumber     String
+  stagingLocation String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  pickWave        PickWave @relation(fields: [pickWaveId], references: [id], onDelete: Cascade)
+
+  @@unique([pickWaveId, routeNumber])
+  @@index([pickWaveId])
+}
+
+model PickWaveScan {
+  id              String        @id @default(cuid())
+  pickWaveId      String
+  itemId          String?
+  scannedValue    String
+  matched         Boolean       @default(false)
+  alreadyScanned  Boolean       @default(false)
+  scannedByUserId String?
+  createdAt       DateTime      @default(now())
+  pickWave        PickWave      @relation(fields: [pickWaveId], references: [id], onDelete: Cascade)
+  item            PickWaveItem? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  scannedByUser   User?         @relation(fields: [scannedByUserId], references: [id])
+
+  @@index([pickWaveId, createdAt])
+  @@index([itemId])
 }
 
 enum Role {

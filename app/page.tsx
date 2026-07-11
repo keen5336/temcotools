@@ -39,6 +39,11 @@ export default async function HomePage() {
       href: "/tools/scan-lists",
       description: "Create named local scan sessions, save finished lists, and export them to CSV.",
     },
+    {
+      name: "Pick Waves",
+      href: "/tools/pick-waves",
+      description: "Upload pick lists, map route staging locations, scan items, and print staging labels.",
+    },
   ];
 
   return (

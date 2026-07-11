@@ -46,6 +46,9 @@ export default function NavBar({ session }: NavBarProps) {
           <Link href="/tools/scan-lists" className="btn btn-ghost btn-sm">
             Scan Lists
           </Link>
+          <Link href="/tools/pick-waves" className="btn btn-ghost btn-sm">
+            Pick Waves
+          </Link>
           {session.role === "admin" && (
             <Link href="/admin/files" className="btn btn-ghost btn-sm">
               File Manager
