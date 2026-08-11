@@ -91,6 +91,19 @@ export default async function HomePage() {
               <p className="text-sm text-base-content/70">Manage users, roles, and access.</p>
             </Link>
           )}
+          {session.role === "admin" && (
+            <Link
+              href="/admin/scanner-diagnostic"
+              className="block bg-base-100 border border-base-200 rounded-lg p-5 hover:border-primary hover:shadow-sm transition"
+            >
+              <h2 className="text-base font-semibold text-base-content mb-1">
+                Scanner Diagnostic
+              </h2>
+              <p className="text-sm text-base-content/70">
+                Test focus-free scanner events, keyboard suppression, and scan acknowledgement.
+              </p>
+            </Link>
+          )}
         </div>
       </main>
     </div>

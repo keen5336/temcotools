@@ -54,6 +54,11 @@ export default function NavBar({ session }: NavBarProps) {
               File Manager
             </Link>
           )}
+          {session.role === "admin" && (
+            <Link href="/admin/scanner-diagnostic" className="btn btn-ghost btn-sm">
+              Scanner Test
+            </Link>
+          )}
         </div>
       </div>
       <div className="navbar-end">
@@ -90,6 +95,11 @@ export default function NavBar({ session }: NavBarProps) {
             {session.role === "admin" && (
               <li>
                 <Link href="/admin/users">User Management</Link>
+              </li>
+            )}
+            {session.role === "admin" && (
+              <li>
+                <Link href="/admin/scanner-diagnostic">Scanner Diagnostic</Link>
               </li>
             )}
             <li>
