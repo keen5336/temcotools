@@ -239,9 +239,9 @@ export default function ScannerCapture({
       </section>
 
       {active ? (
-        <div className="fixed inset-0 z-[100] h-[100dvh] overflow-hidden bg-slate-950 text-slate-100" data-testid="scanner-mode">
-          <header className="h-14 border-b border-slate-700 bg-slate-900 px-3 sm:px-4 flex items-center justify-between gap-3">
-            <button type="button" className="btn btn-sm btn-ghost text-slate-200" onClick={exitScanning}>
+        <div className="fixed inset-0 z-[100] h-[100dvh] w-full max-w-[100vw] overflow-x-hidden overflow-y-hidden bg-slate-950 text-slate-100" data-testid="scanner-mode">
+          <header className="h-14 w-full min-w-0 overflow-hidden border-b border-slate-700 bg-slate-900 px-1.5 sm:px-4 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 sm:gap-3">
+            <button type="button" className="btn btn-sm btn-ghost px-2 text-slate-200" onClick={exitScanning}>
               ← Exit
             </button>
             <div className="min-w-0 text-center">
@@ -252,18 +252,18 @@ export default function ScannerCapture({
             </div>
             <button
               type="button"
-              className={`btn btn-sm ${armed ? "btn-error btn-outline" : "btn-success"}`}
+              className={`btn btn-sm px-2 ${armed ? "btn-error btn-outline" : "btn-success"}`}
               onClick={toggleArmed}
             >
               {armed ? "Pause" : "Resume"}
             </button>
           </header>
 
-          <main className="h-[calc(100dvh-3.5rem)] min-h-0 p-2 sm:p-4 grid grid-rows-[auto_minmax(0,1fr)_auto] gap-2 sm:gap-4">
+          <main className="h-[calc(100dvh-3.5rem)] min-h-0 w-full min-w-0 max-w-full overflow-x-hidden p-2 sm:p-4 grid grid-rows-[auto_minmax(0,1fr)_auto] gap-2 sm:gap-4">
             <section className={`rounded-2xl border-2 p-3 sm:p-5 ${
               !pageActive || !armed ? "border-rose-400 bg-rose-950/70" : toneClass
-            }`} aria-live="polite">
-              <div className="flex items-start justify-between gap-4">
+            } min-w-0 max-w-full overflow-hidden`} aria-live="polite">
+              <div className="flex min-w-0 max-w-full items-start justify-between gap-2 sm:gap-4">
                 <div className="min-w-0">
                   <p className="text-[10px] sm:text-xs font-bold uppercase tracking-[0.18em] opacity-75">
                     {!pageActive
@@ -279,7 +279,7 @@ export default function ScannerCapture({
                   <p className="text-2xl sm:text-5xl font-black leading-tight break-all mt-1">
                     {buffer || effectiveFeedback?.value || lastCaptured || "READY"}
                   </p>
-                  <p className="text-xs sm:text-sm opacity-80 mt-1">
+                  <p className="text-xs sm:text-sm opacity-80 mt-1 break-words">
                     {!pageActive || !armed
                       ? "Resume this screen before continuing."
                       : effectiveFeedback?.detail ?? "Scan a barcode. Enter completes and queues the scan."}
@@ -292,7 +292,7 @@ export default function ScannerCapture({
               </div>
             </section>
 
-            <section className="min-h-0 rounded-2xl border border-slate-700 bg-slate-900 overflow-auto p-3 sm:p-5">
+            <section className="min-h-0 min-w-0 max-w-full rounded-2xl border border-slate-700 bg-slate-900 overflow-x-hidden overflow-y-auto p-3 sm:p-5">
               {result ?? (
                 <div className="h-full min-h-32 grid place-items-center text-center text-slate-400">
                   <div>
@@ -303,7 +303,7 @@ export default function ScannerCapture({
               )}
             </section>
 
-            <footer className="rounded-xl border border-slate-700 bg-slate-900 p-2 flex items-center justify-between gap-3">
+            <footer className="min-w-0 max-w-full overflow-hidden rounded-xl border border-slate-700 bg-slate-900 p-2 flex items-center justify-between gap-2">
               <div className="text-xs text-slate-400 min-w-0 truncate">
                 {processing || queueDepth ? "Do not leave while scans are processing." : "No text field is focused; the keyboard stays hidden."}
               </div>
@@ -319,8 +319,8 @@ export default function ScannerCapture({
           </main>
 
           {manualOpen ? (
-            <div className="fixed inset-0 z-[110] bg-black/70 p-3 grid place-items-center">
-              <form className="card w-full max-w-lg bg-base-100 text-base-content shadow-2xl" onSubmit={submitManual}>
+            <div className="fixed inset-0 z-[110] max-w-[100vw] overflow-x-hidden bg-black/70 p-3 grid place-items-center">
+              <form className="card min-w-0 w-full max-w-lg bg-base-100 text-base-content shadow-2xl" onSubmit={submitManual}>
                 <div className="card-body gap-4">
                   <div>
                     <h2 className="card-title">Manual Entry</h2>
@@ -332,7 +332,7 @@ export default function ScannerCapture({
                     value={manualValue}
                     onChange={(event) => setManualValue(event.target.value)}
                     placeholder={manualPlaceholder}
-                    className="input input-bordered input-lg text-xl font-bold"
+                    className="input input-bordered input-lg w-full min-w-0 text-xl font-bold"
                     autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
