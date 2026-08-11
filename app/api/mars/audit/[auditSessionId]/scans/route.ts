@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
-import { addMarsAuditScan } from "@/lib/mars/audit";
+import { addMarsAuditScan, getMarsAuditDetail } from "@/lib/mars/audit";
 
 export const runtime = "nodejs";
 
@@ -37,7 +37,8 @@ export async function POST(
       manualEntry: body.manualEntry !== false,
     });
 
-    return NextResponse.json({ ok: true, ...result });
+    const detail = await getMarsAuditDetail(auditSessionId);
+    return NextResponse.json({ ok: true, ...result, detail });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to add audit scan.";
     const status = message === "Audit session not found." ? 404 : 400;

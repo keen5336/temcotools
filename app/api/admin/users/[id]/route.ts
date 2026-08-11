@@ -29,7 +29,7 @@ export async function PATCH(
   if (pin !== undefined && !/^\d{4,6}$/.test(pin)) {
     return NextResponse.json({ error: "PIN must be 4 to 6 digits." }, { status: 400 });
   }
-  if (role !== undefined && role !== "admin" && role !== "user") {
+  if (role !== undefined && role !== "admin" && role !== "manager" && role !== "user") {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
   }
 
@@ -65,4 +65,3 @@ export async function PATCH(
 
   return NextResponse.json(updated);
 }
-

@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   if (!pin || !/^\d{4,6}$/.test(pin)) {
     return NextResponse.json({ error: "PIN must be 4 to 6 digits." }, { status: 400 });
   }
-  if (role && role !== "admin" && role !== "user") {
+  if (role && role !== "admin" && role !== "manager" && role !== "user") {
     return NextResponse.json({ error: "Invalid role." }, { status: 400 });
   }
 
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       username: username.trim(),
       displayName: displayName.trim(),
       pinHash,
-      role: (role as "admin" | "user") ?? "user",
+      role: (role as "admin" | "manager" | "user") ?? "user",
     },
     select: {
       id: true,
@@ -83,4 +83,3 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(user, { status: 201 });
 }
-

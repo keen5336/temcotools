@@ -12,8 +12,7 @@ export default async function MarsLabelPage() {
         <h1 className="text-2xl font-semibold text-base-content mb-1">MARS Label Tool</h1>
         <p className="text-base-content/70 mb-6">
           Paste the full return page text, extract the fields automatically, preview the label,
-          and print straight to a networked label printer. Includes editable ZPL templates stored
-          in local storage.
+          and print using a manager-approved label template and printer destination.
         </p>
         <MarsLabelClient />
       </main>

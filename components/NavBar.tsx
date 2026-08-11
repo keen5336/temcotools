@@ -49,6 +49,11 @@ export default function NavBar({ session }: NavBarProps) {
           <Link href="/tools/pick-waves" className="btn btn-ghost btn-sm">
             Pick Waves
           </Link>
+          {(session.role === "admin" || session.role === "manager") && (
+            <Link href="/management/labels" className="btn btn-ghost btn-sm">
+              Label Setup
+            </Link>
+          )}
           {session.role === "admin" && (
             <Link href="/admin/files" className="btn btn-ghost btn-sm">
               File Manager
@@ -90,6 +95,11 @@ export default function NavBar({ session }: NavBarProps) {
             {session.role === "admin" && (
               <li>
                 <Link href="/admin/files">File Manager</Link>
+              </li>
+            )}
+            {(session.role === "admin" || session.role === "manager") && (
+              <li>
+                <Link href="/management/labels">Label Configuration</Link>
               </li>
             )}
             {session.role === "admin" && (

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { SubmittedAuditSessionSummary } from "@/lib/mars/audit";
+import ScannerCapture from "@/components/scanner/ScannerCapture";
 
 interface MarsAuditClientProps {
   initialHistory: SubmittedAuditSessionSummary[];
@@ -29,8 +30,6 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
   const router = useRouter();
   const [draft, setDraft] = useState<LocalAuditDraft | null>(null);
   const [history, setHistory] = useState(initialHistory);
-  const [scanValue, setScanValue] = useState("");
-  const [quickSightingValue, setQuickSightingValue] = useState("");
   const [lastScanned, setLastScanned] = useState<LocalAuditScan | null>(null);
   const [lastSighted, setLastSighted] = useState<{
     seenAt: string;
@@ -47,25 +46,26 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [isPending, startTransition] = useTransition();
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const draftRef = useRef<LocalAuditDraft | null>(null);
 
   useEffect(() => {
-    const deviceId = loadOrCreateDeviceId();
-    const savedDraft = loadDraft();
-
-    if (savedDraft && savedDraft.deviceId === deviceId) {
-      setDraft(savedDraft);
-      setLastScanned(savedDraft.scans[0] ?? null);
-    }
-
-    setReady(true);
+    const timeout = window.setTimeout(() => {
+      const deviceId = loadOrCreateDeviceId();
+      const savedDraft = loadDraft();
+      if (savedDraft && savedDraft.deviceId === deviceId) {
+        draftRef.current = savedDraft;
+        setDraft(savedDraft);
+        setLastScanned(savedDraft.scans[0] ?? null);
+      }
+      setReady(true);
+    }, 0);
+    return () => window.clearTimeout(timeout);
   }, []);
 
   useEffect(() => {
     if (!ready) return;
     if (draft) {
       window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
-      inputRef.current?.focus();
       return;
     }
 
@@ -93,31 +93,31 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
     };
 
     setError(null);
-    setScanValue("");
     setLastScanned(null);
+    draftRef.current = nextDraft;
     setDraft(nextDraft);
   }
 
   function handleDiscardDraft() {
+    draftRef.current = null;
     setDraft(null);
     setLastScanned(null);
-    setScanValue("");
     setError(null);
   }
 
-  function handleSubmitScan(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!draft) {
+  function handleSubmitScan(value: string) {
+    const currentDraft = draftRef.current;
+    if (!currentDraft) {
       setError("Start an audit on this device before scanning.");
       return;
     }
 
-    const normalized = normalizeScanValue(scanValue);
+    const normalized = normalizeScanValue(value);
     if (!normalized) {
       return;
     }
 
-    const duplicate = draft.scans.some((scan) => scan.value === normalized);
+    const duplicate = currentDraft.scans.some((scan) => scan.value === normalized);
     const scan: LocalAuditScan = {
       value: normalized,
       scannedAt: new Date().toISOString(),
@@ -125,16 +125,10 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
     };
 
     setError(null);
-    setScanValue("");
     setLastScanned(scan);
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            scans: [scan, ...current.scans],
-          }
-        : current
-    );
+    const nextDraft = { ...currentDraft, scans: [scan, ...currentDraft.scans] };
+    draftRef.current = nextDraft;
+    setDraft(nextDraft);
   }
 
   function handleSubmitAudit() {
@@ -196,12 +190,32 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
       };
 
       setHistory((current) => [nextHistoryItem, ...current]);
+      draftRef.current = null;
       setDraft(null);
       setLastScanned(null);
-      setScanValue("");
       router.push(`/tools/mars/audit/${encodeURIComponent(payload.session.id)}`);
       router.refresh();
     });
+  }
+
+  async function handleQuickSighting(value: string) {
+    const requestNumber = normalizeScanValue(value);
+    if (!requestNumber) return;
+    setError(null);
+    const response = await fetch("/api/mars/audit/sighting", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestNumber }),
+    });
+    const payload = (await response.json()) as
+      | { ok: true; seenAt: string; unit: { requestNumber: string; orderNumber: string | null; vendor: string | null; serialNumber: string | null; modelNumber: string | null; dateRequested: string | null; returnStatus: string | null } }
+      | { ok: false; error: string };
+    if (!response.ok || !payload.ok) {
+      const message = "error" in payload ? payload.error : "Failed to record item sighting.";
+      setError(message);
+      throw new Error(message);
+    }
+    setLastSighted(payload);
   }
 
   return (
@@ -254,31 +268,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
             </div>
           </div>
 
-          <form onSubmit={handleSubmitScan} className="space-y-4">
-            <label className="form-control">
-              <span className="label-text mb-2">Scan Request Number</span>
-              <input
-                ref={inputRef}
-                type="text"
-                value={scanValue}
-                onChange={(event) => setScanValue(event.target.value)}
-                placeholder={draft ? "Scan barcode or enter request number" : "Start an audit first"}
-                className="input input-bordered input-lg w-full text-2xl font-semibold"
-                disabled={!draft || isPending}
-                autoFocus
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-            </label>
-            <button
-              type="submit"
-              className="btn btn-lg w-full sm:w-auto"
-              disabled={!draft || !scanValue.trim() || isPending}
-            >
-              Add Scan
-            </button>
-          </form>
+          {draft ? <ScannerCapture title="MARS Audit Scanning" description="Capture request numbers continuously without opening the keyboard." onScan={handleSubmitScan} enabled={!isPending} autoActivate count={summary.totalScans} countLabel="scans" feedback={lastScanned ? { tone: lastScanned.duplicate ? "warning" : "success", title: lastScanned.duplicate ? "Duplicate captured" : "Captured locally", value: lastScanned.value, detail: lastScanned.duplicate ? "Already present in this audit." : "Stored on this device." } : null} result={lastScanned ? <div className="grid h-full place-items-center text-center"><div><p className="text-xs uppercase tracking-[0.2em] text-slate-400">Most Recent Scan</p><p className="text-6xl sm:text-8xl font-black break-all mt-3">{lastScanned.value}</p><p className="mt-3 text-slate-300">{lastScanned.duplicate ? "Duplicate in this local audit draft." : "Stored locally on this device."}</p></div></div> : undefined} /> : <div className="alert alert-info"><span>Start an audit to enable scanning mode.</span></div>}
 
           {lastScanned ? (
             <div className={`rounded-2xl border p-5 ${lastScanned.duplicate ? "border-warning/40 bg-warning/10" : "border-success/40 bg-success/10"}`}>
@@ -313,69 +303,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
             </p>
           </div>
 
-          <form
-            className="flex flex-col sm:flex-row gap-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const requestNumber = normalizeScanValue(quickSightingValue);
-              if (!requestNumber) {
-                return;
-              }
-
-              startTransition(async () => {
-                setError(null);
-
-                const response = await fetch("/api/mars/audit/sighting", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ requestNumber }),
-                });
-
-                const payload = (await response.json()) as
-                  | {
-                      ok: true;
-                      seenAt: string;
-                      unit: {
-                        requestNumber: string;
-                        orderNumber: string | null;
-                        vendor: string | null;
-                        serialNumber: string | null;
-                        modelNumber: string | null;
-                        dateRequested: string | null;
-                        returnStatus: string | null;
-                      };
-                    }
-                  | { ok: false; error: string };
-
-                if (!response.ok || !payload.ok) {
-                  setError("error" in payload ? payload.error : "Failed to record item sighting.");
-                  return;
-                }
-
-                setQuickSightingValue("");
-                setLastSighted(payload);
-              });
-            }}
-          >
-            <input
-              type="text"
-              value={quickSightingValue}
-              onChange={(event) => setQuickSightingValue(event.target.value)}
-              placeholder="Scan or enter one request number"
-              className="input input-bordered input-lg flex-1"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              disabled={isPending}
-            />
-            <button
-              type="submit"
-              className="btn btn-secondary btn-lg"
-              disabled={!quickSightingValue.trim() || isPending}
-            >
-              Record Sighting
-            </button>
-          </form>
+          <ScannerCapture title="Quick Sighting" description="Scan one or more request numbers without starting a full audit." onScan={handleQuickSighting} enabled={!isPending} startLabel="Enter Quick Sighting Mode" count={lastSighted ? 1 : 0} countLabel="last sighting" feedback={lastSighted ? { tone: "success", title: "Sighting recorded", value: lastSighted.unit.requestNumber, detail: `Seen ${formatDate(lastSighted.seenAt)}` } : null} result={lastSighted ? <div><p className="text-5xl font-black break-all">{lastSighted.unit.requestNumber}</p><p className="mt-3 text-slate-300">H# {lastSighted.unit.orderNumber ?? "—"} · {lastSighted.unit.vendor ?? "—"} · Serial {lastSighted.unit.serialNumber ?? "—"}</p></div> : undefined} />
 
           {lastSighted ? (
             <div className="rounded-2xl border border-info/30 bg-info/10 p-4 text-sm">

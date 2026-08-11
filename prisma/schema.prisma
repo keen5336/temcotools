@@ -7,24 +7,62 @@ datasource db {
 }
 
 model User {
-  id                String             @id @default(cuid())
-  username          String             @unique
-  displayName       String
-  pinHash           String
-  role              Role               @default(user)
-  isActive          Boolean            @default(true)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  lastLoginAt       DateTime?
-  marsImportBatches MarsImportBatch[]
-  marsEvents        MarsEvent[]
-  marsAuditSessions MarsAuditSession[]
-  marsAuditScans    MarsAuditScan[]
-  marsAuditReports  MarsAuditReport[]
-  scanListSessions  ScanListSession[]
-  scanListItems     ScanListItem[]
-  pickWaves         PickWave[]
-  pickWaveScans     PickWaveScan[]
+  id                    String             @id @default(cuid())
+  username              String             @unique
+  displayName           String
+  pinHash               String
+  role                  Role               @default(user)
+  isActive              Boolean            @default(true)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  lastLoginAt           DateTime?
+  marsImportBatches     MarsImportBatch[]
+  marsEvents            MarsEvent[]
+  marsAuditSessions     MarsAuditSession[]
+  marsAuditScans        MarsAuditScan[]
+  marsAuditReports      MarsAuditReport[]
+  scanListSessions      ScanListSession[]
+  scanListItems         ScanListItem[]
+  pickWaves             PickWave[]
+  pickWaveScans         PickWaveScan[]
+  labelPrintersCreated  LabelPrinter[]     @relation("LabelPrinterCreatedBy")
+  labelPrintersUpdated  LabelPrinter[]     @relation("LabelPrinterUpdatedBy")
+  labelTemplatesCreated LabelTemplate[]    @relation("LabelTemplateCreatedBy")
+  labelTemplatesUpdated LabelTemplate[]    @relation("LabelTemplateUpdatedBy")
+}
+
+model LabelPrinter {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  endpoint        String
+  contentType     String   @default("text/plain")
+  isActive        Boolean  @default(true)
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdByUser   User?    @relation("LabelPrinterCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser   User?    @relation("LabelPrinterUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([isActive, name])
+}
+
+model LabelTemplate {
+  id              String            @id @default(cuid())
+  name            String
+  kind            LabelTemplateKind
+  zpl             String
+  isActive        Boolean           @default(true)
+  isDefault       Boolean           @default(false)
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  createdByUser   User?             @relation("LabelTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser   User?             @relation("LabelTemplateUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([kind, name])
+  @@index([kind, isActive, name])
 }
 
 model Pipeline {
@@ -233,5 +271,11 @@ model PickWaveScan {
 
 enum Role {
   admin
+  manager
   user
+}
+
+enum LabelTemplateKind {
+  mars_return
+  pick_wave
 }

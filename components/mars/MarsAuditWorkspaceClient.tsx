@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { MarsAuditDetail, MarsSavedAuditReport } from "@/lib/mars/audit";
+import ScannerCapture, { type ScannerCaptureSource, type ScannerFeedback } from "@/components/scanner/ScannerCapture";
 
 interface MarsAuditWorkspaceClientProps {
   initialData: MarsAuditDetail;
@@ -11,24 +12,28 @@ export default function MarsAuditWorkspaceClient({
   initialData,
 }: MarsAuditWorkspaceClientProps) {
   const [data, setData] = useState(initialData);
-  const [scanValue, setScanValue] = useState("");
   const [reportLabel, setReportLabel] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const latestSavedReport = data.savedReports[0] ?? null;
   const currentSummary = useMemo(() => data.currentReport.summary, [data.currentReport.summary]);
+  const lastScan = data.scans[0] ?? null;
+  const scanFeedback: ScannerFeedback | null = lastScan ? {
+    tone: lastScan.duplicateInSession ? "warning" : lastScan.matched ? "success" : "info",
+    title: lastScan.duplicateInSession ? "Duplicate captured" : lastScan.matched ? "Matched" : "Unknown request number",
+    value: lastScan.scannedValue,
+    detail: lastScan.manualEntry ? "Added by manual entry." : "Added by scanner.",
+  } : null;
 
-  function handleAddScan(manualEntry: boolean) {
-    const normalized = scanValue.trim();
+  async function handleAddScan(value: string, source: ScannerCaptureSource) {
+    const normalized = value.trim();
     if (!normalized) return;
-
-    startTransition(async () => {
-      setError(null);
-      const response = await fetch(`/api/mars/audit/${encodeURIComponent(data.session.id)}/scans`, {
+    setError(null);
+    const response = await fetch(`/api/mars/audit/${encodeURIComponent(data.session.id)}/scans`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scannedValue: normalized, manualEntry }),
+        body: JSON.stringify({ scannedValue: normalized, manualEntry: source === "manual" }),
       });
 
       const payload = (await response.json()) as
@@ -41,44 +46,16 @@ export default function MarsAuditWorkspaceClient({
             manualEntry: boolean;
             createdAt: string;
             unit: MarsAuditDetail["scans"][number]["unit"];
+            detail: MarsAuditDetail;
           }
         | { ok: false; error: string };
 
       if (!response.ok || !payload.ok) {
-        setError("error" in payload ? payload.error : "Failed to add scan.");
-        return;
+        const message = "error" in payload ? payload.error : "Failed to add scan.";
+        setError(message);
+        throw new Error(message);
       }
-
-      setData((current) => ({
-        ...current,
-        session: {
-          ...current.session,
-          scanCount: current.session.scanCount + 1,
-          summary: {
-            totalScans: current.session.summary.totalScans + 1,
-            matchedScans: current.session.summary.matchedScans + (payload.matched ? 1 : 0),
-            duplicateScans:
-              current.session.summary.duplicateScans + (payload.duplicateInSession ? 1 : 0),
-            unknownScans: current.session.summary.unknownScans + (payload.matched ? 0 : 1),
-          },
-          lastAmendedAt: new Date(),
-        },
-        scans: [
-          {
-            id: payload.id,
-            scannedValue: payload.scannedValue,
-            matched: payload.matched,
-            duplicateInSession: payload.duplicateInSession,
-            manualEntry: payload.manualEntry,
-            createdAt: new Date(payload.createdAt),
-            unit: payload.unit,
-          },
-          ...current.scans,
-        ],
-      }));
-      setScanValue("");
-      window.location.reload();
-    });
+    setData(payload.detail);
   }
 
   function handleDeleteScan(scanId: string) {
@@ -167,35 +144,16 @@ export default function MarsAuditWorkspaceClient({
             <CountCard label="Matched" value={currentSummary.matched} tone="success" />
           </div>
 
-          <div className="flex flex-col lg:flex-row gap-3">
-            <input
-              type="text"
-              value={scanValue}
-              onChange={(event) => setScanValue(event.target.value)}
-              placeholder="Scan or type a request number to amend this audit"
-              className="input input-bordered input-lg flex-1"
-              disabled={isPending}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={!scanValue.trim() || isPending}
-              onClick={() => handleAddScan(false)}
-            >
-              Add Scan
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline"
-              disabled={!scanValue.trim() || isPending}
-              onClick={() => handleAddScan(true)}
-            >
-              Add Manual
-            </button>
-          </div>
+          <ScannerCapture
+            title="Amend Audit Scans"
+            description="Add scanner or manual entries without reloading this audit workspace."
+            onScan={handleAddScan}
+            enabled={!isPending}
+            count={data.session.scanCount}
+            countLabel="session scans"
+            feedback={scanFeedback}
+            result={lastScan ? <div className="grid h-full place-items-center text-center"><div><p className="text-xs uppercase tracking-[0.2em] text-slate-400">Latest amendment</p><p className="text-6xl sm:text-8xl font-black break-all mt-3">{lastScan.scannedValue}</p><p className="mt-3 text-slate-300">{lastScan.duplicateInSession ? "Duplicate" : lastScan.matched ? "Matched" : "Unknown"} · {lastScan.manualEntry ? "Manual" : "Scanner"}</p></div></div> : undefined}
+          />
 
           <div className="flex flex-col lg:flex-row gap-3">
             <input

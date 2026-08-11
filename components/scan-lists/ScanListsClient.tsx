@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import ScannerCapture from "@/components/scanner/ScannerCapture";
 
 export interface ScanListSummary {
   id: string;
@@ -35,11 +36,9 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
   const [draft, setDraft] = useState<LocalDraft | null>(null);
   const [ready, setReady] = useState(false);
   const [name, setName] = useState("");
-  const [scanValue, setScanValue] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -53,8 +52,7 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
     if (!ready) return;
     if (draft) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
     else window.localStorage.removeItem(STORAGE_KEY);
-    if (draft && !draft.closedAt && !isPending) inputRef.current?.focus();
-  }, [draft, ready, isPending]);
+  }, [draft, ready]);
 
   const visibleLists = useMemo(
     () => lists.filter((list) => Boolean(list.archivedAt) === showArchived),
@@ -77,22 +75,18 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
     setError(null);
   }
 
-  function handleScan(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const value = scanValue.trim();
-    if (!value || !draft || draft.closedAt) return;
-    setDraft({
-      ...draft,
-      scans: [{ id: crypto.randomUUID(), value, scannedAt: new Date().toISOString() }, ...draft.scans],
-    });
-    setScanValue("");
+  function handleScan(value: string) {
+    if (!value) return;
+    setDraft((current) => current && !current.closedAt ? {
+      ...current,
+      scans: [{ id: crypto.randomUUID(), value, scannedAt: new Date().toISOString() }, ...current.scans],
+    } : current);
     setError(null);
   }
 
   function handleCloseDraft() {
     if (!draft) return;
     setDraft({ ...draft, closedAt: new Date().toISOString() });
-    setScanValue("");
   }
 
   function handleReopenDraft() {
@@ -104,7 +98,6 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
   function handleDiscardDraft() {
     if (!draft || !window.confirm(`Discard the local draft “${draft.name}” and all ${draft.scans.length} scans?`)) return;
     setDraft(null);
-    setScanValue("");
     setError(null);
   }
 
@@ -143,7 +136,6 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
         itemCount: draft.scans.length,
       }, ...current.filter((list) => list.id !== payload.scanList.id)]);
       setDraft(null);
-      setScanValue("");
     });
   }
 
@@ -213,17 +205,16 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
             </div>
 
             {!draft.closedAt ? (
-              <form onSubmit={handleScan} className="flex flex-col sm:flex-row gap-3">
-                <input
-                  ref={inputRef}
-                  value={scanValue}
-                  onChange={(event) => setScanValue(event.target.value)}
-                  placeholder="Scan barcode or type a value"
-                  className="input input-bordered input-lg flex-1 text-2xl font-semibold"
-                  autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false}
-                />
-                <button className="btn btn-primary btn-lg" disabled={!scanValue.trim()}>Add Scan</button>
-              </form>
+              <ScannerCapture
+                title={draft.name}
+                description="Scan continuously without focusing a text field. The keyboard stays hidden."
+                onScan={handleScan}
+                autoActivate
+                count={draft.scans.length}
+                countLabel="scans"
+                feedback={lastScan ? { tone: "success", title: "Captured", value: lastScan.value, detail: `Saved locally ${formatDate(lastScan.scannedAt)}` } : null}
+                result={lastScan ? <div><p className="text-xs uppercase tracking-[0.2em] text-slate-400 mb-2">Last Scan</p><p className="text-5xl sm:text-7xl font-black break-all">{lastScan.value}</p><div className="mt-5 max-h-48 overflow-auto"><table className="table table-sm text-slate-100"><tbody>{draft.scans.slice(0, 8).map((scan, index) => <tr key={scan.id}><td>{draft.scans.length - index}</td><td className="font-semibold break-all">{scan.value}</td></tr>)}</tbody></table></div></div> : undefined}
+              />
             ) : null}
 
             {lastScan ? (

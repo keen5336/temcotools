@@ -80,6 +80,15 @@ export default async function HomePage() {
               </p>
             </Link>
           )}
+          {(session.role === "admin" || session.role === "manager") && (
+            <Link
+              href="/management/labels"
+              className="block bg-base-100 border border-base-200 rounded-lg p-5 hover:border-primary hover:shadow-sm transition"
+            >
+              <h2 className="text-base font-semibold text-base-content mb-1">Label Configuration</h2>
+              <p className="text-sm text-base-content/70">Manage shared printer destinations and workflow label templates.</p>
+            </Link>
+          )}
           {session.role === "admin" && (
             <Link
               href="/admin/users"

@@ -6,7 +6,7 @@ interface User {
   id: string;
   username: string;
   displayName: string;
-  role: "admin" | "user";
+  role: "admin" | "manager" | "user";
   isActive: boolean;
   lastLoginAt: string | null;
   createdAt: string;
@@ -16,7 +16,7 @@ type EditFields = Partial<Pick<User, "username" | "displayName" | "role" | "isAc
   pin?: string;
 };
 
-const EMPTY_CREATE: { username: string; displayName: string; pin: string; role: "admin" | "user" } =
+const EMPTY_CREATE: { username: string; displayName: string; pin: string; role: "admin" | "manager" | "user" } =
   { username: "", displayName: "", pin: "", role: "user" };
 
 export default function AdminUsersClient() {
@@ -197,7 +197,7 @@ export default function AdminUsersClient() {
                   <td>
                     <span
                       className={`badge badge-sm ${
-                        user.role === "admin" ? "badge-primary" : "badge-ghost"
+                        user.role === "admin" ? "badge-primary" : user.role === "manager" ? "badge-secondary" : "badge-ghost"
                       }`}
                     >
                       {user.role}
@@ -225,12 +225,16 @@ export default function AdminUsersClient() {
                       >
                         Edit
                       </button>
-                      <button
-                        onClick={() => quickUpdate(user.id, { role: user.role === "admin" ? "user" : "admin" })}
-                        className="btn btn-ghost btn-xs text-primary"
+                      <select
+                        aria-label={`Role for ${user.displayName}`}
+                        value={user.role}
+                        onChange={(event) => quickUpdate(user.id, { role: event.target.value as User["role"] })}
+                        className="select select-bordered select-xs"
                       >
-                        {user.role === "admin" ? "Demote" : "Promote"}
-                      </button>
+                        <option value="user">user</option>
+                        <option value="manager">manager</option>
+                        <option value="admin">admin</option>
+                      </select>
                       <button
                         onClick={() => quickUpdate(user.id, { isActive: !user.isActive })}
                         className={`btn btn-ghost btn-xs ${user.isActive ? "text-error" : "text-success"}`}
@@ -293,10 +297,11 @@ export default function AdminUsersClient() {
                   <label className="label"><span className="label-text font-medium">Role</span></label>
                   <select
                     value={createForm.role}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as "admin" | "user" }))}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as User["role"] }))}
                     className="select select-bordered select-sm w-full"
                   >
                     <option value="user">user</option>
+                    <option value="manager">manager</option>
                     <option value="admin">admin</option>
                   </select>
                 </div>
@@ -392,4 +397,3 @@ export default function AdminUsersClient() {
     </div>
   );
 }
-

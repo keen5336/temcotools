@@ -4,7 +4,7 @@ export interface SessionData {
   userId: string;
   username: string;
   displayName: string;
-  role: "admin" | "user";
+  role: "admin" | "manager" | "user";
   isActive: boolean;
 }
 

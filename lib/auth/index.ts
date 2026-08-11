@@ -26,3 +26,11 @@ export async function requireAdmin() {
   }
   return session;
 }
+
+export async function requireManager() {
+  const session = await requireAuth();
+  if (session.role !== "admin" && session.role !== "manager") {
+    redirect("/");
+  }
+  return session;
+}
