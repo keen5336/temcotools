@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     let routeMappings: PickWaveRouteInput[] = [];
     if (typeof routeMappingsRaw === "string" && routeMappingsRaw) {
       const parsed: unknown = JSON.parse(routeMappingsRaw);
-      if (!Array.isArray(parsed) || !parsed.every((row) => row && typeof row.routeNumber === "string" && typeof row.stagingLocation === "string")) {
+      if (!Array.isArray(parsed) || !parsed.every((row) => row && typeof row.routeNumber === "string" && (typeof row.stagingLocation === "string" || row.stagingLocation === null))) {
         return NextResponse.json({ ok: false, error: "Route mappings are invalid." }, { status: 400 });
       }
       routeMappings = parsed;

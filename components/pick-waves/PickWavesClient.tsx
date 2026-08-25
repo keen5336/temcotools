@@ -33,8 +33,8 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const visibleWaves = useMemo(() => waves.filter((wave) => Boolean(wave.archivedAt) === showArchived), [waves, showArchived]);
-  const assignedRoutes = useMemo(() => new Set(Object.values(assignments).filter(Boolean)), [assignments]);
-  const unmappedRoutes = preview?.routeNumbers.filter((route) => !assignedRoutes.has(route)) ?? [];
+  const assignedLocations = useMemo(() => new Set(Object.values(assignments).filter(Boolean)), [assignments]);
+  const noLocationRoutes = preview?.routeNumbers.filter((route) => !assignments[route]) ?? [];
 
   async function handleFile(fileValue: File | null) {
     setFile(fileValue); setPreview(null); setAssignments({}); setError(null);
@@ -45,14 +45,13 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
       const response = await fetch("/api/pick-waves/preview", { method: "POST", body: form });
       const payload = await response.json() as { ok: true; preview: SpreadsheetPreview } | { ok: false; error: string };
       if (!response.ok || !payload.ok) throw new Error("error" in payload ? payload.error : "Failed to read spreadsheet.");
-      if (payload.preview.routeNumbers.length > PICK_WAVE_STAGING_LOCATIONS.length) throw new Error(`This spreadsheet has ${payload.preview.routeNumbers.length} routes but only ${PICK_WAVE_STAGING_LOCATIONS.length} staging locations are available.`);
       setPreview(payload.preview);
     } catch (error) { setError(error instanceof Error ? error.message : "Failed to read spreadsheet."); }
     finally { setPreviewing(false); }
   }
 
-  function assignRoute(location: string, routeNumber: string) {
-    setAssignments((current) => ({ ...current, [location]: routeNumber }));
+  function assignLocation(routeNumber: string, stagingLocation: string) {
+    setAssignments((current) => ({ ...current, [routeNumber]: stagingLocation }));
   }
 
   function handleCreate(event: React.FormEvent<HTMLFormElement>) {
@@ -63,7 +62,7 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
       const form = new FormData();
       form.set("name", name.trim());
       form.set("file", file);
-      form.set("routeMappings", JSON.stringify(Object.entries(assignments).filter(([, routeNumber]) => routeNumber).map(([stagingLocation, routeNumber]) => ({ routeNumber, stagingLocation }))));
+      form.set("routeMappings", JSON.stringify(preview?.routeNumbers.map((routeNumber) => ({ routeNumber, stagingLocation: assignments[routeNumber] || null })) ?? []));
       const response = await fetch("/api/pick-waves", { method: "POST", body: form });
       const payload = await response.json() as { ok: true; pickWave: { id: string } } | { ok: false; error: string };
       if (!response.ok || !payload.ok) {
@@ -96,7 +95,7 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
         <form className="card-body gap-5" onSubmit={handleCreate}>
           <div>
             <h2 className="card-title">Create Pick Wave</h2>
-            <p className="text-sm text-base-content/65 mt-1">Upload an XLSX workbook first. Its route values will populate the staging-location grid.</p>
+            <p className="text-sm text-base-content/65 mt-1">Upload an XLSX workbook first. Its routes will populate the staging map, defaulting to No Location.</p>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <label className="form-control">
@@ -111,19 +110,18 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
 
           {previewing ? <div className="flex items-center gap-3 text-base-content/70"><span className="loading loading-spinner loading-sm" /> Reading spreadsheet and discovering routes…</div> : null}
           {preview ? <div className="space-y-4">
-            <div className="flex flex-wrap gap-2 items-center"><span className="badge badge-success">{preview.itemCount} items found</span><span className="badge badge-primary">{preview.routeNumbers.length} routes found</span>{unmappedRoutes.length ? <span className="badge badge-warning">{unmappedRoutes.length} routes left to assign</span> : <span className="badge badge-success">All routes assigned</span>}</div>
-            <div><h3 className="font-semibold">Staging-location grid</h3><p className="text-sm text-base-content/60 mt-1">Choose one spreadsheet route for each staging slot you need. Each route can be selected once.</p></div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-              {Array.from({ length: 6 }, (_, numberIndex) => numberIndex + 9).map((number) => <div key={number} className="rounded-xl border border-base-200 bg-base-200/40 p-3"><div className="text-lg font-bold mb-2">Location {number}</div><div className="space-y-2">{["A", "B", "C", "D"].map((letter) => {
-                const location = `${number}-${letter}`; const currentRoute = assignments[location] ?? "";
-                return <label key={location} className="grid grid-cols-[2.5rem_1fr] gap-2 items-center"><span className="font-semibold">{letter}</span><select className="select select-bordered select-sm w-full" value={currentRoute} onChange={(event) => assignRoute(location, event.target.value)}><option value="">Unused</option>{preview.routeNumbers.map((route) => <option key={route} value={route} disabled={assignedRoutes.has(route) && route !== currentRoute}>{route}</option>)}</select></label>;
-              })}</div></div>)}
+            <div className="flex flex-wrap gap-2 items-center"><span className="badge badge-success">{preview.itemCount} items found</span><span className="badge badge-primary">{preview.routeNumbers.length} routes found</span>{noLocationRoutes.length ? <span className="badge badge-ghost">{noLocationRoutes.length} with no location</span> : <span className="badge badge-success">All routes have locations</span>}</div>
+            <div><h3 className="font-semibold">Route staging map</h3><p className="text-sm text-base-content/60 mt-1">Choose a staging location for each route. Routes default to No Location, and each actual location can be used once.</p></div>
+            <div className="overflow-x-auto border border-base-200 rounded-xl">
+              <table className="table table-sm"><thead><tr><th>Route Number</th><th>Staging Location</th></tr></thead><tbody>{preview.routeNumbers.map((routeNumber) => {
+                const currentLocation = assignments[routeNumber] ?? "";
+                return <tr key={routeNumber}><td className="font-semibold">{routeNumber}</td><td><select className="select select-bordered select-sm w-full" value={currentLocation} onChange={(event) => assignLocation(routeNumber, event.target.value)}><option value="">No Location</option>{PICK_WAVE_STAGING_LOCATIONS.map((location) => <option key={location} value={location} disabled={assignedLocations.has(location) && location !== currentLocation}>{location}</option>)}</select></td></tr>;
+              })}</tbody></table>
             </div>
-            {unmappedRoutes.length ? <div className="alert alert-warning"><span>Assign these routes before saving: {unmappedRoutes.join(", ")}</span></div> : null}
           </div> : null}
           {error ? <div className="alert alert-error"><span>{error}</span></div> : null}
           <div className="card-actions justify-end">
-            <button className="btn btn-primary" disabled={!name.trim() || !file || !preview || unmappedRoutes.length > 0 || previewing || isPending}>{isPending ? "Creating…" : "Create Pick Wave"}</button>
+            <button className="btn btn-primary" disabled={!name.trim() || !file || !preview || previewing || isPending}>{isPending ? "Creating…" : "Create Pick Wave"}</button>
           </div>
         </form>
       </section>

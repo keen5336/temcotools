@@ -13,7 +13,7 @@ interface PickWaveItem {
   lpn: string | null; serialNumber: string | null; trackingNumber: string | null; partNumber: string | null;
   description: string | null; scannedAt: string | null;
 }
-interface RouteMapping { routeNumber: string; stagingLocation: string }
+interface RouteMapping { routeNumber: string; stagingLocation: string | null }
 interface RecentScan { id: string; scannedValue: string; matched: boolean; alreadyScanned: boolean; createdAt: string }
 interface PickWaveDetail {
   id: string; name: string; sourceFilename: string; createdAt: string; updatedAt: string; archivedAt: string | null; createdBy: string | null;
@@ -39,8 +39,8 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
   }, []);
 
   const scannedCount = wave.items.filter((item) => item.scannedAt).length;
-  const unassignedRoutes = useMemo(() => routeMappings.filter((mapping) => !mapping.stagingLocation.trim()).length, [routeMappings]);
-  const assignedLocations = useMemo(() => new Set(routeMappings.map((mapping) => mapping.stagingLocation).filter(Boolean)), [routeMappings]);
+  const noLocationRoutes = useMemo(() => routeMappings.filter((mapping) => !mapping.stagingLocation).length, [routeMappings]);
+  const assignedLocations = useMemo(() => new Set(routeMappings.map((mapping) => mapping.stagingLocation).filter((location): location is string => Boolean(location))), [routeMappings]);
   const visibleItems = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return wave.items.filter((item) => {
@@ -68,8 +68,8 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
       if (!result.matched) setMessage({ text: "Not in pick wave", tone: "info" });
       else if (result.alreadyScanned) setMessage({ text: "This matching item was already scanned.", tone: "warning" });
       else {
-        setMessage({ text: result.stagingLocation ? `Matched — stage at ${result.stagingLocation}.` : "Matched, but this route has no staging location.", tone: result.stagingLocation ? "success" : "warning" });
-        if (autoPrint) await sendLabel(result.item, result.stagingLocation);
+        setMessage({ text: result.stagingLocation ? `Matched — stage at ${result.stagingLocation}.` : "Item has no location.", tone: result.stagingLocation ? "success" : "info" });
+        if (autoPrint && result.stagingLocation) await sendLabel(result.item, result.stagingLocation);
       }
     } catch (error) {
       const text = error instanceof Error ? error.message : "Scan failed.";
@@ -82,6 +82,7 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
 
   async function sendLabel(item: PickWaveItem | null, stagingLocation: string | null) {
     if (!item) return;
+    if (!stagingLocation) { setMessage({ text: "Item has no location. No label was printed.", tone: "info" }); return; }
     if (!labels.printer || !labels.template) { setMessage({ text: "A manager must activate a printer destination and Pick Wave template before printing.", tone: "warning" }); return; }
     const fields = labelFields(item, stagingLocation);
     const controller = new AbortController();
@@ -109,11 +110,11 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
   }
 
   function updateLocation(routeNumber: string, stagingLocation: string) {
-    setRouteMappings((current) => current.map((mapping) => mapping.routeNumber === routeNumber ? { ...mapping, stagingLocation } : mapping));
+    setRouteMappings((current) => current.map((mapping) => mapping.routeNumber === routeNumber ? { ...mapping, stagingLocation: stagingLocation || null } : mapping));
   }
 
   const lastItem = lastResult?.item ?? null;
-  const previewFields = lastItem ? labelFields(lastItem, lastResult?.stagingLocation ?? null) : null;
+  const previewFields = lastItem && lastResult?.stagingLocation ? labelFields(lastItem, lastResult.stagingLocation) : null;
   const scanFeedback: ScannerFeedback | null = message ? {
     tone: message.tone,
     title: message.text,
@@ -124,7 +125,7 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><Link href="/tools/pick-waves" className="link link-primary text-sm">← All pick waves</Link><div className="flex flex-wrap items-center gap-2 mt-2"><h1 className="text-2xl font-semibold">{wave.name}</h1><span className={`badge ${wave.archivedAt ? "badge-neutral" : "badge-success"}`}>{wave.archivedAt ? "Archived" : "Active"}</span></div><p className="text-sm text-base-content/60 mt-1">Created {formatDate(wave.createdAt)} by {wave.createdBy ?? "unknown"} · {wave.sourceFilename}</p></div>
-        <div className="stats bg-base-100 border border-base-200 shadow-sm"><div className="stat py-3"><div className="stat-title">Picked</div><div className="stat-value text-2xl">{scannedCount}/{wave.items.length}</div></div><div className="stat py-3"><div className="stat-title">Unmapped routes</div><div className={`stat-value text-2xl ${unassignedRoutes ? "text-warning" : "text-success"}`}>{unassignedRoutes}</div></div></div>
+        <div className="stats bg-base-100 border border-base-200 shadow-sm"><div className="stat py-3"><div className="stat-title">Picked</div><div className="stat-value text-2xl">{scannedCount}/{wave.items.length}</div></div><div className="stat py-3"><div className="stat-title">Routes with no location</div><div className="stat-value text-2xl">{noLocationRoutes}</div></div></div>
       </div>
 
       {message ? <div className={`alert ${message.tone === "success" ? "alert-success" : message.tone === "warning" ? "alert-warning" : message.tone === "info" ? "alert-info" : "alert-error"}`}><span>{message.text}</span></div> : null}
@@ -134,9 +135,9 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
           <section className="card bg-base-100 border border-base-200 shadow-sm">
             <div className="card-body gap-5">
               <div className="flex flex-wrap justify-between gap-3"><div><h2 className="card-title">Scan Item</h2><p className="text-sm text-base-content/60 mt-1">Matches LPN, serial, tracking, order, or part number.</p></div><label className="label cursor-pointer gap-3"><span className="label-text font-semibold">Automatically print label</span><input type="checkbox" className="toggle toggle-success" checked={autoPrint} onChange={(event) => { setAutoPrint(event.target.checked); localStorage.setItem(AUTO_PRINT_STORAGE, String(event.target.checked)); }} /></label></div>
-              <ScannerCapture title="Pick Wave Scanning" description="Scanner events are captured anywhere on the one-screen view without opening the keyboard." onScan={handleScan} enabled={!wave.archivedAt} disabledReason="Restore this wave before scanning." count={scannedCount} countLabel="picked" feedback={scanFeedback} result={lastItem ? <div className="min-w-0 max-w-full overflow-hidden"><div className="text-xs uppercase tracking-[0.2em] text-slate-400">Staging Location</div><div className="max-w-full text-5xl sm:text-8xl font-black leading-none my-3 break-all">{lastResult?.stagingLocation || "UNASSIGNED"}</div><div className="grid min-w-0 grid-cols-2 gap-3 text-sm">{itemFields(lastItem).map(({ label, value }) => <div key={label} className="min-w-0"><div className="text-xs uppercase text-slate-400">{label}</div><div className="font-semibold break-all">{value || "—"}</div></div>)}</div><button type="button" className="btn btn-success mt-4 w-full" disabled={!labels.printer || !labels.template} onClick={() => void sendLabel(lastItem, lastResult?.stagingLocation ?? null)}>{lastResult?.alreadyScanned ? "Print Label Anyway" : "Print Label"}</button>{!labels.printer || !labels.template ? <p className="mt-2 text-xs text-amber-300">A printer and template must be configured before printing.</p> : null}</div> : lastResult && !lastResult.matched ? <div className="grid h-full min-w-0 place-items-center text-center text-3xl sm:text-4xl font-black">Not in pick wave</div> : undefined} />
+              <ScannerCapture title="Pick Wave Scanning" description="Scanner events are captured anywhere on the one-screen view without opening the keyboard." onScan={handleScan} enabled={!wave.archivedAt} disabledReason="Restore this wave before scanning." count={scannedCount} countLabel="picked" feedback={scanFeedback} result={lastItem && !lastResult?.stagingLocation ? <div className="grid h-full min-w-0 place-items-center text-center text-3xl sm:text-4xl font-black">Item has no location</div> : lastItem ? <div className="min-w-0 max-w-full overflow-hidden"><div className="text-xs uppercase tracking-[0.2em] text-slate-400">Staging Location</div><div className="max-w-full text-5xl sm:text-8xl font-black leading-none my-3 break-all">{lastResult?.stagingLocation}</div><div className="grid min-w-0 grid-cols-2 gap-3 text-sm">{itemFields(lastItem).map(({ label, value }) => <div key={label} className="min-w-0"><div className="text-xs uppercase text-slate-400">{label}</div><div className="font-semibold break-all">{value || "—"}</div></div>)}</div><button type="button" className="btn btn-success mt-4 w-full" disabled={!labels.printer || !labels.template} onClick={() => void sendLabel(lastItem, lastResult?.stagingLocation ?? null)}>{lastResult?.alreadyScanned ? "Print Label Anyway" : "Print Label"}</button>{!labels.printer || !labels.template ? <p className="mt-2 text-xs text-amber-300">A printer and template must be configured before printing.</p> : null}</div> : lastResult && !lastResult.matched ? <div className="grid h-full min-w-0 place-items-center text-center text-3xl sm:text-4xl font-black">Not in pick wave</div> : undefined} />
 
-              {lastItem ? <div className={`rounded-2xl border-2 p-5 ${lastResult?.alreadyScanned ? "border-warning bg-warning/10" : "border-success bg-success/10"}`}>
+              {lastItem && !lastResult?.stagingLocation ? <div className="rounded-2xl border-2 border-info bg-info/10 p-6"><div className="text-4xl font-bold">Item has no location</div><p className="mt-2">No label will be printed.</p></div> : lastItem ? <div className={`rounded-2xl border-2 p-5 ${lastResult?.alreadyScanned ? "border-warning bg-warning/10" : "border-success bg-success/10"}`}>
                 <div className="text-xs uppercase tracking-[0.2em] text-base-content/60">Staging Location</div><div className="text-5xl sm:text-7xl font-black leading-none my-3 break-words">{lastResult?.stagingLocation || "UNASSIGNED"}</div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">{itemFields(lastItem).map(({ label, value }) => <div key={label}><div className="text-xs uppercase text-base-content/50">{label}</div><div className="font-semibold break-words">{value || "—"}</div></div>)}</div>
                 <button className="btn btn-success mt-5" onClick={() => sendLabel(lastItem, lastResult?.stagingLocation ?? null)}>Print Label</button>
@@ -151,7 +152,7 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
         </div>
 
         <div className="space-y-6">
-          <section className="card bg-base-100 border border-base-200 shadow-sm"><div className="card-body gap-4"><div><h2 className="card-title">Route Staging Map</h2><p className="text-sm text-base-content/60 mt-1">Routes are taken from the uploaded workbook. Each staging location can be used once.</p></div><div className="overflow-x-auto border border-base-200 rounded-xl"><table className="table table-sm"><thead><tr><th>Route Number</th><th>Staging Location</th></tr></thead><tbody>{routeMappings.map((mapping) => <tr key={mapping.routeNumber}><td className="font-semibold">{mapping.routeNumber}</td><td><select className={`select select-bordered select-sm w-full ${mapping.stagingLocation ? "" : "select-warning"}`} value={mapping.stagingLocation} onChange={(event) => updateLocation(mapping.routeNumber, event.target.value)}><option value="">Select location</option>{PICK_WAVE_STAGING_LOCATIONS.map((location) => <option key={location} value={location} disabled={assignedLocations.has(location) && location !== mapping.stagingLocation}>{location}</option>)}</select></td></tr>)}</tbody></table></div><button className="btn btn-primary" disabled={busy || unassignedRoutes > 0} onClick={saveRoutes}>Save Route Mappings</button></div></section>
+          <section className="card bg-base-100 border border-base-200 shadow-sm"><div className="card-body gap-4"><div><h2 className="card-title">Route Staging Map</h2><p className="text-sm text-base-content/60 mt-1">Routes are taken from the uploaded workbook. Routes may have No Location, and each actual staging location can be used once.</p></div><div className="overflow-x-auto border border-base-200 rounded-xl"><table className="table table-sm"><thead><tr><th>Route Number</th><th>Staging Location</th></tr></thead><tbody>{routeMappings.map((mapping) => <tr key={mapping.routeNumber}><td className="font-semibold">{mapping.routeNumber}</td><td><select className="select select-bordered select-sm w-full" value={mapping.stagingLocation ?? ""} onChange={(event) => updateLocation(mapping.routeNumber, event.target.value)}><option value="">No Location</option>{PICK_WAVE_STAGING_LOCATIONS.map((location) => <option key={location} value={location} disabled={assignedLocations.has(location) && location !== mapping.stagingLocation}>{location}</option>)}</select></td></tr>)}</tbody></table></div><button className="btn btn-primary" disabled={busy} onClick={saveRoutes}>Save Route Mappings</button></div></section>
 
           <section className="card bg-base-100 border border-base-200 shadow-sm"><div className="card-body gap-4"><div><h2 className="card-title">Label Output</h2><p className="text-sm text-base-content/60 mt-1">Choose an approved template and where to print. Managers control the endpoint and ZPL.</p></div><LabelOutputSelector printers={labels.printers} templates={labels.templates} printerId={labels.printerId} templateId={labels.templateId} onPrinterChange={labels.setPrinterId} onTemplateChange={labels.setTemplateId} loading={labels.loading} error={labels.error} />
             {previewFields ? <div className="rounded-xl bg-white text-black border p-4" style={{ aspectRatio: "4 / 3" }}><div className="text-xs font-bold uppercase">Staging Location</div><div className="text-5xl font-black text-center border-4 border-black p-3 mt-1 mb-3 break-words">{previewFields.stagingLocation}</div><div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">{[{ k: "Contact", v: previewFields.contact }, { k: "Order", v: previewFields.orderNumber }, { k: "LPN", v: previewFields.lpn }, { k: "Serial", v: previewFields.serialNumber }, { k: "Date", v: previewFields.today }, { k: "Part", v: previewFields.partNumber }].map(({ k, v }) => <div key={k}><div className="text-[10px] font-bold uppercase text-gray-500">{k}</div><div className="font-bold break-words">{v || "UNKNOWN"}</div></div>)}</div></div> : null}
@@ -166,8 +167,8 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
 
 function buildRouteMappings(wave: Pick<PickWaveDetail, "items" | "routeMappings">) {
   const saved = new Map(wave.routeMappings.map((mapping) => [mapping.routeNumber.toLowerCase(), mapping.stagingLocation]));
-  return [...new Set(wave.items.map((item) => item.routeNumber).filter((route): route is string => Boolean(route)))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((routeNumber) => ({ routeNumber, stagingLocation: saved.get(routeNumber.toLowerCase()) ?? "" }));
+  return [...new Set(wave.items.map((item) => item.routeNumber).filter((route): route is string => Boolean(route)))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map((routeNumber) => ({ routeNumber, stagingLocation: saved.get(routeNumber.toLowerCase()) ?? null }));
 }
-function labelFields(item: PickWaveItem, stagingLocation: string | null): PickWaveLabelFields { return { stagingLocation: stagingLocation || "UNASSIGNED", contact: item.contact || "", orderNumber: item.orderNumber || "", lpn: item.lpn || "", serialNumber: item.serialNumber || "", today: new Intl.DateTimeFormat(undefined, { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()), partNumber: item.partNumber || "", routeNumber: item.routeNumber || "" }; }
+function labelFields(item: PickWaveItem, stagingLocation: string): PickWaveLabelFields { return { stagingLocation, contact: item.contact || "", orderNumber: item.orderNumber || "", lpn: item.lpn || "", serialNumber: item.serialNumber || "", today: new Intl.DateTimeFormat(undefined, { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()), partNumber: item.partNumber || "", routeNumber: item.routeNumber || "" }; }
 function itemFields(item: PickWaveItem) { return [{ label: "Route", value: item.routeNumber }, { label: "Contact", value: item.contact }, { label: "Order", value: item.orderNumber }, { label: "LPN", value: item.lpn }, { label: "Serial", value: item.serialNumber }, { label: "Tracking", value: item.trackingNumber }, { label: "Part", value: item.partNumber }, { label: "Description", value: item.description }]; }
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(new Date(value)); }

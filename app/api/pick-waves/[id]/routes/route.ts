@@ -9,7 +9,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!session.userId) return NextResponse.json({ ok: false, error: "Authentication is required." }, { status: 401 });
   if (!session.isActive) return NextResponse.json({ ok: false, error: "User account is inactive." }, { status: 403 });
   const body = await req.json().catch(() => null);
-  if (!body || !Array.isArray(body.routeMappings) || !body.routeMappings.every((row: unknown) => row && typeof (row as { routeNumber?: unknown }).routeNumber === "string" && typeof (row as { stagingLocation?: unknown }).stagingLocation === "string")) {
+  if (!body || !Array.isArray(body.routeMappings) || !body.routeMappings.every((row: unknown) => row && typeof (row as { routeNumber?: unknown }).routeNumber === "string" && (typeof (row as { stagingLocation?: unknown }).stagingLocation === "string" || (row as { stagingLocation?: unknown }).stagingLocation === null))) {
     return NextResponse.json({ ok: false, error: "Valid route mappings are required." }, { status: 400 });
   }
   try {

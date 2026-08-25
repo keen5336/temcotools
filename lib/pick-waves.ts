@@ -21,7 +21,7 @@ export interface PickWaveImportedItem {
 
 export interface PickWaveRouteInput {
   routeNumber: string;
-  stagingLocation: string;
+  stagingLocation: string | null;
 }
 
 const COLUMN_ALIASES: Record<string, keyof Omit<PickWaveImportedItem, "rowNumber">> = {
@@ -137,7 +137,7 @@ export async function createPickWave(options: {
   const mappedRoutes = new Set(routeMappings.map((mapping) => mapping.routeNumber.toLowerCase()));
   const missingRoutes = spreadsheetRoutes.filter((route) => !mappedRoutes.has(route.toLowerCase()));
   const extraRoutes = routeMappings.filter((mapping) => !spreadsheetRoutes.some((route) => route.toLowerCase() === mapping.routeNumber.toLowerCase()));
-  if (missingRoutes.length) throw new PickWaveValidationError(`Assign a staging location to every route. Missing: ${missingRoutes.join(", ")}.`);
+  if (missingRoutes.length) throw new PickWaveValidationError(`Choose a staging location or No Location for every route. Missing: ${missingRoutes.join(", ")}.`);
   if (extraRoutes.length) throw new PickWaveValidationError(`These mapped routes are not in the spreadsheet: ${extraRoutes.map((mapping) => mapping.routeNumber).join(", ")}.`);
 
   const wave = await prisma.pickWave.create({
@@ -191,7 +191,9 @@ export async function replacePickWaveRoutes(id: string, inputs: PickWaveRouteInp
   const spreadsheetRoutes = itemRoutes.map((item) => item.routeNumber).filter((route): route is string => Boolean(route));
   const mappedRoutes = new Set(routeMappings.map((mapping) => mapping.routeNumber.toLowerCase()));
   const missingRoutes = spreadsheetRoutes.filter((route) => !mappedRoutes.has(route.toLowerCase()));
-  if (missingRoutes.length) throw new PickWaveValidationError(`Assign a staging location to every route. Missing: ${missingRoutes.join(", ")}.`);
+  const extraRoutes = routeMappings.filter((mapping) => !spreadsheetRoutes.some((route) => route.toLowerCase() === mapping.routeNumber.toLowerCase()));
+  if (missingRoutes.length) throw new PickWaveValidationError(`Choose a staging location or No Location for every route. Missing: ${missingRoutes.join(", ")}.`);
+  if (extraRoutes.length) throw new PickWaveValidationError(`These mapped routes are not in the spreadsheet: ${extraRoutes.map((mapping) => mapping.routeNumber).join(", ")}.`);
   await prisma.$transaction([
     prisma.pickWaveRouteMapping.deleteMany({ where: { pickWaveId: id } }),
     prisma.pickWaveRouteMapping.createMany({ data: routeMappings.map((mapping) => ({ pickWaveId: id, ...mapping })) }),
@@ -235,16 +237,15 @@ function normalizeRouteMappings(inputs: PickWaveRouteInput[]) {
   const usedLocations = new Set<string>();
   for (const input of inputs) {
     const routeNumber = input.routeNumber.trim();
-    const stagingLocation = input.stagingLocation.trim();
-    if (!routeNumber && !stagingLocation) continue;
-    if (!routeNumber || !stagingLocation) throw new PickWaveValidationError("Each route mapping needs both a route number and staging location.");
-    if (!PICK_WAVE_STAGING_LOCATIONS.includes(stagingLocation)) throw new PickWaveValidationError(`“${stagingLocation}” is not a valid staging location.`);
+    const stagingLocation = input.stagingLocation?.trim() || null;
+    if (!routeNumber) throw new PickWaveValidationError("Each route mapping needs a route number.");
+    if (stagingLocation && !PICK_WAVE_STAGING_LOCATIONS.includes(stagingLocation)) throw new PickWaveValidationError(`“${stagingLocation}” is not a valid staging location.`);
     const routeKey = routeNumber.toLowerCase();
-    const locationKey = stagingLocation.toLowerCase();
     if (unique.has(routeKey)) throw new PickWaveValidationError(`Route “${routeNumber}” was assigned more than once.`);
-    if (usedLocations.has(locationKey)) throw new PickWaveValidationError(`Staging location “${stagingLocation}” was assigned more than once.`);
+    const locationKey = stagingLocation?.toLowerCase();
+    if (locationKey && usedLocations.has(locationKey)) throw new PickWaveValidationError(`Staging location “${stagingLocation}” was assigned more than once.`);
     unique.set(routeKey, { routeNumber, stagingLocation });
-    usedLocations.add(locationKey);
+    if (locationKey) usedLocations.add(locationKey);
   }
   return [...unique.values()];
 }

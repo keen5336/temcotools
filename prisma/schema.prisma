@@ -243,7 +243,7 @@ model PickWaveRouteMapping {
   id              String   @id @default(cuid())
   pickWaveId      String
   routeNumber     String
-  stagingLocation String
+  stagingLocation String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   pickWave        PickWave @relation(fields: [pickWaveId], references: [id], onDelete: Cascade)
