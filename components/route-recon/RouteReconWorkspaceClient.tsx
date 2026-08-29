@@ -15,6 +15,9 @@ declare global {
 const BARCODE_CDN_URL = "https://cdn.jsdelivr.net/npm/bwip-js@3.4.3/dist/bwip-js-min.js";
 const ALL_ROUTES = "__all_routes__";
 const NO_ROUTE_KEY = "__no_route__";
+const SEARCHABLE_FIELDS: Array<keyof Pick<RouteReconItem,
+  "serialNumber" | "contact" | "trackingNumber" | "orderNumber" | "partNumber" | "lpn" | "description"
+>> = ["serialNumber", "contact", "trackingNumber", "orderNumber", "partNumber", "lpn", "description"];
 
 interface RouteReconItem {
   id: string;
@@ -49,11 +52,17 @@ interface RouteGroup {
 
 export default function RouteReconWorkspaceClient({ initialReport }: { initialReport: RouteReconDetail }) {
   const groups = useMemo(() => groupItemsByRoute(initialReport.items), [initialReport.items]);
-  const [selectedRouteKey, setSelectedRouteKey] = useState(groups[0]?.key ?? NO_ROUTE_KEY);
+  const [selectedRouteKey, setSelectedRouteKey] = useState(ALL_ROUTES);
+  const [search, setSearch] = useState("");
   const [printRouteKey, setPrintRouteKey] = useState(ALL_ROUTES);
   const [barcodeReady, setBarcodeReady] = useState(false);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
-  const selectedGroup = groups.find((group) => group.key === selectedRouteKey) ?? groups[0];
+  const selectedGroup = groups.find((group) => group.key === selectedRouteKey);
+  const selectedItems = selectedRouteKey === ALL_ROUTES ? initialReport.items : selectedGroup?.items ?? [];
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visibleItems = normalizedSearch
+    ? selectedItems.filter((item) => SEARCHABLE_FIELDS.some((field) => item[field]?.toLocaleLowerCase().includes(normalizedSearch)))
+    : selectedItems;
   const hasBarcodes = initialReport.items.some((item) => Boolean(item.lpn));
 
   useEffect(() => {
@@ -103,24 +112,15 @@ export default function RouteReconWorkspaceClient({ initialReport }: { initialRe
   return (
     <div className="route-recon-root">
       <div className="route-recon-screen-only space-y-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <Link href="/tools/route-recon" className="link link-primary text-sm">← All Route Recons</Link>
-            <div className="flex flex-wrap items-center gap-3 mt-2">
-              <h1 className="text-2xl font-semibold">{initialReport.name}</h1>
-              {initialReport.archivedAt ? <span className="badge badge-warning">Archived</span> : null}
-            </div>
-            <p className="text-sm text-base-content/60 mt-1">
-              {initialReport.items.length} items across {groups.length} routes · {initialReport.sourceFilename}
-            </p>
+        <div>
+          <Link href="/tools/route-recon" className="link link-primary text-sm">← All Route Recons</Link>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <h1 className="text-2xl font-semibold">{initialReport.name}</h1>
+            {initialReport.archivedAt ? <span className="badge badge-warning">Archived</span> : null}
           </div>
-          <button
-            className="btn btn-primary btn-lg"
-            onClick={() => printRoutes(ALL_ROUTES)}
-            disabled={printingDisabled || !groups.length}
-          >
-            Print All Routes
-          </button>
+          <p className="text-sm text-base-content/60 mt-1">
+            {initialReport.items.length} items across {groups.length} routes · {initialReport.sourceFilename}
+          </p>
         </div>
 
         {barcodeError ? <div className="alert alert-error"><span>{barcodeError}</span></div> : null}
@@ -129,58 +129,71 @@ export default function RouteReconWorkspaceClient({ initialReport }: { initialRe
         ) : null}
 
         <section className="card bg-base-100 border border-base-200 shadow-sm">
-          <div className="card-body">
-            <div>
-              <h2 className="card-title">Routes</h2>
-              <p className="text-sm text-base-content/60 mt-1">Open a route to review its item list, or print it directly.</p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mt-2">
-              {groups.map((group) => {
-                const selected = group.key === selectedGroup?.key;
-                return (
-                  <div
-                    key={group.key}
-                    className={`rounded-xl border p-4 transition ${selected ? "border-primary bg-primary/5" : "border-base-200"}`}
-                  >
-                    <button className="w-full text-left" onClick={() => setSelectedRouteKey(group.key)}>
-                      <span className="block text-xs font-bold uppercase tracking-wide text-base-content/55">Route</span>
-                      <span className="block text-xl font-bold mt-1 break-words">{routeLabel(group.routeNumber)}</span>
-                      <span className="block text-sm text-base-content/60 mt-1">{group.items.length} item{group.items.length === 1 ? "" : "s"}</span>
-                    </button>
-                    <div className="flex gap-2 mt-4">
-                      <button className={`btn btn-sm flex-1 ${selected ? "btn-primary" : "btn-outline"}`} onClick={() => setSelectedRouteKey(group.key)}>
-                        {selected ? "Open" : "View Items"}
-                      </button>
-                      <button className="btn btn-sm btn-outline" disabled={printingDisabled} onClick={() => printRoutes(group.key)}>
-                        Print
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+          <div className="card-body p-4">
+            <div className="flex flex-nowrap gap-3 items-center">
+              <label className="form-control w-44 sm:w-64 shrink-0">
+                <span className="sr-only">Route</span>
+                <select
+                  className="select select-bordered w-full"
+                  value={selectedRouteKey}
+                  onChange={(event) => setSelectedRouteKey(event.target.value)}
+                >
+                  <option value={ALL_ROUTES}>All Routes ({initialReport.items.length})</option>
+                  {groups.map((group) => (
+                    <option key={group.key} value={group.key}>
+                      {routeLabel(group.routeNumber)} ({group.items.length})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-control flex-1 min-w-0">
+                <span className="sr-only">Search items</span>
+                <input
+                  className="input input-bordered w-full"
+                  type="text"
+                  placeholder="Search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </label>
+              <button className="btn btn-outline shrink-0" disabled={!search} onClick={() => setSearch("")}>
+                Clear
+              </button>
             </div>
           </div>
         </section>
 
-        {selectedGroup ? (
-          <section className="space-y-4" aria-labelledby="selected-route-heading">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-base-content/55">Route</p>
-                <h2 id="selected-route-heading" className="text-2xl font-bold">{routeLabel(selectedGroup.routeNumber)}</h2>
-                <p className="text-sm text-base-content/60">{selectedGroup.items.length} item{selectedGroup.items.length === 1 ? "" : "s"}</p>
-              </div>
-              <button className="btn btn-primary" disabled={printingDisabled} onClick={() => printRoutes(selectedGroup.key)}>
-                Print This Route
-              </button>
+        <section className="space-y-4" aria-labelledby="selected-route-heading">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              {selectedRouteKey !== ALL_ROUTES ? <p className="text-xs font-bold uppercase tracking-wide text-base-content/55">Route</p> : null}
+              <h2 id="selected-route-heading" className="text-2xl font-bold">
+                {selectedRouteKey === ALL_ROUTES ? "All Routes" : routeLabel(selectedGroup?.routeNumber ?? null)}
+              </h2>
+              <p className="text-sm text-base-content/60">
+                {normalizedSearch ? `${visibleItems.length} of ${selectedItems.length}` : selectedItems.length} item{visibleItems.length === 1 ? "" : "s"}
+              </p>
             </div>
+            <button
+              className="btn btn-primary"
+              disabled={printingDisabled || !selectedItems.length}
+              onClick={() => printRoutes(selectedRouteKey)}
+            >
+              {selectedRouteKey === ALL_ROUTES ? "Print All Routes" : "Print This Route"}
+            </button>
+          </div>
+          {visibleItems.length ? (
             <div className="space-y-3">
-              {selectedGroup.items.map((item) => (
+              {visibleItems.map((item) => (
                 <RouteReconItemCard key={item.id} item={item} barcodeReady={barcodeReady} />
               ))}
             </div>
-          </section>
-        ) : null}
+          ) : (
+            <div className="rounded-xl border border-dashed border-base-300 bg-base-100 py-12 px-4 text-center text-base-content/60">
+              No items match “{search.trim()}”.
+            </div>
+          )}
+        </section>
       </div>
 
       <div className="route-recon-print-only" aria-hidden="true">
