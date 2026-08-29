@@ -44,6 +44,11 @@ export default async function HomePage() {
       href: "/tools/pick-waves",
       description: "Upload pick lists, map route staging locations, scan items, and print staging labels.",
     },
+    {
+      name: "Route Recon",
+      href: "/tools/route-recon",
+      description: "Organize pick lists by route and print readable item reports with scannable LPN barcodes.",
+    },
   ];
 
   return (

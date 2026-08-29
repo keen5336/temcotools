@@ -49,6 +49,9 @@ export default function NavBar({ session }: NavBarProps) {
           <Link href="/tools/pick-waves" className="btn btn-ghost btn-sm">
             Pick Waves
           </Link>
+          <Link href="/tools/route-recon" className="btn btn-ghost btn-sm">
+            Route Recon
+          </Link>
           {(session.role === "admin" || session.role === "manager") && (
             <Link href="/management/labels" className="btn btn-ghost btn-sm">
               Label Setup
@@ -102,6 +105,9 @@ export default function NavBar({ session }: NavBarProps) {
                 <Link href="/management/labels">Label Configuration</Link>
               </li>
             )}
+            <li>
+              <Link href="/tools/route-recon">Route Recon</Link>
+            </li>
             {session.role === "admin" && (
               <li>
                 <Link href="/admin/users">User Management</Link>

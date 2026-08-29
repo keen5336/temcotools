@@ -25,6 +25,7 @@ model User {
   scanListItems         ScanListItem[]
   pickWaves             PickWave[]
   pickWaveScans         PickWaveScan[]
+  routeRecons           RouteRecon[]
   labelPrintersCreated  LabelPrinter[]     @relation("LabelPrinterCreatedBy")
   labelPrintersUpdated  LabelPrinter[]     @relation("LabelPrinterUpdatedBy")
   labelTemplatesCreated LabelTemplate[]    @relation("LabelTemplateCreatedBy")
@@ -267,6 +268,40 @@ model PickWaveScan {
 
   @@index([pickWaveId, createdAt])
   @@index([itemId])
+}
+
+model RouteRecon {
+  id              String           @id @default(cuid())
+  name            String
+  sourceFilename  String
+  routeCount      Int
+  createdByUserId String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  archivedAt      DateTime?
+  createdByUser   User?            @relation(fields: [createdByUserId], references: [id])
+  items           RouteReconItem[]
+
+  @@index([archivedAt, createdAt])
+}
+
+model RouteReconItem {
+  id             String     @id @default(cuid())
+  routeReconId   String
+  rowNumber      Int
+  routeNumber    String?
+  contact        String?
+  orderNumber    String?
+  lpn            String?
+  serialNumber   String?
+  trackingNumber String?
+  partNumber     String?
+  description    String?
+  createdAt      DateTime   @default(now())
+  routeRecon     RouteRecon @relation(fields: [routeReconId], references: [id], onDelete: Cascade)
+
+  @@unique([routeReconId, rowNumber])
+  @@index([routeReconId, routeNumber])
 }
 
 enum Role {

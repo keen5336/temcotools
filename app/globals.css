@@ -2,3 +2,221 @@
 @plugin "daisyui" {
   themes: light --default, dark --prefersdark, cupcake, nord, dim;
 }
+
+.route-recon-print-only {
+  display: none;
+}
+
+.route-recon-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 22rem);
+  gap: 1rem;
+  border: 1px solid;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.route-recon-item-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.route-recon-field-wide {
+  grid-column: span 2;
+}
+
+.route-recon-field-label {
+  color: color-mix(in oklab, currentColor 58%, transparent);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.route-recon-field-value {
+  font-size: 0.9375rem;
+  font-weight: 650;
+  line-height: 1.3;
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+}
+
+.route-recon-barcode-area {
+  align-items: center;
+  background: white;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  color: black;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 7rem;
+  padding: 0.65rem;
+}
+
+.route-recon-barcode {
+  display: block;
+  height: auto;
+  margin-top: 0.35rem;
+  max-width: 100%;
+}
+
+.route-recon-barcode-placeholder,
+.route-recon-barcode-missing {
+  align-items: center;
+  color: #4b5563;
+  display: flex;
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 700;
+  justify-content: center;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .route-recon-item {
+    grid-template-columns: 1fr;
+  }
+
+  .route-recon-item-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media print {
+  @page {
+    size: letter portrait;
+    margin: 0.42in;
+  }
+
+  html,
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  body.route-recon-print-page nav,
+  body.route-recon-print-page .route-recon-screen-only {
+    display: none !important;
+  }
+
+  body.route-recon-print-page main {
+    margin: 0 !important;
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  body.route-recon-print-page .route-recon-print-only {
+    display: block !important;
+  }
+
+  .route-recon-print-section {
+    break-before: page;
+    color: black;
+    page-break-before: always;
+  }
+
+  .route-recon-print-section.route-recon-print-first {
+    break-before: auto;
+    page-break-before: auto;
+  }
+
+  .route-recon-print-section.route-recon-print-excluded {
+    display: none !important;
+  }
+
+  .route-recon-print-header {
+    align-items: end;
+    border-bottom: 3px solid black;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.18in;
+    padding-bottom: 0.1in;
+  }
+
+  .route-recon-print-header h1 {
+    font-size: 22pt;
+    font-weight: 850;
+    line-height: 1.05;
+    margin: 0.03in 0 0.04in;
+  }
+
+  .route-recon-print-header p {
+    font-size: 9.5pt;
+    line-height: 1.2;
+    margin: 0;
+  }
+
+  .route-recon-print-kicker {
+    font-size: 8pt !important;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .route-recon-print-meta {
+    display: grid;
+    font-size: 8pt;
+    gap: 0.02in 0.1in;
+    grid-template-columns: auto minmax(0, 2.3in);
+    line-height: 1.2;
+    text-align: left;
+  }
+
+  .route-recon-print-meta span {
+    overflow-wrap: anywhere;
+  }
+
+  .route-recon-print-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.14in;
+  }
+
+  .route-recon-item-print {
+    break-inside: avoid;
+    grid-template-columns: minmax(0, 1fr) 3.05in;
+    page-break-inside: avoid;
+  }
+
+  .route-recon-item {
+    border-color: #4b5563;
+    border-radius: 0.08in;
+    gap: 0.14in;
+    padding: 0.14in;
+  }
+
+  .route-recon-item-fields {
+    gap: 0.1in 0.14in;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .route-recon-field-wide {
+    grid-column: span 2;
+  }
+
+  .route-recon-field-label {
+    color: #4b5563;
+    font-size: 7.5pt;
+  }
+
+  .route-recon-field-value {
+    font-size: 10.5pt;
+    line-height: 1.18;
+    margin-top: 0.02in;
+  }
+
+  .route-recon-barcode-area {
+    border-color: #9ca3af;
+    border-radius: 0.06in;
+    min-height: 0.9in;
+    padding: 0.08in;
+  }
+
+  .route-recon-barcode {
+    max-height: 0.78in;
+    max-width: 100%;
+  }
+}
