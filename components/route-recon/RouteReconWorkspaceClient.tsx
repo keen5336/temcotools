@@ -185,7 +185,12 @@ export default function RouteReconWorkspaceClient({ initialReport }: { initialRe
           {visibleItems.length ? (
             <div className="space-y-3">
               {visibleItems.map((item) => (
-                <RouteReconItemCard key={item.id} item={item} barcodeReady={barcodeReady} />
+                <RouteReconItemCard
+                  key={item.id}
+                  item={item}
+                  barcodeReady={barcodeReady}
+                  highlightQuery={search.trim()}
+                />
               ))}
             </div>
           ) : (
@@ -231,20 +236,21 @@ export default function RouteReconWorkspaceClient({ initialReport }: { initialRe
   );
 }
 
-function RouteReconItemCard({ item, barcodeReady, print = false }: {
+function RouteReconItemCard({ item, barcodeReady, print = false, highlightQuery = "" }: {
   item: RouteReconItem;
   barcodeReady: boolean;
   print?: boolean;
+  highlightQuery?: string;
 }) {
   const fields = [
-    { label: "Route", value: item.routeNumber },
-    { label: "Contact", value: item.contact },
-    { label: "Order", value: item.orderNumber },
-    { label: "LPN", value: item.lpn },
-    { label: "Serial", value: item.serialNumber },
-    { label: "Tracking", value: item.trackingNumber },
-    { label: "Part", value: item.partNumber },
-    { label: "Description", value: item.description, wide: true },
+    { label: "Route", value: item.routeNumber, searchable: false },
+    { label: "Contact", value: item.contact, searchable: true },
+    { label: "Order", value: item.orderNumber, searchable: true },
+    { label: "LPN", value: item.lpn, searchable: true },
+    { label: "Serial", value: item.serialNumber, searchable: true },
+    { label: "Tracking", value: item.trackingNumber, searchable: true },
+    { label: "Part", value: item.partNumber, searchable: true },
+    { label: "Description", value: item.description, searchable: true, wide: true },
   ];
 
   return (
@@ -253,7 +259,9 @@ function RouteReconItemCard({ item, barcodeReady, print = false }: {
         {fields.map((field) => (
           <div key={field.label} className={field.wide ? "route-recon-field-wide" : ""}>
             <div className="route-recon-field-label">{field.label}</div>
-            <div className="route-recon-field-value">{field.value || "—"}</div>
+            <div className="route-recon-field-value">
+              {field.value ? highlightMatches(field.value, field.searchable ? highlightQuery : "") : "—"}
+            </div>
           </div>
         ))}
       </div>
@@ -267,6 +275,32 @@ function RouteReconItemCard({ item, barcodeReady, print = false }: {
       </div>
     </article>
   );
+}
+
+function highlightMatches(value: string, query: string) {
+  const normalizedQuery = query.toLocaleLowerCase();
+  if (!normalizedQuery) return value;
+
+  const normalizedValue = value.toLocaleLowerCase();
+  const parts = [];
+  let cursor = 0;
+  let matchStart = normalizedValue.indexOf(normalizedQuery, cursor);
+
+  while (matchStart !== -1) {
+    if (matchStart > cursor) parts.push(value.slice(cursor, matchStart));
+    const matchEnd = matchStart + query.length;
+    parts.push(
+      <mark key={matchStart} className="rounded-sm bg-warning/60 text-base-content px-0.5 font-extrabold">
+        {value.slice(matchStart, matchEnd)}
+      </mark>,
+    );
+    cursor = matchEnd;
+    matchStart = normalizedValue.indexOf(normalizedQuery, cursor);
+  }
+
+  if (!parts.length) return value;
+  if (cursor < value.length) parts.push(value.slice(cursor));
+  return parts;
 }
 
 function LpnBarcode({ value }: { value: string }) {
