@@ -243,14 +243,14 @@ function RouteReconItemCard({ item, barcodeReady, print = false, highlightQuery 
   highlightQuery?: string;
 }) {
   const fields = [
-    { label: "Route", value: item.routeNumber, searchable: false },
-    { label: "Contact", value: item.contact, searchable: true },
-    { label: "Order", value: item.orderNumber, searchable: true },
-    { label: "LPN", value: item.lpn, searchable: true },
-    { label: "Serial", value: item.serialNumber, searchable: true },
-    { label: "Tracking", value: item.trackingNumber, searchable: true },
-    { label: "Part", value: item.partNumber, searchable: true },
-    { label: "Description", value: item.description, searchable: true, wide: true },
+    { label: "Route", value: item.routeNumber, searchable: false, copyable: false },
+    { label: "Contact", value: item.contact, searchable: true, copyable: false },
+    { label: "Order", value: item.orderNumber, searchable: true, copyable: true },
+    { label: "LPN", value: item.lpn, searchable: true, copyable: true },
+    { label: "Serial", value: item.serialNumber, searchable: true, copyable: true },
+    { label: "Tracking", value: item.trackingNumber, searchable: true, copyable: false },
+    { label: "Part", value: item.partNumber, searchable: true, copyable: false },
+    { label: "Description", value: item.description, searchable: true, copyable: false, wide: true },
   ];
 
   return (
@@ -259,8 +259,11 @@ function RouteReconItemCard({ item, barcodeReady, print = false, highlightQuery 
         {fields.map((field) => (
           <div key={field.label} className={field.wide ? "route-recon-field-wide" : ""}>
             <div className="route-recon-field-label">{field.label}</div>
-            <div className="route-recon-field-value">
-              {field.value ? highlightMatches(field.value, field.searchable ? highlightQuery : "") : "—"}
+            <div className="route-recon-field-value flex items-center gap-1.5">
+              <span className="min-w-0 break-words">
+                {field.value ? highlightMatches(field.value, field.searchable ? highlightQuery : "") : "—"}
+              </span>
+              {!print && field.copyable && field.value ? <CopyValueButton label={field.label} value={field.value} /> : null}
             </div>
           </div>
         ))}
@@ -274,6 +277,40 @@ function RouteReconItemCard({ item, barcodeReady, print = false, highlightQuery 
         )}
       </div>
     </article>
+  );
+}
+
+function CopyValueButton({ label, value }: { label: string; value: string }) {
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (resetTimeoutRef.current !== null) window.clearTimeout(resetTimeoutRef.current);
+  }, []);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      setStatus("copied");
+    } catch {
+      setStatus("failed");
+    }
+
+    if (resetTimeoutRef.current !== null) window.clearTimeout(resetTimeoutRef.current);
+    resetTimeoutRef.current = window.setTimeout(() => setStatus("idle"), 1600);
+  }
+
+  const buttonText = status === "copied" ? "Copied" : status === "failed" ? "Retry" : "Copy";
+  return (
+    <button
+      type="button"
+      className={`btn btn-ghost btn-xs h-6 min-h-6 px-1.5 shrink-0 text-[0.65rem] ${status === "copied" ? "text-success" : status === "failed" ? "text-error" : ""}`}
+      aria-label={`${buttonText} ${label}`}
+      title={`${buttonText} ${label}`}
+      onClick={() => void handleCopy()}
+    >
+      <span aria-live="polite">{buttonText}</span>
+    </button>
   );
 }
 
