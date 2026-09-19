@@ -18,6 +18,11 @@ export default async function HomePage() {
       description: "Generate and print MARS return shipping labels.",
     },
     {
+      name: "Label Relay Mode",
+      href: "/tools/label-relay",
+      description: "Use this laptop to print labels sent from scanners and other devices.",
+    },
+    {
       name: "Report Engine",
       href: "/tools/report-engine",
       description:

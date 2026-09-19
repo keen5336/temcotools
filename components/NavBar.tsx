@@ -26,16 +26,19 @@ export default function NavBar({ session }: NavBarProps) {
 
   return (
     <nav className="navbar bg-base-100 border-b border-base-200 px-4">
-      <div className="navbar-start">
-        <Link href="/" className="btn btn-ghost font-semibold">
+      <div className="navbar-start min-w-0 flex-1 items-start">
+        <Link href="/" className="btn btn-ghost shrink-0 font-semibold">
           TemcoTools
         </Link>
-        <div className="hidden sm:flex gap-1 ml-2">
+        <div className="hidden min-w-0 flex-1 flex-wrap gap-1 ml-2 sm:flex">
           <Link href="/tools/mars" className="btn btn-ghost btn-sm">
             MARS Tracking
           </Link>
           <Link href="/tools/rtv-label" className="btn btn-ghost btn-sm">
             MARS Label
+          </Link>
+          <Link href="/tools/label-relay" className="btn btn-ghost btn-sm">
+            Label Relay Mode
           </Link>
           <Link href="/tools/lpn-put-away" className="btn btn-ghost btn-sm">
             LPN Put Away
@@ -69,7 +72,7 @@ export default function NavBar({ session }: NavBarProps) {
           )}
         </div>
       </div>
-      <div className="navbar-end">
+      <div className="navbar-end w-auto shrink-0">
         <div className="dropdown dropdown-end">
           <div tabIndex={0} role="button" className="btn btn-ghost btn-sm">
             {session.displayName}
