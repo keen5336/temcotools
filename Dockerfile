@@ -23,6 +23,13 @@ RUN npm run build
 FROM base AS runner
 WORKDIR /app
 
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.source="https://github.com/keen5336/temcotools" \
+      org.opencontainers.image.revision=$VCS_REF \
+      com.temcotools.deployment-role="production" \
+      com.temcotools.workload-class="warehouse-app" \
+      com.temcotools.production-eligible="true"
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -43,6 +50,7 @@ RUN chown nextjs:nodejs .next
 # https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder /app/node_modules/ws ./node_modules/ws
 
 USER nextjs:nodejs
 

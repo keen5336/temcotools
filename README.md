@@ -134,6 +134,8 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 | `npm run lint` | Run ESLint |
 | `npm run bootstrap` | Create initial admin user (run once after first migration) |
 | `npm run --silent mcp` | Start the TemcoTools MCP server over stdio |
+| `npm run relay` | Start the label relay WebSocket service (port 3002) |
+| `npm run test:relay` | Test relay authentication, routing, queuing, and failures |
 | `npx prisma studio` | Open Prisma database GUI |
 | `npx prisma migrate dev` | Run pending migrations (dev) |
 | `npx prisma migrate deploy` | Run pending migrations (prod) |
@@ -197,12 +199,49 @@ To rebuild and redeploy after pulling new changes:
 
 ## Troubleshooting
 
+### Label Relay Mode
+
+Use relay mode when a scanner cannot reach a label printer but a laptop can:
+
+1. Sign in on the laptop, open the user menu, and select **Label Relay Mode**.
+2. Select the printers reachable from that laptop and turn on **Label Relay Mode**.
+3. Keep that page open and the laptop awake. Its browser must allow the configured printer endpoints, just as for direct printing.
+4. On the scanner's Pick Wave or MARS Label page, choose the printer and turn on **Use label relay**. This preference is shared across label pages and saved on that device.
+
+The laptop's settings are also saved; reopening its relay page restores the enabled state.
+Leaving or closing that page disconnects the relay. All signed-in users can use it.
+Multiple laptops may serve a printer, but each label is sent to exactly one laptop.
+Concurrent scans are queued (up to eight jobs per laptop) and delivered one at a time.
+The scanner waits for the laptop's result. Failed or uncertain jobs are never retried
+automatically: check physical output before retrying to avoid duplicate labels.
+Browser requests use `no-cors`, so a completed request does not prove physical printing.
+
+MARS bookmarklets generated with relay enabled open the extracted fields in TemcoTools
+for review and printing. This keeps authentication on the TemcoTools origin. Existing
+direct-print bookmarklets retain their original behavior until replaced.
+
+The WebSocket service authenticates using the app's encrypted session cookie and
+rechecks active users and managed printers through `/api/label-relay/session`.
+Scanners submit a printer ID and ZPL, never a destination URL. Labels are transient
+in memory; restarting the service does not replay outstanding jobs.
+
+**Production:** `scripts/deploy.sh` builds the published clean `main` revision and restarts
+both `app` and `label-relay`. Caddy must route `/api/label-relay/ws` to `127.0.0.1:3002`;
+all other requests continue to port 3000. See `scripts/label-relay/Caddyfile.example`.
+Update `RELAY_ORIGIN` in Compose if the app hostname changes. The relay port is bound
+only to loopback, and Caddy supplies TLS and WebSocket upgrades. No database migration
+is needed for this feature.
+
+**Development:** run `npm run dev` and `npm run relay` in separate terminals. The browser
+uses port 3002 for relay connections in development. Defaults expect the app at
+`http://localhost:3000`; set `RELAY_ORIGIN` and `RELAY_APP_URL` for a different origin or port.
+
 ### Printing fails or the browser shows a network error
 
-The MARS Label tool sends ZPL data directly to the Zebra printer at `10.108.40.114` over the local network. If printing fails:
+Label tools send ZPL to the selected managed printer over the local network, either from the current device or from the relay laptop. If printing fails:
 
 1. **Allow mixed-content / local network access** – When the browser prompts you to allow communication with the printer's local IP address (e.g. `10.108.40.114`), click **Allow**. Some browsers block requests to private IP addresses from HTTPS pages by default.
-2. **Check the printer endpoint** – In the MARS Label tool settings, confirm the printer endpoint matches the actual printer address and port (e.g. `http://10.108.40.114:9100`).
+2. **Check the printer endpoint** – In Label Configuration, confirm the managed printer endpoint matches the actual printer address and port (e.g. `http://10.108.40.114:9100`).
 3. **Verify network connectivity** – Ensure your device is on the same local network as the printer.
 
 ### The app fails to start / database connection errors

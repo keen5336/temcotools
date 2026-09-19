@@ -1,0 +1,8 @@
+temco.chronchive.com {
+  handle /api/label-relay/ws {
+    reverse_proxy 127.0.0.1:3002
+  }
+  handle {
+    reverse_proxy 127.0.0.1:3000
+  }
+}

@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LabelOutputSelector from "@/components/labels/LabelOutputSelector";
 import { useLabelConfiguration } from "@/components/labels/useLabelConfiguration";
+import { sendLabel } from "@/lib/label-printing";
 import { LabelFields, emptyLabelFields, parseFields, renderTemplate, safeField } from "./marsLabelShared";
 
 type StatusTone = "default" | "ok" | "warn" | "error";
 
-function bookmarkletRuntime(config: { template: string; endpoint: string; contentType: string }) {
+function bookmarkletRuntime(config: { template: string; endpoint: string; contentType: string; relayPage: string; printerId: string; templateId: string }) {
   const urlRe = /^https:\/\/delivery-management\.homedepot\.com\/mars\/return-submissions\/detail\/(\d+)(?:[/?#].*)?$/i;
   if (!urlRe.test(window.location.href)) {
     window.alert("MARS Label bookmarklet only works on Home Depot return submission detail pages.");
@@ -32,14 +33,19 @@ function bookmarkletRuntime(config: { template: string; endpoint: string; conten
     submittedBy: after("Return Submitted By"), vendorRaNumber: after("Vendor RA #") || inline("Vendor RA"),
     dateSubmitted: after("Date Submitted"),
   };
+  if (config.relayPage) {
+    const payload = encodeURIComponent(JSON.stringify({ fields, printerId: config.printerId, templateId: config.templateId }));
+    window.open(config.relayPage + "#relay-label=" + payload, "_blank", "noopener");
+    return;
+  }
   const zpl = config.template.replace(/{{\s*(\w+)\s*}}/g, (_, key) => clean(fields[key] ?? "")) + "\x04";
   window.fetch(config.endpoint, { method: "POST", headers: { "Content-Type": config.contentType }, body: zpl, mode: "no-cors", cache: "no-store" })
     .then(() => window.alert("Label sent."))
-    .catch(() => window.alert("Label sent."));
+    .catch(() => window.alert("Printer delivery could not be confirmed. Check the printer before printing again."));
 }
 
-function buildBookmarkletCode(template: string, endpoint: string, contentType: string) {
-  return `javascript:(${bookmarkletRuntime.toString()})(${JSON.stringify({ template, endpoint, contentType })})`;
+function buildBookmarkletCode(template: string, endpoint: string, contentType: string, relayPage: string, printerId: string, templateId: string) {
+  return `javascript:(${bookmarkletRuntime.toString()})(${JSON.stringify({ template, endpoint, contentType, relayPage, printerId, templateId })})`;
 }
 
 export default function MarsLabelClient() {
@@ -51,7 +57,27 @@ export default function MarsLabelClient() {
 
   const showStatus = useCallback((message: string, tone: StatusTone = "default") => setStatus({ message, tone }), []);
   const zplOutput = useMemo(() => labels.template ? renderTemplate(labels.template.zpl, fields) : "", [labels.template, fields]);
-  const bookmarkletCode = useMemo(() => labels.template && labels.printer ? buildBookmarkletCode(labels.template.zpl, labels.printer.endpoint, labels.printer.contentType) : "", [labels.template, labels.printer]);
+  const bookmarkletCode = useMemo(() => labels.template && labels.printer ? buildBookmarkletCode(labels.template.zpl, labels.printer.endpoint, labels.printer.contentType, labels.relayEnabled ? `${window.location.origin}/tools/rtv-label` : "", labels.printer.id, labels.template.id) : "", [labels.template, labels.printer, labels.relayEnabled]);
+
+  useEffect(() => {
+    if (labels.loading || !window.location.hash.startsWith("#relay-label=")) return;
+    const timer = window.setTimeout(() => {
+      try {
+        const payload = JSON.parse(decodeURIComponent(window.location.hash.slice("#relay-label=".length)));
+        const imported = emptyLabelFields();
+        for (const key of Object.keys(imported) as (keyof LabelFields)[]) {
+          if (typeof payload.fields?.[key] === "string") imported[key] = payload.fields[key];
+        }
+        setFields(imported);
+        labels.setRelayEnabled(true);
+        if (labels.printers.some((printer) => printer.id === payload.printerId)) labels.setPrinterId(payload.printerId);
+        if (labels.templates.some((template) => template.id === payload.templateId)) labels.setTemplateId(payload.templateId);
+        showStatus("MARS fields imported. Review the selected printer, then print through the relay.", "ok");
+      } catch { showStatus("Could not import bookmarklet fields.", "error"); }
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [labels, showStatus]);
 
   useEffect(() => {
     if (parseTimerRef.current) clearTimeout(parseTimerRef.current);
@@ -63,17 +89,10 @@ export default function MarsLabelClient() {
   async function handlePrint() {
     if (!labels.printer || !labels.template) { showStatus("Printer configuration is incomplete", "warn"); return; }
     showStatus("Sending label…", "ok");
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2000);
     try {
-      await fetch(labels.printer.endpoint, { method: "POST", headers: { "Content-Type": labels.printer.contentType }, body: zplOutput + "\x04", mode: "no-cors", cache: "no-store", signal: controller.signal });
-      showStatus("Label sent", "ok");
+      showStatus(await sendLabel(labels.printer, zplOutput + "\x04", labels.relayEnabled), "ok");
     } catch (error) {
-      if (!(error instanceof Error && error.name === "AbortError")) console.error("Printer Fetch Error:", error);
-      showStatus("Label sent", "ok");
-    } finally {
-      clearTimeout(timeout);
-      setTimeout(() => showStatus("Ready"), 2500);
+      showStatus(error instanceof Error ? error.message : "Unable to send label.", "error");
     }
   }
 
@@ -111,7 +130,7 @@ export default function MarsLabelClient() {
           </div></section>
 
           <section className="card bg-base-100 border border-base-200 shadow-sm"><div className="card-body gap-4">
-            <div><h2 className="card-title text-base">4) Bookmarklet payload</h2><p className="text-sm text-base-content/60 mt-1">The bookmarklet uses the currently selected managed template and printer destination.</p></div>
+            <div><h2 className="card-title text-base">4) Bookmarklet payload</h2><p className="text-sm text-base-content/60 mt-1">{labels.relayEnabled ? "The relay bookmarklet opens the extracted MARS fields in TemcoTools. Review them and click Print label." : "The bookmarklet prints directly using the selected managed template and printer destination."}</p></div>
             <textarea className="textarea textarea-bordered font-mono text-xs min-h-36 bg-base-200" readOnly value={bookmarkletCode} />
             <button className="btn btn-sm btn-primary self-start" onClick={() => copy(bookmarkletCode, "Bookmarklet copied")} disabled={!bookmarkletCode}>Copy bookmarklet</button>
           </div></section>
@@ -131,7 +150,7 @@ export default function MarsLabelClient() {
         </div>
       </div>
       <div className="sticky bottom-0 z-40 mt-5 px-4 py-3 border border-base-200 rounded-t-2xl bg-base-100/95 backdrop-blur flex items-center justify-between gap-3 shadow-[0_-10px_30px_rgba(0,0,0,0.12)]"><div><div className="text-sm font-black">Ready to print</div><div className="text-xs text-base-content/50">{labels.template?.name ?? "No template"} → {labels.printer?.name ?? "No printer configured"}</div></div><button className="btn btn-sm btn-success" onClick={handlePrint} disabled={!labels.printer || !labels.template}>Print label</button></div>
-      <div role="status" aria-live="polite" className={`fixed top-16 right-4 z-50 border rounded-full px-3 py-1.5 text-xs font-semibold ${statusClass}`}>{status.message}</div>
+      <div role="status" aria-live="polite" className={`fixed top-16 right-4 z-50 max-w-[calc(100vw-2rem)] sm:max-w-md border rounded-xl bg-base-100 shadow-lg px-3 py-2 text-sm font-semibold ${statusClass}`}>{status.message}</div>
     </>
   );
 }

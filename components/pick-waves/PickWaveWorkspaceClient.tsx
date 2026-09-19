@@ -7,6 +7,7 @@ import { PICK_WAVE_STAGING_LOCATIONS } from "@/lib/pick-wave-constants";
 import ScannerCapture, { type ScannerFeedback } from "@/components/scanner/ScannerCapture";
 import LabelOutputSelector from "@/components/labels/LabelOutputSelector";
 import { useLabelConfiguration } from "@/components/labels/useLabelConfiguration";
+import { sendLabel as printLabel } from "@/lib/label-printing";
 
 interface PickWaveItem {
   id: string; rowNumber: number; routeNumber: string | null; contact: string | null; orderNumber: string | null;
@@ -85,14 +86,12 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
     if (!stagingLocation) { setMessage({ text: "Item has no location. No label was printed.", tone: "info" }); return; }
     if (!labels.printer || !labels.template) { setMessage({ text: "A manager must activate a printer destination and Pick Wave template before printing.", tone: "warning" }); return; }
     const fields = labelFields(item, stagingLocation);
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 2000);
     try {
-      await fetch(labels.printer.endpoint, { method: "POST", headers: { "Content-Type": labels.printer.contentType }, body: renderPickWaveLabel(labels.template.zpl, fields) + "\x04", mode: "no-cors", cache: "no-store", signal: controller.signal });
-      setMessage({ text: `Label sent for ${item.lpn || item.serialNumber || item.orderNumber || "item"}.`, tone: "success" });
-    } catch {
-      setMessage({ text: `Label sent for ${item.lpn || item.serialNumber || item.orderNumber || "item"}.`, tone: "success" });
-    } finally { window.clearTimeout(timeoutId); }
+      const result = await printLabel(labels.printer, renderPickWaveLabel(labels.template.zpl, fields) + "\x04", labels.relayEnabled);
+      setMessage({ text: `${result} Item: ${item.lpn || item.serialNumber || item.orderNumber || "item"}.`, tone: "success" });
+    } catch (error) {
+      setMessage({ text: error instanceof Error ? error.message : "Unable to send label.", tone: "warning" });
+    }
   }
 
   async function saveRoutes() {

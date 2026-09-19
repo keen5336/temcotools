@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LabelTemplateKindValue } from "@/lib/label-configuration";
+import { useLabelRelayPreference } from "./useLabelRelayPreference";
 
 export interface OperatorPrinter {
   id: string;
@@ -23,6 +24,7 @@ interface OperatorConfiguration {
 }
 
 export function useLabelConfiguration(kind: LabelTemplateKindValue) {
+  const relay = useLabelRelayPreference();
   const [configuration, setConfiguration] = useState<OperatorConfiguration>({ printers: [], templates: [] });
   const [printerId, setPrinterIdState] = useState("");
   const [templateId, setTemplateIdState] = useState("");
@@ -64,5 +66,5 @@ export function useLabelConfiguration(kind: LabelTemplateKindValue) {
   const printer = useMemo(() => configuration.printers.find((item) => item.id === printerId) ?? null, [configuration.printers, printerId]);
   const template = useMemo(() => configuration.templates.find((item) => item.id === templateId) ?? null, [configuration.templates, templateId]);
 
-  return { ...configuration, printerId, templateId, setPrinterId, setTemplateId, printer, template, loading, error, reload: load };
+  return { ...configuration, ...relay, printerId, templateId, setPrinterId, setTemplateId, printer, template, loading, error, reload: load };
 }

@@ -18,9 +18,12 @@ services:
 
   app:
     container_name: temcotools
+    image: temcotools-app
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        VCS_REF: ${VCS_REF:-unknown}
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"
@@ -49,6 +52,27 @@ services:
       temco_net:
         aliases:
           - temcotools.internal
+
+  label-relay:
+    image: temcotools-app
+    command: ["node", "scripts/label-relay/server.mjs"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3002:3002"
+    environment:
+      RELAY_APP_URL: http://app:3000
+      RELAY_ORIGIN: https://temco.chronchive.com
+      RELAY_HOST: "0.0.0.0"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3002/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - temco_net
 
   mcp:
     build:
