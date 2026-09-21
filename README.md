@@ -197,6 +197,20 @@ To rebuild and redeploy after pulling new changes:
 3. Run `npm run bootstrap` once to create the initial admin user.
 4. Build with `npm run build`.
 
+## Pick Wave Actions
+
+In **Pick Items**, select a row and choose **Print pick label**. Printing uses the
+selected printer, template, relay preference, and saved route staging location.
+It does not mark the item picked or add a scan. Enable **Show scanned** to reprint
+a picked item. An item needs a saved staging location before it can print.
+
+Under **Recent Scans**, choose **Save to scan list** to save the wave's complete
+scan history, including entries older than the 25-row preview. The saved list
+preserves duplicate and unmatched values, scan times, and scanner attribution.
+The confirmation links to the list in Scan Lists, where CSV export is available.
+Saving unchanged history reuses the same list; new scans produce a new snapshot.
+Existing local scan-list drafts are unaffected.
+
 ## Troubleshooting
 
 ### Label Relay Mode

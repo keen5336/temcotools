@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
-import type { Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { PICK_WAVE_STAGING_LOCATIONS } from "@/lib/pick-wave-constants";
 
@@ -172,6 +173,7 @@ export async function getPickWave(id: string) {
       id: true, name: true, sourceFilename: true, createdAt: true, updatedAt: true, archivedAt: true,
       createdByUser: { select: { displayName: true } },
       routeMappings: { orderBy: { routeNumber: "asc" }, select: { routeNumber: true, stagingLocation: true } },
+      _count: { select: { scans: true } },
       items: {
         orderBy: { rowNumber: "asc" },
         select: { id: true, rowNumber: true, routeNumber: true, contact: true, orderNumber: true, lpn: true, serialNumber: true, trackingNumber: true, partNumber: true, description: true, scannedAt: true },
@@ -183,6 +185,53 @@ export async function getPickWave(id: string) {
 
 export async function setPickWaveArchived(id: string, archived: boolean) {
   return prisma.pickWave.update({ where: { id }, data: { archivedAt: archived ? new Date() : null }, select: { id: true, archivedAt: true } });
+}
+
+export async function savePickWaveScansToList(id: string, userId: string) {
+  const wave = await prisma.pickWave.findUnique({
+    where: { id },
+    select: {
+      name: true,
+      scans: {
+        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+        select: { id: true, scannedValue: true, createdAt: true, scannedByUserId: true },
+      },
+    },
+  });
+  if (!wave) throw new PickWaveValidationError("Pick wave not found.");
+  if (!wave.scans.length) throw new PickWaveValidationError("This pick wave has no scans to save.");
+
+  // Repeated clicks and retries reuse this snapshot; later scans produce a new list.
+  const snapshot = createHash("sha256").update(JSON.stringify(wave.scans.map((scan) => scan.id))).digest("hex");
+  const localDraftId = `pick-wave:${id}:${snapshot}`;
+  const select = { id: true, name: true, _count: { select: { items: true } } } as const;
+  let scanList = await prisma.scanListSession.findUnique({ where: { localDraftId }, select });
+  if (!scanList) {
+    try {
+      scanList = await prisma.scanListSession.create({
+        data: {
+          localDraftId,
+          name: `Pick wave: ${wave.name}`.slice(0, 120),
+          createdByUserId: userId,
+          createdAt: wave.scans[0].createdAt,
+          closedAt: new Date(),
+          items: {
+            create: wave.scans.map((scan) => ({
+              scannedValue: scan.scannedValue,
+              createdAt: scan.createdAt,
+              scannedByUserId: scan.scannedByUserId,
+            })),
+          },
+        },
+        select,
+      });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+      scanList = await prisma.scanListSession.findUnique({ where: { localDraftId }, select });
+      if (!scanList) throw error;
+    }
+  }
+  return { id: scanList.id, name: scanList.name, scanCount: scanList._count.items };
 }
 
 export async function replacePickWaveRoutes(id: string, inputs: PickWaveRouteInput[]) {

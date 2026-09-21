@@ -17,6 +17,7 @@ export default async function PickWavePage({ params }: { params: Promise<{ id: s
           ...wave,
           createdAt: wave.createdAt.toISOString(), updatedAt: wave.updatedAt.toISOString(), archivedAt: wave.archivedAt?.toISOString() ?? null,
           createdBy: wave.createdByUser?.displayName ?? null,
+          scanCount: wave._count.scans,
           items: wave.items.map((item) => ({ ...item, scannedAt: item.scannedAt?.toISOString() ?? null })),
           scans: wave.scans.map((scan) => ({ ...scan, createdAt: scan.createdAt.toISOString() })),
         }} />
