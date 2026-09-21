@@ -203,13 +203,15 @@ To rebuild and redeploy after pulling new changes:
 
 Use relay mode when a scanner cannot reach a label printer but a laptop can:
 
-1. Sign in on the laptop, open the user menu, and select **Label Relay Mode**.
+1. Sign in on the laptop and open **Relay Mode** in the header, beside your name.
 2. Select the printers reachable from that laptop and turn on **Label Relay Mode**.
-3. Keep that page open and the laptop awake. Its browser must allow the configured printer endpoints, just as for direct printing.
+3. Keep TemcoTools open and the laptop awake. You can close the dropdown and navigate between tools; the relay stays connected. Its browser must allow the configured printer endpoints, just as for direct printing.
 4. On the scanner's Pick Wave or MARS Label page, choose the printer and turn on **Use label relay**. This preference is shared across label pages and saved on that device.
 
-The laptop's settings are also saved; reopening its relay page restores the enabled state.
-Leaving or closing that page disconnects the relay. All signed-in users can use it.
+The laptop's settings are also saved; reopening TemcoTools while signed in restores the enabled state.
+The receiver lives in the shared app layout, so page navigation and dropdown visibility
+do not interrupt it. Turning it off, signing out, or closing the tab disconnects it.
+All signed-in users can use it. There is no separate relay page or home-page card.
 Multiple laptops may serve a printer, but each label is sent to exactly one laptop.
 Concurrent scans are queued (up to eight jobs per laptop) and delivered one at a time.
 The scanner waits for the laptop's result. Failed or uncertain jobs are never retried

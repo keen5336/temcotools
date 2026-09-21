@@ -16,7 +16,7 @@ export default function LabelRelayStatus({ printerId }: { printerId: string }) {
         if (message.type === "heartbeat") socket.send(JSON.stringify({ type: "heartbeat" }));
         if (message.type === "status") {
           const relay = message.relays.find((item: { printerIds: string[] }) => item.printerIds.includes(printerId));
-          setStatus(relay ? `Relay ready: ${relay.name}` : "No relay online for this printer. Open Label Relay Mode on the laptop.");
+          setStatus(relay ? `Relay ready: ${relay.name}` : "No relay online for this printer. Enable Relay Mode in the laptop header.");
         }
       };
       socket.onclose = () => {
