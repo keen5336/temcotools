@@ -10,7 +10,8 @@
     "bootstrap": "tsx scripts/bootstrap-admin.ts",
     "mcp": "tsx scripts/mcp-server.ts",
     "relay": "node scripts/label-relay/server.mjs",
-    "test:relay": "node --test scripts/label-relay/*.test.mjs"
+    "test:relay": "node --test scripts/label-relay/*.test.mjs",
+    "test:inventory-audit": "tsx --test scripts/inventory-audit.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

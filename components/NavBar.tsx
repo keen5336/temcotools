@@ -75,6 +75,9 @@ export default function NavBar({ session }: NavBarProps) {
             <li>
               <Link href="/tools/route-recon">Route Recon</Link>
             </li>
+            <li>
+              <Link href="/tools/inventory-audit">Inventory Audit</Link>
+            </li>
             {session.role === "admin" && (
               <li>
                 <Link href="/admin/users">User Management</Link>

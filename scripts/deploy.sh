@@ -25,8 +25,22 @@ if ! chmod -R ug+rwX "$ROOT_DIR/runtime/admin-files" 2>/dev/null; then
   sudo chmod -R ug+rwX "$ROOT_DIR/runtime/admin-files"
 fi
 
-echo "Rebuilding and restarting TemcoTools app..."
-docker compose -f docker-compose.yml up -d --build --no-deps --wait --wait-timeout 120 app
+echo "Building the published app and database migration images..."
+docker compose -f docker-compose.yml build app migrate
+for image in temcotools-app temcotools-migrate; do
+  if [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" != "$VCS_REF" ]] ||
+     [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "com.temcotools.production-eligible"}}')" != "true" ]] ||
+     [[ "$(docker image inspect "$image" --format '{{index .Config.Labels "com.temcotools.deployment-role"}}')" != "production" ]]; then
+    echo "Refusing an image with an unexpected revision or deployment role: $image" >&2
+    exit 1
+  fi
+done
+
+echo "Applying database migrations before restarting the app..."
+docker compose -f docker-compose.yml run --rm --no-deps -T migrate
+
+echo "Restarting TemcoTools app..."
+docker compose -f docker-compose.yml up -d --no-deps --wait --wait-timeout 120 app
 docker compose -f docker-compose.yml up -d --no-deps --wait --wait-timeout 120 label-relay
 
 echo "Current container status:"

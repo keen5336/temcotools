@@ -19,6 +19,20 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
+# Dedicated migration image uses the pinned Prisma CLI from package-lock.json.
+FROM deps AS migrator
+WORKDIR /app
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.source="https://github.com/keen5336/temcotools" \
+      org.opencontainers.image.revision=$VCS_REF \
+      com.temcotools.deployment-role="production" \
+      com.temcotools.workload-class="database-migration" \
+      com.temcotools.production-eligible="true"
+COPY prisma ./prisma
+COPY prisma.config.js ./prisma.config.js
+USER node
+CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+
 # Production image, copy all the files and run next
 FROM base AS runner
 WORKDIR /app

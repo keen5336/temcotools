@@ -2,36 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const XLSX_CDN_URL =
-  "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
-
-const REQUIRED_COLUMNS = [
-  "LPN",
-  "Status",
-  "Order Number",
-  "Vendor",
-  "Received Date",
-  "Description",
-  "Deliver to:",
-] as const;
-
-type SourceRow = Record<string, unknown>;
-
-type SheetJs = {
-  read: (
-    data: Uint8Array,
-    options: Record<string, unknown>
-  ) => {
-    SheetNames: string[];
-    Sheets: Record<string, unknown>;
-  };
-  utils: {
-    sheet_to_json: (
-      worksheet: unknown,
-      options: Record<string, unknown>
-    ) => Record<string, unknown>[];
-  };
-};
+import { LPN_REPORT_COLUMNS as REQUIRED_COLUMNS, findLpnColumn as findColumn, lpnValueToString as valueToString, lpnInputDate as parseDateLike, type LpnSourceRow as SourceRow } from "@/lib/lpn-report";
+import { loadLpnSpreadsheetParser, parseLpnWorkbook as parseWorkbook } from "@/lib/lpn-workbook";
 
 type PutAwayRow = {
   lpn: string;
@@ -45,69 +17,6 @@ function todayInputValue() {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 10);
-}
-
-function normalizeHeader(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, " ").replace(/:$/, "");
-}
-
-function findColumn(row: SourceRow | undefined, columnName: string) {
-  if (!row) return null;
-  const expected = normalizeHeader(columnName);
-  return (
-    Object.keys(row).find((key) => normalizeHeader(key) === expected) ?? null
-  );
-}
-
-function valueToString(value: unknown) {
-  if (value == null) return "";
-  if (value instanceof Date) return value.toLocaleDateString();
-  return String(value).trim();
-}
-
-function excelSerialToInputDate(serial: number) {
-  const millis = Math.round((serial - 25569) * 86_400_000);
-  return new Date(millis).toISOString().slice(0, 10);
-}
-
-function parseDateLike(value: unknown) {
-  if (value == null || value === "") return "";
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const local = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
-    return local.toISOString().slice(0, 10);
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return excelSerialToInputDate(value);
-  }
-  const text = String(value).trim();
-  if (!text) return "";
-  const numeric = Number(text);
-  if (Number.isFinite(numeric) && numeric > 20_000 && numeric < 80_000) {
-    return excelSerialToInputDate(numeric);
-  }
-  const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) {
-    const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60_000);
-    return local.toISOString().slice(0, 10);
-  }
-  return "";
-}
-
-function parseWorkbook(buffer: ArrayBuffer) {
-  const xlsx = window.XLSX as SheetJs | undefined;
-  if (!xlsx) throw new Error("Spreadsheet parser is not loaded yet.");
-
-  const workbook = xlsx.read(new Uint8Array(buffer), {
-    type: "array",
-    cellDates: true,
-  });
-  const firstSheetName = workbook.SheetNames[0];
-  if (!firstSheetName) throw new Error("The workbook does not contain a sheet.");
-
-  return xlsx.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
-    defval: "",
-    raw: true,
-  });
 }
 
 function escapeCsvCell(value: string) {
@@ -157,19 +66,9 @@ export default function LpnPutAwayClient() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (window.XLSX) {
-      setXlsxLoaded(true);
-      return;
-    }
-    const script = document.createElement("script");
-    script.src = XLSX_CDN_URL;
-    script.async = true;
-    script.onload = () => setXlsxLoaded(true);
-    script.onerror = () =>
-      setXlsxLoadError(
-        `Failed to load spreadsheet library from ${XLSX_CDN_URL}. Please check your internet connection.`
-      );
-    document.head.appendChild(script);
+    void loadLpnSpreadsheetParser().then(() => setXlsxLoaded(true)).catch((error: unknown) => {
+      setXlsxLoadError(error instanceof Error ? error.message : "Unable to load the spreadsheet parser.");
+    });
   }, []);
 
   const columns = useMemo(() => {

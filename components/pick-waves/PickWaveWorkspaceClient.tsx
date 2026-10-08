@@ -40,6 +40,10 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
   const savingScanListRef = useRef(false);
   const [savedScanList, setSavedScanList] = useState<{ id: string; name: string; scanCount: number } | null>(null);
   const [scanListError, setScanListError] = useState<string | null>(null);
+  const [exportingAudit, setExportingAudit] = useState(false);
+  const exportingAuditRef = useRef(false);
+  const [auditExport, setAuditExport] = useState<{ totalScanCount: number; newScanCount: number; matchedLpnCount: number; unmatchedScanCount: number } | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; tone: "success" | "warning" | "error" | "info" } | null>(null);
 
   useEffect(() => {
@@ -149,6 +153,19 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
     }
   }
 
+  async function exportToInventoryAudit() {
+    if (exportingAuditRef.current) return;
+    exportingAuditRef.current = true;
+    setExportingAudit(true); setAuditError(null); setAuditExport(null);
+    try {
+      const response = await fetch(`/api/pick-waves/${encodeURIComponent(wave.id)}/inventory-audit`, { method: "POST" });
+      const payload = await response.json() as { ok: true; result: { totalScanCount: number; newScanCount: number; matchedLpnCount: number; unmatchedScanCount: number } } | { ok: false; error: string };
+      if (!response.ok || !payload.ok) throw new Error("error" in payload ? payload.error : "Inventory Audit export failed.");
+      setAuditExport(payload.result);
+    } catch (error) { setAuditError(error instanceof Error ? error.message : "Inventory Audit export failed."); }
+    finally { exportingAuditRef.current = false; setExportingAudit(false); }
+  }
+
   function updateLocation(routeNumber: string, stagingLocation: string) {
     setRouteMappings((current) => current.map((mapping) => mapping.routeNumber === routeNumber ? { ...mapping, stagingLocation: stagingLocation || null } : mapping));
   }
@@ -230,11 +247,16 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
           <section className="card bg-base-100 border border-base-200 shadow-sm"><div className="card-body">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="card-title">Recent Scans</h2>
-              <button type="button" className="btn btn-primary btn-sm" disabled={!wave.scanCount || busy || savingScanList} onClick={() => void saveToScanList()}>{savingScanList ? "Saving…" : "Save to scan list"}</button>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn btn-primary btn-sm" disabled={!wave.scanCount || busy || savingScanList} onClick={() => void saveToScanList()}>{savingScanList ? "Saving…" : "Save to scan list"}</button>
+                <button type="button" className="btn btn-outline btn-sm" disabled={!wave.scanCount || busy || exportingAudit} onClick={() => void exportToInventoryAudit()}>{exportingAudit ? "Exporting…" : "Export to Inventory Audit"}</button>
+              </div>
             </div>
             <p className="text-sm text-base-content/60">Showing the latest {wave.scans.length} of {wave.scanCount} scans. Saving includes all scans in this wave, including duplicates and unmatched values.</p>
             {savedScanList ? <div role="status" className="alert alert-success text-sm"><span>Saved {savedScanList.scanCount} scans to <Link className="link font-semibold" href={`/tools/scan-lists/${savedScanList.id}`}>{savedScanList.name}</Link>.</span></div> : null}
             {scanListError ? <div role="alert" className="alert alert-error text-sm">{scanListError}</div> : null}
+            {auditExport ? <div role="status" className="alert alert-success text-sm"><span>Exported {auditExport.totalScanCount} scans ({auditExport.newScanCount} new); {auditExport.matchedLpnCount} LPNs matched and {auditExport.unmatchedScanCount} scans need review. <Link href="/tools/inventory-audit" className="link font-semibold">Open Inventory Audit</Link>.</span></div> : null}
+            {auditError ? <div role="alert" className="alert alert-error text-sm">{auditError}</div> : null}
             <div className="overflow-auto max-h-72">
               <table className="table table-sm">
                 <thead><tr><th>Value</th><th>Result</th><th>Time</th></tr></thead>

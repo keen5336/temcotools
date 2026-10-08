@@ -314,3 +314,60 @@ enum LabelTemplateKind {
   mars_return
   pick_wave
 }
+
+
+// LPN source records and scan evidence are retained independently of pick-wave deletion.
+model InventoryAuditItem {
+  id               String   @id @default(cuid())
+  lpn              String   @unique
+  status           String
+  orderNumber      String
+  vendor           String
+  receivedDate     String
+  description      String
+  customerName     String
+  sourceData       Json
+  contentHash      String
+  revision         Int      @default(1)
+  firstSeenAt      DateTime @default(now())
+  sourceChangedAt  DateTime @default(now())
+  verifiedAt       DateTime?
+  lastScannedAt    DateTime?
+  lastScanWaveName  String?
+  archivedAt       DateTime?
+
+  @@index([archivedAt, sourceChangedAt, lpn])
+  @@index([verifiedAt])
+}
+
+model InventoryAuditImport {
+  id             String   @id @default(cuid())
+  filename       String
+  uploadedByName String
+  createdAt      DateTime @default(now())
+  rowCount       Int
+  insertedCount  Int
+  changedCount   Int
+  unchangedCount Int
+  duplicateCount Int
+  blankCount     Int
+
+  @@index([createdAt])
+}
+
+model InventoryAuditScan {
+  id              String   @id @default(cuid())
+  sourceScanId    String   @unique
+  pickWaveId      String
+  pickWaveName    String
+  scannedValue    String
+  lpn             String?
+  scannedByName   String?
+  matchedPickWave Boolean
+  duplicateInWave Boolean
+  scannedAt       DateTime
+  exportedAt      DateTime @default(now())
+
+  @@index([lpn, scannedAt])
+  @@index([pickWaveId])
+}

@@ -168,27 +168,26 @@ should be added after the database has explicit fields for Temco-side resolution
 
 ## Docker Deployment
 
-To rebuild and redeploy after pulling new changes:
+On the VPS, pull the published main branch and run the deployment script:
 
-1. **Rebuild the image**:
-   ```bash
-   docker compose build
-   ```
+```bash
+cd /srv/temcotools
+git pull --ff-only
+./scripts/deploy.sh
+```
 
-2. **Restart the services**:
-   ```bash
-   docker compose up -d
-   ```
+The script requires a clean main checkout matching `origin/main`. It builds the
+app and a separate migration image using the locked Prisma version, applies
+pending migrations, and then restarts the app and label relay with health checks.
+The existing database service stays running. To apply migrations separately:
 
-3. **Apply database migrations** (if any):
-   ```bash
-   docker compose exec app npx prisma migrate deploy
-   ```
+```bash
+docker compose build migrate
+docker compose run --rm --no-deps -T migrate
+```
 
-4. **Bootstrap admin user** (if first time or needed, requires `BOOTSTRAP_ADMIN_*` environment variables):
-   ```bash
-   docker compose exec app npx tsx scripts/bootstrap-admin.ts
-   ```
+Bootstrap the first administrator once using `scripts/bootstrap-admin.ts` with
+`BOOTSTRAP_ADMIN_*` environment variables, as described above.
 
 ## Manual Deployment
 
@@ -210,6 +209,39 @@ preserves duplicate and unmatched values, scan times, and scanner attribution.
 The confirmation links to the list in Scan Lists, where CSV export is available.
 Saving unchanged history reuses the same list; new scans produce a new snapshot.
 Existing local scan-list drafts are unaffected.
+
+## Inventory Audit
+
+Open **Inventory Audit** from Operations Tools, upload the same `.xlsx` or `.xls`
+LPN report used by **LPN Put Away**, then use **Export to Inventory Audit** under
+Recent Scans in each Pick Wave. The report imports every status and received date.
+
+The running inventory uses a case-insensitive LPN key and retains all imported
+report columns. Reimporting identical data does not change the row, its scan
+confirmation, or archive state. A change to any report field increases the revision,
+restores an archived row to Active, and marks it Needs scan. LPNs absent from a later
+report stay in the tracker. Archive/restore individual rows or select up to 100
+rows per page; search and CSV export can include archived inventory.
+
+Pick Wave exports retain the entire scan history, including duplicates, scanner
+names, original scan times, and unmatched values. Serial/order/part scans use the
+LPN of the matched picked item. Unmatched scans can match an exact LPN; matched
+items without an LPN remain visible for review. Repeated exports add only new scan
+events. Deleting a Pick Wave does not delete its audit evidence. Reports imported
+after scans match previously unknown LPNs automatically on first appearance. After
+a report change, only a new exported scan taken after that change confirms the
+current revision; old scans stay visible as history.
+
+Reports are imported atomically in batches, with a 100,000-row / 50 MB limit.
+Identical duplicate LPN rows are collapsed; conflicting duplicates reject the
+report so an arbitrary row cannot overwrite inventory. The inventory and unmatched
+scan views are paginated, and inventory CSV exports include all rows matching the
+selected filters, including each full source report row.
+
+Run `npm run test:inventory-audit` for report validation tests. For database tests,
+apply migrations to a disposable local database named `temcotools_audit_test` and
+set `AUDIT_TEST_DATABASE_URL` to its connection URL. The integration suite refuses
+other database names or nonlocal hosts.
 
 ## Troubleshooting
 

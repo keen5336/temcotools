@@ -74,6 +74,21 @@ services:
     networks:
       - temco_net
 
+  migrate:
+    image: temcotools-migrate
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+      args:
+        VCS_REF: ${VCS_REF:-unknown}
+    profiles:
+      - maintenance
+    environment:
+      DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
+    networks:
+      - temco_net
+
   mcp:
     build:
       context: .

@@ -30,6 +30,11 @@ export default async function HomePage() {
         "Upload an LPN report and list Placing LPNs by received date.",
     },
     {
+      name: "Inventory Audit",
+      href: "/tools/inventory-audit",
+      description: "Track every reported LPN, compare Pick Wave scans, and archive completed inventory.",
+    },
+    {
       name: "Barcode Generator",
       href: "/tools/barcode-generator",
       description: "Paste a list of values to generate and print a batch of barcodes.",
