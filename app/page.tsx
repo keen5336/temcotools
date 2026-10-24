@@ -7,6 +7,11 @@ export default async function HomePage() {
 
   const tools = [
     {
+      name: "DMP API Relay",
+      href: "/tools/api-relay",
+      description: "Connect your signed-in DMP tab and run API operations through your own account.",
+    },
+    {
       name: "MARS Tracking",
       href: "/tools/mars",
       description:

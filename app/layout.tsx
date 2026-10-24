@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { THEMES } from "@/lib/themes";
 import { getSession } from "@/lib/auth";
 import LabelRelayProvider from "@/components/labels/LabelRelayProvider";
+import ApiRelayLease from "@/components/api-relay/ApiRelayLease";
 
 export const metadata: Metadata = {
   title: "TemcoTools",
@@ -29,7 +30,7 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="antialiased">
-        <ThemeProvider><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></ThemeProvider>
+        <ThemeProvider><ApiRelayLease userId={userId} /><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></ThemeProvider>
       </body>
     </html>
   );

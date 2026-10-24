@@ -73,6 +73,9 @@ export default function NavBar({ session }: NavBarProps) {
               </li>
             )}
             <li>
+              <Link href="/tools/api-relay">DMP API Relay</Link>
+            </li>
+            <li>
               <Link href="/tools/route-recon">Route Recon</Link>
             </li>
             <li>

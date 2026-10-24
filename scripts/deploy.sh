@@ -42,6 +42,7 @@ docker compose -f docker-compose.yml run --rm --no-deps -T migrate
 echo "Restarting TemcoTools app..."
 docker compose -f docker-compose.yml up -d --no-deps --wait --wait-timeout 120 app
 docker compose -f docker-compose.yml up -d --no-deps --wait --wait-timeout 120 label-relay
+docker compose -f docker-compose.yml up -d --no-deps --wait --wait-timeout 120 api-relay
 
 echo "Current container status:"
 docker compose -f docker-compose.yml ps

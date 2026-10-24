@@ -140,6 +140,18 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 | `npx prisma migrate dev` | Run pending migrations (dev) |
 | `npx prisma migrate deploy` | Run pending migrations (prod) |
 
+## DMP API Relay
+
+**DMP API Relay** connects an authenticated DMP browser tab exclusively to its
+paired Temco user. A small bookmarklet loads the current executor from Temco;
+the server supplies named API operations and the tab returns correlated results
+over a separate WebSocket service. Multiple requests can run concurrently.
+
+Configuration and deployment routing are documented in
+[`scripts/api-relay/README.md`](scripts/api-relay/README.md). Defaults use Home
+Depot DMP, `/identity/me` (`subject`), and deliveries for location 5288. Run the broker
+with `npm run api-relay` and its tests with `npm run test:api-relay`.
+
 ## MCP Server
 
 TemcoTools includes a read-only MCP server for MARS workflow inspection. It uses the same

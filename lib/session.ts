@@ -6,6 +6,7 @@ export interface SessionData {
   displayName: string;
   role: "admin" | "manager" | "user";
   isActive: boolean;
+  apiRelaySessionId?: string;
 }
 
 export const sessionOptions: SessionOptions = {
