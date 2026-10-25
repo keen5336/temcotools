@@ -16,6 +16,7 @@ model User {
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
   lastLoginAt           DateTime?
+  favoriteToolIds       String[]           @default([])
   marsImportBatches     MarsImportBatch[]
   marsEvents            MarsEvent[]
   marsAuditSessions     MarsAuditSession[]

@@ -6,6 +6,7 @@ import type { SessionData } from "@/lib/session";
 import { useTheme, THEMES } from "@/components/ThemeProvider";
 import LabelRelayMenu from "@/components/labels/LabelRelayMenu";
 import { useLabelRelay } from "@/components/labels/LabelRelayProvider";
+import MobileToolDrawer from "@/components/tools/MobileToolDrawer";
 
 interface NavBarProps {
   session: SessionData;
@@ -30,15 +31,16 @@ export default function NavBar({ session }: NavBarProps) {
 
   return (
     <nav className="navbar bg-base-100 border-b border-base-200 px-2 sm:px-4">
-      <div className="navbar-start min-w-0 flex-1 items-start">
-        <Link href="/" className="btn btn-ghost shrink-0 px-2 sm:px-4 font-semibold">
-          TemcoTools
+      <div className="navbar-start min-w-0 flex-1 items-center gap-1">
+        <MobileToolDrawer />
+        <Link href="/" className="btn btn-ghost min-w-0 px-2 sm:px-4 font-semibold text-sm sm:text-base">
+          <span className="truncate">TemcoTools</span>
         </Link>
       </div>
       <div className="navbar-end w-auto min-w-0 gap-1">
         <LabelRelayMenu />
         <div className="dropdown dropdown-end min-w-0">
-          <div tabIndex={0} role="button" className="btn btn-ghost btn-sm max-w-20 sm:max-w-52">
+          <div tabIndex={0} role="button" className="btn btn-ghost btn-sm max-w-16 sm:max-w-52">
             <span className="truncate">{session.displayName}</span>
           </div>
           <ul

@@ -1,0 +1,1 @@
+ALTER TABLE "User" ADD COLUMN "favoriteToolIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

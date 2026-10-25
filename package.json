@@ -13,7 +13,8 @@
     "test:relay": "node --test scripts/label-relay/*.test.mjs",
     "api-relay": "node scripts/api-relay/server.mjs",
     "test:api-relay": "tsx --test scripts/api-relay/*.test.mjs scripts/api-relay/*.test.ts",
-    "test:inventory-audit": "tsx --test scripts/inventory-audit.test.ts"
+    "test:inventory-audit": "tsx --test scripts/inventory-audit.test.ts",
+    "test:favorites": "tsx --test scripts/tool-favorites.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

@@ -140,6 +140,23 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 | `npx prisma migrate dev` | Run pending migrations (dev) |
 | `npx prisma migrate deploy` | Run pending migrations (prod) |
 
+## Favorites and mobile navigation
+
+Use the star in the upper-right corner of a tool card to move it into
+**Favorites**, above **Operations Tools**. Select **Reorder favorites** to drag
+cards or use the earlier/later buttons, then choose **Done**. Unstarred tools
+stay below. Favorites and their order are saved to the signed-in user's account
+and shared across that user's devices; other users keep their own selections.
+
+On mobile, the hamburger button opens the tools drawer from the left, with
+favorites first in the same order. It lists only tools available to the current
+role. Escape, the close button, or the backdrop closes the drawer.
+
+Apply migration `20261025010000_tool_favorites` before running this revision in
+production. It adds an empty-by-default favorites array to each user; existing
+tool access and server-side authorization remain unchanged.
+Run `npm run test:favorites` for catalog, permission, and ordering checks.
+
 ## DMP API Relay
 
 **DMP API Relay** connects an authenticated DMP browser tab exclusively to its
