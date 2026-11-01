@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { assertCapability, type Capability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { recordWorkflowObservation, resolveWarehouseIdentifierInTransaction } from "@/lib/warehouse/units";
+import { currentOfficeDispatchRestrictions, reviewWorkflowOfficeObservation } from "@/lib/office/service";
 import { DispatchError, dispatchDay, dispatchHash, dispatchId, dispatchLine, dispatchOperation, dispatchPlain, dispatchReason, dispatchSlot, dispatchSourceNotice, dispatchStamp, expandDispatchLines, type DispatchSlot } from "./model";
 
 export { DispatchError } from "./model";
@@ -282,9 +283,10 @@ async function lockedFinalsSession(tx: Prisma.TransactionClient, sessionId: stri
 
 export async function recordFinalsScan(principal: Principal, raw: unknown) {
   const input = z.object({ sessionId: dispatchId, eventId: z.string().min(1).max(100), lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), rawIdentifier: z.string().min(1).max(500), confirmPlacement: z.boolean(), capturedAt: dispatchStamp, capturedByUserId: dispatchId.optional(), captureMethod: z.enum(["scanner", "manual", "ocr"]).default("manual"), deviceId: z.string().max(200).optional(), identifierType: z.enum(["auto", "lpn", "msn", "serial", "submission"]).default("auto"), namespace: z.string().max(100).optional() }).strict().parse(raw);
-  return dispatchCommand(principal, `finals:${dispatchHash([input.sessionId, input.eventId])}`, "finals_scan", input, "workflow.execute", async (tx) => {
+  const receipt = await dispatchCommand(principal, `finals:${dispatchHash([input.sessionId, input.eventId])}`, "finals_scan", input, "workflow.execute", async (tx) => {
     const session = await lockedFinalsSession(tx, input.sessionId); const slots = slotsOf(session.snapshot.slots);
     const physical = await recordWorkflowObservation(tx, principal, { eventId: `finals:${dispatchHash([input.sessionId, input.eventId])}`, rawIdentifier: input.rawIdentifier, identifierType: input.identifierType, namespace: input.namespace, type: input.confirmPlacement ? "placement" : "presence", location: input.lane, capturedAt: input.capturedAt, capturedByUserId: input.capturedByUserId, captureMethod: input.captureMethod, deviceId: input.deviceId });
+    const office = await reviewWorkflowOfficeObservation(tx, principal, { observationId: physical.observation.observationId });
     const current = session.board.headSnapshotId === session.snapshotId;
     const identity = await resolveWarehouseIdentifierInTransaction(tx, { value: input.rawIdentifier, kind: input.identifierType, namespace: input.namespace });
     let unitId = physical.unitId;
@@ -317,14 +319,20 @@ export async function recordFinalsScan(principal: Principal, raw: unknown) {
       }
     }
     else if (!slots.some((slot) => slot.lane === input.lane) && !await tx.dispatchAmendment.count({ where: { sessionId: session.id, lane: input.lane } })) { outcome = "unknown_lane"; message = "This lane is not defined for the selected dispatch version. Actual observed location and unidentified scan were retained."; }
+    const dispatchOutcome = outcome;
+    const handling = office.blockingDispatch.filter((instruction) => instruction.unitId === unitId);
+    if (unitId && identity.resolution === "resolved" && handling.length) {
+      outcome = "office_conflict";
+      message = `OFFICE / ${handling.some((item) => item.authorityState === "authorized_rtv") ? "AUTHORIZED RTV" : "HANDLING REVIEW"}: ${handling.map((item) => `${item.instruction}${item.targetLocation ? ` (instruction: ${item.targetLocation}; placement is not confirmed)` : ""}${item.authorityState === "rtv_review_required" ? ` Review: ${item.reason}` : ""}`).join(" ")} Delivery lane fulfillment is blocked; no MARS submission or print was sent.`;
+    }
     const resolved = ["confirmed", "duplicate", "placement_confirmation_required", "stale_snapshot"].includes(outcome);
     const scan = await tx.dispatchFinalsScan.create({ data: { sessionId: session.id, userId: principal.userId, eventId: input.eventId, fingerprint: dispatchHash(input), rawIdentifier: input.rawIdentifier, actualLane: input.lane, expectedLane, unitId, physicalObservationId: physical.observation.observationId, resolution: identity.resolution, candidateUnitIds: identity.candidateUnitIds, outcome, capturedAt: new Date(input.capturedAt), reviewStatus: resolved ? "resolved" : "open" } });
     let changed = !resolved;
     if (unitId) {
       const credits = await tx.dispatchFinalsCredit.findMany({ where: { sessionId: session.id, unitId, status: "confirmed" } });
-      for (const credit of credits) if ((credit.lane !== input.lane && new Date(input.capturedAt) >= credit.confirmedAt) || outcome === "confirmed") {
+      for (const credit of credits) if ((credit.lane !== input.lane && new Date(input.capturedAt) >= credit.confirmedAt) || outcome === "confirmed" || outcome === "office_conflict") {
         await tx.dispatchFinalsCredit.update({ where: { id: credit.id }, data: { status: "invalidated", invalidatedByScanId: scan.id, invalidatedAt: new Date() } });
-        await amendLane(tx, principal, session.id, credit.lane, "Later physical location/confirmation changed; targeted lane recheck required.", [credit.slotKey]); changed = true;
+        await amendLane(tx, principal, session.id, credit.lane, outcome === "office_conflict" ? "Current exact-unit office handling conflicts with delivery; fresh review and lane confirmation are required." : "Later physical location/confirmation changed; targeted lane recheck required.", [credit.slotKey]); changed = true;
       }
     }
     if (outcome === "confirmed" && allocation && unitId) {
@@ -338,10 +346,17 @@ export async function recordFinalsScan(principal: Principal, raw: unknown) {
     }
     if (!resolved) await amendLane(tx, principal, session.id, input.lane, "A later exception requires review before this lane remains signed off.", allocation ? [allocation.slotKey] : []);
     if (changed) await tx.dispatchFinalsSession.update({ where: { id: session.id }, data: { revision: { increment: 1 } } });
-    await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "finals_scan", note: message, payload: { scanId: scan.id, outcome, observedLane: input.lane, expectedLane, physicalObservationId: physical.observation.observationId } });
+    await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "finals_scan", note: message, payload: { scanId: scan.id, outcome, dispatchOutcome, observedLane: input.lane, expectedLane, physicalObservationId: physical.observation.observationId, office } });
     const revision = (await tx.dispatchFinalsSession.findUniqueOrThrow({ where: { id: session.id }, select: { revision: true } })).revision;
-    return { observation: physical.observation, scan: dispatchPlain(scan), outcome, expectedLane, actionMessage: message, sessionRevision: revision, fulfilled: outcome === "confirmed" || outcome === "duplicate", sourceNotice: dispatchSourceNotice };
+    return { observation: physical.observation, scan: dispatchPlain(scan), outcome, dispatchOutcome, office, expectedLane, actionMessage: message, sessionRevision: revision, fulfilled: outcome === "confirmed" || outcome === "duplicate", sourceNotice: dispatchSourceNotice };
   });
+  // The current scan/rules/task receipt above is atomic. Other current dispatch
+  // scopes recheck this same immutable observation separately, with ordered
+  // board locks; retrying this local follow-up never repeats an external effect.
+  let dispatchReview: { affectedSessionIds: string[] } | { pendingReview: true };
+  try { dispatchReview = await reviewDispatchObservation(principal, { observationId: receipt.observation.observationId }); }
+  catch { dispatchReview = { pendingReview: true }; }
+  return { ...receipt, dispatchReview };
 }
 
 export async function reviewFinalsException(principal: Principal, raw: unknown) {
@@ -351,13 +366,14 @@ export async function reviewFinalsException(principal: Principal, raw: unknown) 
     if (!scan) throw new DispatchError("Scan not found.", 404);
     const session = await lockedFinalsSession(tx, scan.sessionId);
     if (session.board.headSnapshotId !== session.snapshotId || session.revision !== input.expectedSessionRevision) throw new DispatchError("Verification changed. Reload before reviewing the exception.", 409);
-    if (["wrong_lane", "ambiguous", "unidentified", "ambiguous_requirement", "allocation_required", "unknown_lane"].includes(scan.outcome)) {
+    if (["wrong_lane", "ambiguous", "unidentified", "ambiguous_requirement", "allocation_required", "unknown_lane", "office_conflict"].includes(scan.outcome)) {
       const correction = await tx.warehouseObservationCorrection.findFirst({ where: { observationId: scan.physicalObservationId }, orderBy: { revision: "desc" } });
       const identity = await resolveWarehouseIdentifierInTransaction(tx, { value: scan.rawIdentifier, kind: "auto" });
       const unitId = correction ? correction.unitId : identity.resolution === "resolved" ? identity.unitId : null;
       const credit = unitId ? await tx.dispatchFinalsCredit.findFirst({ where: { sessionId: session.id, unitId, status: "confirmed" } }) : null;
       const proof = credit ? await tx.dispatchFinalsScan.findFirst({ where: { sessionId: session.id, unitId, actualLane: credit.lane, outcome: { in: ["confirmed", "duplicate"] }, capturedAt: { gte: scan.capturedAt } }, orderBy: { capturedAt: "desc" } }) : null;
       if (!credit || !proof || !await creditStillSupported(tx, credit, slotsOf(session.snapshot.slots).map((slot) => slot.lane))) throw new DispatchError("Resolve identity/allocation and obtain a new exact destination confirmation first. A review note cannot manufacture fulfillment.", 409);
+      if ((await currentOfficeDispatchRestrictions(tx, credit.unitId)).length) throw new DispatchError("Resolve current exact-unit office handling before resolving this exception.", 409);
       const updated = await tx.dispatchFinalsScan.update({ where: { id: scan.id }, data: { reviewStatus: "resolved", reviewedByUserId: principal.userId, reviewedAt: new Date(), reviewReason: input.reason, resolvedByScanId: proof.id } });
       await tx.dispatchFinalsSession.update({ where: { id: session.id }, data: { revision: { increment: 1 } } });
       await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "exception_resolved_by_physical_proof", note: input.reason, payload: { scanId: scan.id, destinationScanId: proof.id, unitId } });
@@ -393,7 +409,7 @@ async function finalsView(tx: Prisma.TransactionClient, sessionId: string) {
   const lanes = [...new Set([...slots.map((slot) => slot.lane), ...session.amendments.map((item) => item.lane), ...exceptions.map((item) => item.actualLane)])].sort();
   const credits: (typeof session.credits[number] & { physicallySupported: boolean })[] = [];
   for (const credit of session.credits) credits.push({ ...credit, physicallySupported: await creditStillSupported(tx, credit, lanes) });
-  const officeConflicts = await tx.officeDisposition.findMany({ where: { unitId: { in: session.snapshot.allocations.map((item) => item.unitId) }, status: { in: ["active", "triggered"] }, revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }], kind: { in: ["hold", "customer_property", "rtv", "conditional_rtv"] } }, select: { id: true, unitId: true, kind: true, status: true, instruction: true } });
+  const officeConflicts = (await tx.officeDisposition.findMany({ where: { unitId: { in: session.snapshot.allocations.map((item) => item.unitId) }, status: { in: ["active", "triggered", "executed"] }, revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }], kind: { in: ["hold", "customer_property", "rtv", "conditional_rtv"] } }, select: { id: true, unitId: true, kind: true, status: true, instruction: true } })).filter((item) => item.kind !== "conditional_rtv" || ["triggered", "executed"].includes(item.status));
   const carried = objectJson(session.carriedSignoffs); const clearances = objectJson(session.laneClearances);
   return {
     sessionId: session.id, boardId: session.boardId, snapshotId: session.snapshotId, revision: session.revision,
@@ -403,12 +419,13 @@ async function finalsView(tx: Prisma.TransactionClient, sessionId: string) {
       const required = slots.filter((slot) => slot.lane === lane).map((slot) => {
         const allocation = session.snapshot.allocations.find((item) => item.slotKey === slot.slotKey);
         const credit = credits.find((item) => item.slotKey === slot.slotKey && item.physicallySupported && item.unitId === allocation?.unitId);
-        return { ...slot, allocation: allocation ? dispatchPlain(allocation) : null, confirmation: credit ? dispatchPlain(credit) : null };
+        const officeBlocked = officeConflicts.some((item) => item.unitId === allocation?.unitId);
+        return { ...slot, allocation: allocation ? dispatchPlain(allocation) : null, confirmation: credit && !officeBlocked ? dispatchPlain(credit) : null, physicalConfirmation: credit ? dispatchPlain(credit) : null, officeBlocked };
       });
       const openExceptions = exceptions.filter((item) => item.actualLane === lane && item.reviewStatus === "open");
       const unresolvedAmendments = session.amendments.filter((item) => item.lane === lane && !item.resolvedAt);
       const latestSignoff = session.signoffs.find((item) => item.lane === lane) ?? null;
-      const conflicts = officeConflicts.filter((item) => required.some((slot) => slot.allocation?.unitId === item.unitId) && (item.kind !== "conditional_rtv" || item.status === "triggered"));
+      const conflicts = officeConflicts.filter((item) => required.some((slot) => slot.allocation?.unitId === item.unitId));
       const complete = required.every((slot) => slot.confirmation) && (required.length > 0 || Boolean(clearances[lane]));
       return { lane, required, requiredCount: required.length, confirmedCount: required.filter((slot) => slot.confirmation).length, complete, officeConflicts: conflicts, openExceptions: dispatchPlain(openExceptions), acceptedExceptions: dispatchPlain(exceptions.filter((item) => item.actualLane === lane && item.reviewStatus === "accepted")), amendments: dispatchPlain(unresolvedAmendments), latestSignoff: dispatchPlain(latestSignoff), carriedSignoff: carried[lane] ?? null, emptyClearance: clearances[lane] ?? null, needsRecheck: !complete || conflicts.length > 0 || openExceptions.length > 0 || unresolvedAmendments.length > 0 || (!latestSignoff && !carried[lane]), invalidatedPhysicalProofs: credits.filter((item) => item.lane === lane && !item.physicallySupported).map((item) => item.id) };
     }),
@@ -422,6 +439,20 @@ export async function getFinalsSession(principal: Principal, raw: unknown) {
   return prisma.$transaction((tx) => finalsView(tx, sessionId), { isolationLevel: "RepeatableRead", timeout: 60_000 });
 }
 
+// Trusted dashboard read within its existing current-principal transaction.
+// Reuse physical-support/signoff rules instead of counting stale credit rows.
+export async function getDispatchDashboardInTransaction(tx: Prisma.TransactionClient, day: string) {
+  const boards = await tx.dispatchBoard.findMany({ where: { day, headSnapshotId: { not: null } }, orderBy: { id: "desc" }, take: 6 });
+  const results = [];
+  for (const board of boards.slice(0, 5)) {
+    const session = await tx.dispatchFinalsSession.findUnique({ where: { snapshotId: board.headSnapshotId! }, select: { id: true } });
+    if (!session) { results.push({ boardId: board.id, scope: board.scope, snapshotId: board.headSnapshotId!, required: 0, confirmed: 0, signedLanes: 0, recheckLanes: 0, unavailable: true }); continue; }
+    const view = await finalsView(tx, session.id);
+    results.push({ boardId: board.id, scope: board.scope, snapshotId: view.snapshotId, sourceAsOf: view.sourceAsOf, required: view.lanes.reduce((sum, lane) => sum + lane.requiredCount, 0), confirmed: view.lanes.reduce((sum, lane) => sum + lane.confirmedCount, 0), signedLanes: view.lanes.filter(lane => !lane.needsRecheck && (lane.latestSignoff || lane.carriedSignoff)).length, recheckLanes: view.lanes.filter(lane => lane.needsRecheck).length, unavailable: false });
+  }
+  return { scopes: results, hasMore: boards.length > 5, sourceNotice: dispatchSourceNotice };
+}
+
 export async function signOffDispatchLane(principal: Principal, raw: unknown) {
   const input = z.object({ operationId: dispatchOperation, sessionId: dispatchId, lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), expectedSessionRevision: z.number().int().positive(), evidence: dispatchReason }).strict().parse(raw);
   return dispatchCommand(principal, input.operationId, "signoff_lane", input, "dispatch.signoff", async (tx) => {
@@ -429,10 +460,9 @@ export async function signOffDispatchLane(principal: Principal, raw: unknown) {
     if (session.board.headSnapshotId !== session.snapshotId || session.revision !== input.expectedSessionRevision) throw new DispatchError("Demand or verification changed. Refresh before signing this lane.", 409);
     const view = await finalsView(tx, session.id); const lane = view.lanes.find((item) => item.lane === input.lane);
     if (!lane) throw new DispatchError("Lane not in this dispatch verification scope.", 404);
-    if (!lane.complete || lane.openExceptions.length) throw new DispatchError("This lane still has missing/current physical confirmations or unresolved exceptions.", 409);
     const unitIds = lane.required.flatMap((slot) => slot.allocation ? [slot.allocation.unitId] : []);
-    const conflicts = await tx.officeDisposition.findMany({ where: { unitId: { in: unitIds }, status: { in: ["active", "triggered"] }, revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }], kind: { in: ["hold", "customer_property", "rtv", "conditional_rtv"] } } });
-    if (conflicts.some((item) => item.kind !== "conditional_rtv" || item.status === "triggered")) throw new DispatchError("An active office hold/property/RTV instruction conflicts with delivery. Resolve that exact unit's instruction before sign-off.", 409);
+    for (const unitId of [...new Set(unitIds)].sort()) if ((await currentOfficeDispatchRestrictions(tx, unitId)).length) throw new DispatchError("An active office hold/property/RTV instruction conflicts with delivery. Resolve that exact unit's instruction before sign-off.", 409);
+    if (!lane.complete || lane.openExceptions.length) throw new DispatchError("This lane still has missing/current physical confirmations or unresolved exceptions.", 409);
     const previous = await tx.dispatchLaneSignoff.findFirst({ where: { sessionId: session.id, lane: input.lane }, orderBy: { version: "desc" } });
     const payload = { snapshotId: session.snapshotId, snapshotVersion: session.snapshot.version, sourceKind: session.snapshot.sourceKind, sourceAsOf: session.snapshot.sourceAsOf.toISOString(), sourceRef: session.snapshot.sourceRef, sessionRevision: session.revision, lane: input.lane, requirements: lane.required, acceptedExceptions: lane.acceptedExceptions, emptyClearance: lane.emptyClearance, evidence: input.evidence, sourceNotice: dispatchSourceNotice };
     const signature = await tx.dispatchLaneSignoff.create({ data: { sessionId: session.id, lane: input.lane, version: (previous?.version ?? 0) + 1, snapshotId: session.snapshotId, sourceAsOf: session.snapshot.sourceAsOf, payload: asJson(payload), payloadHash: dispatchHash(payload), signedByUserId: principal.userId } });
@@ -483,10 +513,11 @@ export async function reviewDispatchObservation(principal: Principal, raw: unkno
       const currentBoard = await tx.dispatchBoard.findUniqueOrThrow({ where: { id: credit.session.boardId }, select: { headSnapshotId: true } });
       if (currentBoard.headSnapshotId !== credit.session.snapshotId) continue;
       const snapshot = await tx.dispatchSnapshot.findUniqueOrThrow({ where: { id: credit.session.snapshotId } });
-      if (await creditStillSupported(tx, credit, slotsOf(snapshot.slots).map((slot) => slot.lane))) continue;
+      const officeBlocked = (await currentOfficeDispatchRestrictions(tx, credit.unitId)).length > 0;
+      if (!officeBlocked && await creditStillSupported(tx, credit, slotsOf(snapshot.slots).map((slot) => slot.lane))) continue;
       const changed = await tx.dispatchFinalsCredit.updateMany({ where: { id: credit.id, status: "confirmed" }, data: { status: "invalidated", invalidatedAt: new Date() } });
       if (!changed.count) continue;
-      await amendLane(tx, principal, credit.sessionId, credit.lane, "Later independent physical evidence conflicts with lane confirmation.", [credit.slotKey]);
+      await amendLane(tx, principal, credit.sessionId, credit.lane, officeBlocked ? "Current exact-unit office handling conflicts with dispatch; recheck this lane after office resolution." : "Later independent physical evidence conflicts with lane confirmation.", [credit.slotKey]);
       affectedSessionIds.add(credit.sessionId);
     }
     for (const sessionId of affectedSessionIds) await tx.dispatchFinalsSession.update({ where: { id: sessionId }, data: { revision: { increment: 1 } } });

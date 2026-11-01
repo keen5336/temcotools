@@ -17,17 +17,18 @@ export async function ingestWarehouseScan(principal: Principal, raw: unknown) {
   assertCapability(principal, "inventory.write");
   const input = scanIngestionSchema.parse(raw);
   const receipt = await recordWarehouseObservation(principal, input);
-  let dispatchReview;
-  try { dispatchReview = await reviewDispatchObservation(principal, { observationId: receipt.observation.observationId }); }
-  catch { dispatchReview = { pendingReview: true }; }
   // Rule evaluation only creates/returns durable local instructions. It never
   // sends a print or a MARS submission, including on same-event replay.
   let office;
   try { office = await reviewOfficeObservation(principal, { observationId: receipt.observation.observationId }); }
   catch { office = { pendingReview: true, message: "Observation saved. Office instructions require a fresh review." }; }
+  let dispatchReview;
+  try { dispatchReview = await reviewDispatchObservation(principal, { observationId: receipt.observation.observationId }); }
+  catch { dispatchReview = { pendingReview: true }; }
   const result = { ...receipt, office, dispatchReview };
   if (!input.pickWaveId) return result;
   if ("pendingReview" in office) return { ...result, task: { matched: false, error: "Current handling instructions are unavailable. Refresh office review before staging." } };
+  if ("blockingDispatch" in office && office.blockingDispatch.length > 0) return { ...result, task: { matched: false, error: "Current office handling blocks delivery staging. Review the instruction and confirm its authorized execution separately." } };
   if ("instructions" in office && office.instructions.some(instruction => ["hold", "customer_property", "route_to_authorized_rtv_workflow"].includes(instruction.action))) {
     return { ...result, task: { matched: false, error: "Current office handling instructions require review before delivery staging." } };
   }

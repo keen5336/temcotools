@@ -53,7 +53,7 @@ async function facts(tx: Prisma.TransactionClient, unitId: string, now = new Dat
     tx.officeScheduleFact.findFirst({ where: { unitId }, orderBy: [{ sourceAsOf: "desc" }, { recordedAt: "desc" }, { id: "desc" }] }),
     tx.inventoryAuditItem.findMany({ where: { unitId }, select: { id: true, lpn: true, status: true, receivedDate: true } }),
     tx.officeReturnExpectation.findMany({ where: { unitId }, include: { exchange: { include: { attempts: { orderBy: { occurredAt: "desc" } } } } } }),
-    tx.officeDisposition.findMany({ where: { unitId, status: { in: ["active", "triggered"] }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
+    tx.officeDisposition.findMany({ where: { unitId, revokedAt: null, status: { in: ["active", "triggered", "executed"] }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } }),
   ]);
   const custody = deriveCustody(observations);
   const today = businessDay(now);
@@ -97,6 +97,22 @@ export async function assertCurrentRtvAuthorization(tx: Prisma.TransactionClient
   if (refreshed.dispositions.some((item) => !item.revokedAt && ["hold", "customer_property"].includes(item.kind))) throw new OfficeError("A current hold/customer-property instruction conflicts with RTV for this exact unit. Office must resolve it first.", 409);
   if (disposition.requireNoUpcomingDate && (!refreshed.scheduleCurrent || refreshed.upcoming)) throw new OfficeError("This authorization requires a complete current schedule with no upcoming delivery date. Refresh/review the scheduling evidence first.", 409);
   return { ...disposition, eligibility: { reviewedAt: now.toISOString(), physicalObservationId: last.id, observedAt: last.capturedAt.toISOString(), conditionalTriggerObservationId: triggerObservationId, scheduleFactId: disposition.requireNoUpcomingDate ? refreshed.schedule?.id ?? null : null, meaning: "Prior exact-unit office authority and independent physical evidence only; no MARS submission, pickup or print completion is implied." } };
+}
+
+export interface OfficeDispatchRestriction { dispositionId: string; unitId: string; kind: string; instruction: string; targetLocation: string | null; authorityState: "office_hold" | "authorized_rtv" | "rtv_review_required"; reason: string }
+// Internal current-state writer seam. This only restricts contradictory work;
+// it never creates an authorization, submits MARS, prints or records movement.
+export async function currentOfficeDispatchRestrictions(tx: Prisma.TransactionClient, unitId: string, now = new Date()): Promise<OfficeDispatchRestriction[]> {
+  const dispositions = await tx.officeDisposition.findMany({ where: { unitId, revokedAt: null, status: { in: ["active", "triggered", "executed"] }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }], kind: { in: ["hold", "customer_property", "rtv", "conditional_rtv"] } }, orderBy: { id: "asc" } });
+  const restrictions: OfficeDispatchRestriction[] = [];
+  for (const disposition of dispositions) {
+    if (disposition.kind === "conditional_rtv" && disposition.status === "active") continue;
+    const base = { dispositionId: disposition.id, unitId, kind: disposition.kind, instruction: disposition.instruction, targetLocation: disposition.targetLocation };
+    if (["hold", "customer_property"].includes(disposition.kind)) { restrictions.push({ ...base, authorityState: "office_hold", reason: "Current exact-unit office handling conflicts with delivery." }); continue; }
+    try { await assertCurrentRtvAuthorization(tx, unitId, disposition.id, now); restrictions.push({ ...base, authorityState: "authorized_rtv", reason: "Current prior RTV authority and qualifying physical evidence route this exact unit into RTV instead of delivery." }); }
+    catch (error) { if (!(error instanceof OfficeError)) throw error; restrictions.push({ ...base, authorityState: "rtv_review_required", reason: error.message }); }
+  }
+  return restrictions;
 }
 
 async function ensureCase(tx: Prisma.TransactionClient, principal: Principal, input: { unitId: string; reason: string; episodeKey: string; evidence: unknown; signature: unknown; nextAction: string }, now: Date) {
@@ -294,7 +310,7 @@ async function evaluateObservation(tx: Prisma.TransactionClient, principal: Prin
   const observation = await tx.warehousePhysicalObservation.findUnique({ where: { id: observationId }, include: { corrections: { orderBy: { revision: "desc" }, take: 1 } } });
   if (!observation) throw new OfficeError("Physical observation not found.", 404);
   const unitId = observation.corrections[0] ? observation.corrections[0].unitId : observation.unitId;
-  if (!unitId) return { instructions: [], evaluation: null, reason: "Resolve the scan's unit identity before applying office instructions." };
+  if (!unitId) return { instructions: [], blockingDispatch: [] as OfficeDispatchRestriction[], evaluation: null, reason: "Resolve the scan's unit identity before applying office instructions." };
   const data = await facts(tx, unitId, now);
   const instructions: Array<{ dispositionId: string; unitId: string; instruction: string; action: string; targetLocation: string | null }> = [];
   for (const disposition of data.dispositions.filter(item => !["rtv", "conditional_rtv"].includes(item.kind))) {
@@ -303,7 +319,7 @@ async function evaluateObservation(tx: Prisma.TransactionClient, principal: Prin
   }
   for (const disposition of data.dispositions) {
     if (!["rtv", "conditional_rtv"].includes(disposition.kind) || !disposition.authorizedAt || !disposition.authorizedByUserId || !disposition.expiresAt || disposition.expiresAt <= now) continue;
-    if (observation.type === "departure" || !data.custody.warehouseEvidence || observation.capturedAt < disposition.authorizedAt || (disposition.triggerAt && observation.capturedAt < disposition.triggerAt)) continue;
+    if (observation.type === "departure" || !data.custody.warehouseEvidence || observation.capturedAt < disposition.authorizedAt || (disposition.triggerAt && (disposition.triggerAt > now || observation.capturedAt < disposition.triggerAt))) continue;
     if (disposition.requireNoUpcomingDate && (!data.scheduleCurrent || data.upcoming)) continue;
     const conflicting = data.dispositions.filter((item) => ["hold", "customer_property"].includes(item.kind));
     if (conflicting.length) {
@@ -320,7 +336,22 @@ async function evaluateObservation(tx: Prisma.TransactionClient, principal: Prin
     await ensureCase(tx, principal, { unitId, reason: "authorized_rtv_ready", episodeKey: disposition.id, signature: { disposition: disposition.id }, evidence: { why: disposition.reason, exactUnitId: unitId, qualifyingObservation: observation.id, authorizedByUserId: disposition.authorizedByUserId, authorizedAt: disposition.authorizedAt, expiresAt: disposition.expiresAt }, nextAction: disposition.instruction }, now);
     instructions.push({ dispositionId: disposition.id, unitId, instruction: disposition.instruction, action: "route_to_authorized_rtv_workflow", targetLocation: disposition.targetLocation });
   }
-  return { instructions, evaluation: await evaluateUnit(tx, principal, unitId, now), reason: "Instructions are distinct from confirmed execution; no MARS operation was sent." };
+  const evaluation = await evaluateUnit(tx, principal, unitId, now);
+  const blockingDispatch = await currentOfficeDispatchRestrictions(tx, unitId, now);
+  const validatedInstructions = instructions.filter((instruction) => instruction.action !== "route_to_authorized_rtv_workflow" || blockingDispatch.some((restriction) => restriction.dispositionId === instruction.dispositionId && restriction.authorityState === "authorized_rtv"));
+  for (const restriction of blockingDispatch.filter((item) => item.authorityState === "rtv_review_required")) {
+    await ensureCase(tx, principal, { unitId, reason: "disposition_conflict", episodeKey: restriction.dispositionId, signature: { dispositionId: restriction.dispositionId, reason: restriction.reason }, evidence: { why: restriction.reason, priorDispositionId: restriction.dispositionId, exactUnitId: unitId, qualifyingObservation: observation.id, instruction: restriction.instruction }, nextAction: "Office must reconcile current physical/scheduling evidence with the prior RTV instruction before dispatch or RTV execution." }, now);
+    validatedInstructions.push({ dispositionId: restriction.dispositionId, unitId, instruction: `Office review required: ${restriction.reason}`, action: "office_review_required", targetLocation: restriction.targetLocation });
+  }
+  return { instructions: validatedInstructions, blockingDispatch, evaluation, reason: "Instructions are distinct from confirmed execution; no MARS operation was sent." };
+}
+
+export async function reviewWorkflowOfficeObservation(tx: Prisma.TransactionClient, principal: Principal, input: { observationId: string }) {
+  await assertCurrentPrincipal(tx, principal, "workflow.execute");
+  const observationId = id.parse(input.observationId);
+  const observation = await tx.warehousePhysicalObservation.findUnique({ where: { id: observationId }, select: { userId: true } });
+  if (!observation || observation.userId !== principal.userId) throw new OfficeError("Workflow review requires the original operator's own captured observation.", 403);
+  return evaluateObservation(tx, principal, observationId, new Date());
 }
 
 export async function reviewOfficeObservation(principal: Principal, raw: unknown) {
