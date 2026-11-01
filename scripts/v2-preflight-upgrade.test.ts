@@ -1,23 +1,37 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readdir, copyFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, copyFile, writeFile, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import ExcelJS from "exceljs";
+import { generate } from "otplib";
+import { CURRENT_USER_SELECT, resolvePrincipal, type Principal, type SessionClaim } from "../lib/auth/principal";
 import { maintenanceClient, maintenanceTarget, tableExists } from "./v2-preflight-support";
 import { inspectV2Readiness } from "./v2-preflight";
-import { backfillV2Inventory } from "./v2-backfill";
+import { backfillV2Inventory, invalidateRestoredAccess } from "./v2-backfill";
 import { bootstrapV2Administrator } from "./v2-bootstrap";
 
 const testUrl = process.env.MAINTENANCE_UPGRADE_DATABASE_URL;
+const fixturePassword = "Synthetic isolated v1 restoration phrase 84";
+const fixtureMfaKey = Buffer.alloc(32, 0x73).toString("base64url");
+function upgradeTarget(url: string) {
+  const expected = process.env.MAINTENANCE_UPGRADE_DATABASE_NAME ?? "temcotools_v2_upgrade_30_test";
+  assert.match(expected, /^temcotools_v2_upgrade(?:_[a-z0-9]+)*_test$/);
+  return maintenanceTarget(expected, false, url);
+}
 test("published v1 migrations and retained fixtures upgrade additively to the qualified v2 migration set", { skip: !testUrl }, async () => {
-  const target = maintenanceTarget("temcotools_v2_upgrade_test", false, testUrl);
+  const target = upgradeTarget(testUrl!);
+  process.env.DATABASE_URL = target.url;
+  process.env.SESSION_SECRET = "synthetic-renewed-cutover-session-secret-2026";
+  process.env.MFA_ENCRYPTION_KEY = fixtureMfaKey;
   const prisma = maintenanceClient(target);
   const root = process.cwd();
   const scratch = await mkdtemp(join(tmpdir(), "temco-upgrade-"));
   const baseline = join(scratch, "v1"), upgraded = join(scratch, "v2");
-  const cutoff = process.env.MAINTENANCE_MIGRATION_CUTOFF ?? "20261101140000";
+  const cutoff = process.env.MAINTENANCE_MIGRATION_CUTOFF ?? "20261101170000";
   assert.match(cutoff, /^\d{14}$/);
+  assert.ok(cutoff >= "20261101170000", "The renewed source/custody fixture requires the full MARS history migration.");
   const baselineRef = "fea1f22af1b2fae788388f2aefed3e3998e98d09";
   async function configFor(directory: string) {
     const config = join(directory, "prisma.config.mjs");
@@ -39,6 +53,10 @@ test("published v1 migrations and retained fixtures upgrade additively to the qu
     }
     await copyFile(resolve(root, "prisma/migrations/migration_lock.toml"), join(baseline, "migrations/migration_lock.toml"));
     const currentNames = (await readdir(resolve(root, "prisma/migrations"), { withFileTypes: true })).filter(entry => entry.isDirectory() && entry.name.slice(0, 14) <= cutoff).map(entry => entry.name).sort();
+    if (!process.env.MAINTENANCE_MIGRATION_CUTOFF) {
+      const allNames = (await readdir(resolve(root, "prisma/migrations"), { withFileTypes: true })).filter(entry => entry.isDirectory());
+      assert.equal(currentNames.length, allNames.length, "The default cutoff no longer includes every current migration. Renew qualification explicitly.");
+    }
     for (const name of currentNames) { await mkdir(join(upgraded, "migrations", name)); await copyFile(resolve(root, "prisma/migrations", name, "migration.sql"), join(upgraded, "migrations", name, "migration.sql")); }
     await copyFile(resolve(root, "prisma/migrations/migration_lock.toml"), join(upgraded, "migrations/migration_lock.toml"));
     migrate(await configFor(baseline));
@@ -55,6 +73,8 @@ test("published v1 migrations and retained fixtures upgrade additively to the qu
     migrate(await configFor(upgraded));
     const state = await inspectV2Readiness(prisma);
     assert.equal(state.migrations.appliedCount, currentNames.length); assert.equal(state.migrations.checksumMismatch.length, 0);
+    assert.deepEqual(state.migrations.failed, []); assert.deepEqual(state.migrations.unknownApplied, []);
+    if (!process.env.MAINTENANCE_MIGRATION_CUTOFF) assert.deepEqual(state.migrations.pending, []);
     const user = await prisma.user.findUniqueOrThrow({ where: { id: "synthetic-v1-admin" } });
     assert.equal(user.passwordHash, null); assert.equal(user.pinHash, "retained-synthetic-pin-hash"); assert.deepEqual(user.favoriteToolIds, ["inventory-audit"]);
     const manager = await prisma.userRoleBundle.findMany({ where: { userId: "synthetic-v1-manager" }, include: { bundle: true } });
@@ -73,5 +93,76 @@ test("published v1 migrations and retained fixtures upgrade additively to the qu
     const applied = await bootstrapV2Administrator(prisma, { username: user.username, create: false, enrollExisting: true, apply: true, reason: "Synthetic v1 upgrade owner-assisted initial enrollment", deliveryFile: join(scratch, "legacy-admin-enrollment") }); assert.equal(applied.mode, "applied");
     const retained = await prisma.user.findUniqueOrThrow({ where: { id: user.id } }); assert.equal(retained.id, user.id); assert.equal(retained.pinHash, user.pinHash); assert.equal(retained.passwordHash, null);
     assert.equal(await prisma.identityRecoveryToken.count({ where: { userId: user.id, consumedAt: null } }), 1);
-  } finally { await prisma.$disconnect(); }
+    assert.equal(await prisma.marsImportRow.count(), 0, "The migration cannot invent legacy MARS batch membership.");
+    assert.equal(await prisma.warehouseUnitNote.count(), 0, "Private legacy notes are not silently copied into public source fixtures.");
+
+    // Populate new native tables through real shared commands for the dump/
+    // restore rehearsal. These are synthetic local effects, never network I/O.
+    const identity = await import("../lib/auth/identity"), mfa = await import("../lib/auth/mfa");
+    const token = (await readFile(join(scratch, "legacy-admin-enrollment"), "utf8")).trim();
+    await identity.redeemRecovery({ token, password: fixturePassword }, { source: "synthetic-upgrade30" });
+    const login = await identity.signInWithPassword({ username: user.username, password: fixturePassword }, { source: "synthetic-upgrade30" });
+    async function actorFor(claim: SessionClaim): Promise<Principal> {
+      const actor = await resolvePrincipal(claim, id => prisma.user.findUnique({ where: { id }, select: CURRENT_USER_SELECT }));
+      const session = await prisma.userSession.findUniqueOrThrow({ where: { id: claim.sessionId! } }); assert.ok(actor);
+      return { ...actor, sessionId: session.id, strongAuthenticatedAt: session.lastStrongAuthenticatedAt.getTime(), mfaVerifiedAt: session.mfaVerifiedAt?.getTime() };
+    }
+    let actor = await actorFor(login.claim);
+    const factor = await mfa.beginMfaEnrollment(actor, { password: fixturePassword }, { source: "synthetic-upgrade30" });
+    await mfa.confirmMfaEnrollment(actor, { token: await generate({ secret: factor.secret }) }, { source: "synthetic-upgrade30" }); actor = await actorFor(login.claim);
+    const notes = await import("../lib/warehouse/notes");
+    const note = await notes.appendWarehouseUnitNote(actor, { operationId: "synthetic-upgrade30-note-append", unitId: item.unitId!, body: "Synthetic original unit retained; do not merge it with a replacement." });
+    await notes.correctWarehouseUnitNote(actor, { operationId: "synthetic-upgrade30-note-correct", noteId: note.note.noteId, expectedRevision: 1, action: "correct", body: "Synthetic corrected original-unit note; prior text remains history.", reason: "Synthetic correction for restore qualification" });
+    const mars = await import("../lib/mars/service"), submissions = await import("../lib/mars/submissions");
+    const workbook = new ExcelJS.Workbook(), sheet = workbook.addWorksheet("Synthetic restore source");
+    sheet.addRow(["Request Number","Order Number","Return Status","Synthetic extra column"]); sheet.addRow(["9900001","SYNTHETIC-NEW-ORDER","Awaiting Pickup","RETAIN THIS SOURCE EXTRA"]);
+    await mars.importMarsInventory(actor, { operationId: "synthetic-upgrade30-mars-import", filename: "synthetic-restore.xlsx", scope: "synthetic-restore", coverage: "partial", sourceAsOf: new Date().toISOString(), fileBase64: Buffer.from(await workbook.xlsx.writeBuffer()).toString("base64") });
+    const audit = await mars.startMarsAudit(actor, { operationId: "synthetic-upgrade30-audit-start", notes: "Synthetic native audit; no upstream action." });
+    const scanned = await mars.scanMarsAudit(actor, { operationId: "synthetic-upgrade30-audit-scan", auditSessionId: audit.auditSession.id, scannedValue: "9900001" });
+    await mars.completeMarsAudit(actor, { operationId: "synthetic-upgrade30-audit-complete", auditSessionId: audit.auditSession.id });
+    await mars.reportMarsAudit(actor, { operationId: "synthetic-upgrade30-audit-report", auditSessionId: audit.auditSession.id, label: "Synthetic immutable pre-void report" });
+    await mars.voidMarsAuditScan(actor, { operationId: "synthetic-upgrade30-audit-void", auditSessionId: audit.auditSession.id, scanId: scanned.scanId, reason: "Synthetic audit membership withdrawal; physical evidence remains" });
+    const warehouse = await import("../lib/warehouse/units"), office = await import("../lib/office/service");
+    const disposition = await office.createOfficeDisposition(actor, { operationId: "synthetic-upgrade30-rtv-authority", unitId: item.unitId!, kind: "rtv", reason: "Synthetic explicit exact-unit authority", instruction: "Human workflow only; no automated submission", expiresAt: new Date(Date.now()+3_600_000).toISOString() });
+    await warehouse.recordWarehouseObservation(actor, { eventId: "synthetic-upgrade30-fresh-presence", rawIdentifier: item.lpn, identifierType: "lpn", namespace: "wms", type: "presence", capturedAt: new Date().toISOString(), captureMethod: "manual" });
+    const prepared = await submissions.prepareMarsSubmissionIntent(actor, { operationId: "synthetic-upgrade30-intent-prepare", unitId: item.unitId!, authorizationId: disposition.disposition.id, evidence: "Synthetic fresh confirmation of retained physical unit" });
+    const started = await submissions.startMarsSubmissionIntent(actor, { operationId: "synthetic-upgrade30-intent-start", intentId: prepared.intent.id, expectedRevision: prepared.intent.revision, evidence: "Synthetic human handoff; no upstream request executed" });
+    await submissions.markMarsSubmissionUnknown(actor, { operationId: "synthetic-upgrade30-intent-unknown", intentId: started.intent.id, expectedRevision: started.intent.revision, evidence: "Synthetic unknown-result custody fixture; no request executed" });
+    const devices = await import("../lib/labels/devices"), labels = await import("../lib/labels/issuance");
+    const device = await devices.registerPrintingDevice(actor, { deviceId: "synthetic-upgrade30-local-device", name: "Synthetic restore phone (no hardware)", mode: "direct", printerIds: ["synthetic-v1-printer"] });
+    const label = await labels.prepareLabelIssuance(actor, { operationId: "synthetic-upgrade30-unsent-label", unitId: item.unitId!, printerId: "synthetic-v1-printer", purpose: "legacy_manual", mode: "direct", deviceId: device.device.id, legacyZpl: "^XA^FDSynthetic label^FS^XZ\x04" });
+    assert.equal(label.issuance.state, "queued");
+    const grants = await import("../lib/application/grants");
+    await grants.createAccessGrant(actor, { clientName: "Synthetic restored scoped client", scopes: ["inventory.read"], lifetimeMinutes: 60 });
+    assert.equal(await prisma.warehouseUnitNoteRevision.count(), 2); assert.equal(await prisma.marsImportRow.count(), 1); assert.equal(await prisma.marsSubmissionIntent.count({ where: { state: "unknown" } }), 1); assert.equal(await prisma.labelIssuance.count({ where: { state: "queued" } }), 1);
+    assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).pinHash, user.pinHash);
+  } finally { await prisma.$disconnect(); if (process.env.DATABASE_URL === target.url) { const { prisma: shared } = await import("../lib/db"); await shared.$disconnect(); } }
+});
+
+const restoreUrl = process.env.MAINTENANCE_RESTORE_DATABASE_URL;
+test("restored all-30 fixture invalidates old authority without replaying or losing operational evidence", { skip: !restoreUrl }, async () => {
+  const expected = process.env.MAINTENANCE_RESTORE_DATABASE_NAME ?? "temcotools_v2_roundtrip_30_test"; assert.match(expected, /^temcotools_v2_roundtrip(?:_[a-z0-9]+)*_test$/);
+  const target = maintenanceTarget(expected, false, restoreUrl); const prisma = maintenanceClient(target);
+  process.env.DATABASE_URL = target.url; process.env.SESSION_SECRET = "synthetic-renewed-cutover-session-secret-2026"; process.env.MFA_ENCRYPTION_KEY = fixtureMfaKey;
+  try {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: "synthetic-v1-admin" }, select: CURRENT_USER_SELECT }); assert.equal(user.username, "synthetic-v1-admin");
+    const session = await prisma.userSession.findFirstOrThrow({ where: { userId: user.id, revokedAt: null }, orderBy: { createdAt: "desc" } });
+    const claim = { userId: user.id, authVersion: session.authVersion, sessionId: session.id, issuedAt: session.createdAt.getTime(), expiresAt: session.expiresAt.getTime() };
+    const resolved = await resolvePrincipal(claim, async () => user); assert.ok(resolved);
+    const actor: Principal = { ...resolved, sessionId: session.id, strongAuthenticatedAt: session.lastStrongAuthenticatedAt.getTime(), mfaVerifiedAt: session.mfaVerifiedAt?.getTime() };
+    const identity = await import("../lib/auth/identity"); await prisma.$transaction(tx => identity.assertCurrentPrincipal(tx, actor, "inventory.read"));
+    const { decryptMfaSecret } = await import("../lib/auth/mfa-crypto"); const factor = await prisma.userMfa.findUniqueOrThrow({ where: { userId: user.id } });
+    const secret = decryptMfaSecret(user.id, factor.encryptedSecret); assert.ok(secret.length > 10); process.env.MFA_ENCRYPTION_KEY = Buffer.alloc(32, 0x74).toString("base64url"); assert.throws(() => decryptMfaSecret(user.id, factor.encryptedSecret)); process.env.MFA_ENCRYPTION_KEY = fixtureMfaKey;
+    const before = { source: await prisma.marsImportRow.findMany(), notes: await prisma.warehouseUnitNoteRevision.findMany(), intents: await prisma.marsSubmissionIntent.findMany(), events: await prisma.marsSubmissionIntentEvent.findMany(), labels: await prisma.labelIssuance.findMany(), observations: await prisma.warehousePhysicalObservation.findMany() };
+    assert.equal(before.intents.filter(intent => intent.state === "unknown").length, 1); assert.equal(before.labels.filter(label => label.state === "queued").length, 1);
+    const dry = await invalidateRestoredAccess(prisma, { apply: false }); assert.ok(dry.affected.sessions > 0); assert.ok(dry.affected.clientGrants > 0); assert.ok(dry.affected.mfaRecoveryCodes > 0);
+    await invalidateRestoredAccess(prisma, { apply: true, reason: "Synthetic renewed all-30 populated restore invalidation" });
+    await assert.rejects(prisma.$transaction(tx => identity.assertCurrentPrincipal(tx, actor, "inventory.read")));
+    assert.equal(await prisma.userSession.count({ where: { revokedAt: null } }), 0); assert.equal(await prisma.appAccessGrant.count({ where: { revokedAt: null } }), 0); assert.equal(await prisma.mfaRecoveryCode.count({ where: { consumedAt: null } }), 0);
+    assert.equal((await prisma.userMfa.findUniqueOrThrow({ where: { userId: user.id } })).encryptedSecret, factor.encryptedSecret);
+    const after = { source: await prisma.marsImportRow.findMany(), notes: await prisma.warehouseUnitNoteRevision.findMany(), intents: await prisma.marsSubmissionIntent.findMany(), events: await prisma.marsSubmissionIntentEvent.findMany(), labels: await prisma.labelIssuance.findMany(), observations: await prisma.warehousePhysicalObservation.findMany() }; assert.deepEqual(after,before);
+    const signIn = await identity.signInWithPassword({ username: user.username, password: fixturePassword }, { source: "synthetic-renewed-restore" }); assert.notEqual(signIn.claim.sessionId, session.id);
+    assert.equal((await prisma.userSession.findUniqueOrThrow({ where: { id: signIn.claim.sessionId! } })).mfaVerifiedAt, null, "Restoration/sign-in cannot recreate privileged MFA proof.");
+    const state = await inspectV2Readiness(prisma); assert.equal(state.migrations.appliedCount,30); assert.deepEqual(state.migrations.checksumMismatch,[]); assert.deepEqual(state.migrations.pending,[]);
+  } finally { await prisma.$disconnect(); const { prisma: shared } = await import("../lib/db"); await shared.$disconnect(); }
 });

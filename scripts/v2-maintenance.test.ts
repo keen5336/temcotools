@@ -24,7 +24,9 @@ test("maintenance target guard requires exact explicit selection and fails befor
 
 const testUrl = process.env.MAINTENANCE_TEST_DATABASE_URL;
 test("cutover enrollment, conservative backfill and recovery on the dedicated synthetic restore", { skip: !testUrl }, async (suite) => {
-  const target = maintenanceTarget("temcotools_v2_recovery_test", false, testUrl);
+  const expected = process.env.MAINTENANCE_TEST_DATABASE_NAME ?? "temcotools_v2_recovery_test";
+  assert.match(expected, /^temcotools_v2_recovery(?:_[a-z0-9]+)*_test$/);
+  const target = maintenanceTarget(expected, false, testUrl);
   process.env.DATABASE_URL = target.url;
   process.env.SESSION_SECRET = "synthetic-maintenance-session-secret-2026";
   process.env.MFA_ENCRYPTION_KEY = Buffer.alloc(32, 0x56).toString("base64url");
