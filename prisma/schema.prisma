@@ -300,6 +300,63 @@ model LabelTemplate {
   @@index([kind, isActive, name])
 }
 
+model Pipeline {
+  id        String   @id @default(cuid())
+  name      String
+  steps     Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Local custody for a human-assisted external MARS submission. No upstream
+// creation endpoint or physical completion is implied by an intent state.
+model MarsSubmissionIntent {
+  id                     String @id @default(cuid())
+  unitId                 String
+  unit                   WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  state                  String @default("prepared")
+  revision               Int @default(1)
+  authorizationId        String?
+  authorizedByUserId     String
+  authorizationExpiresAt DateTime
+  preparedByUserId       String
+  requestNumber          String?
+  evidence               String
+  startedAt              DateTime?
+  linkedAt               DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  events                 MarsSubmissionIntentEvent[]
+
+  @@index([unitId, createdAt])
+  @@index([state, updatedAt])
+}
+
+model MarsSubmissionIntentEvent {
+  id          String @id @default(cuid())
+  intentId    String
+  intent      MarsSubmissionIntent @relation(fields: [intentId], references: [id], onDelete: Restrict)
+  userId      String
+  action      String
+  evidence    String
+  payload     Json
+  createdAt   DateTime @default(now())
+
+  @@index([intentId, createdAt])
+}
+
+model MarsCommandReceipt {
+  id          String @id @default(cuid())
+  userId      String
+  operationId String
+  action      String
+  fingerprint String
+  result      Json
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, operationId])
+}
+
 model MarsImportBatch {
   id               String            @id @default(cuid())
   filename         String
@@ -311,6 +368,10 @@ model MarsImportBatch {
   skippedCount     Int               @default(0)
   notes            String?
   uploadedByUser   User?             @relation(fields: [uploadedByUserId], references: [id])
+  scope            String            @default("legacy_unknown")
+  coverage         String            @default("unknown")
+  sourceAsOf       DateTime?
+  coverageEvidence String?
   marsUnits        MarsUnit[]
   marsAuditReports MarsAuditReport[]
 }
@@ -382,6 +443,11 @@ model MarsAuditScan {
   auditSession       MarsAuditSession @relation(fields: [auditSessionId], references: [id], onDelete: Cascade)
   marsUnit           MarsUnit?        @relation(fields: [marsUnitId], references: [id])
   user               User?            @relation(fields: [userId], references: [id])
+  voidedAt           DateTime?
+  voidedByUserId     String?
+  voidReason         String?
+
+  @@index([auditSessionId, voidedAt, createdAt])
 }
 
 model MarsAuditReport {
@@ -811,6 +877,41 @@ model WarehouseUnit {
   replacementExchanges OfficeExchange[] @relation("ExchangeReplacement")
   returnExpectations OfficeReturnExpectation[]
   dispatchAllocations DispatchAllocation[]
+  marsSubmissionIntents MarsSubmissionIntent[]
+  notes WarehouseUnitNote[]
+}
+
+model WarehouseUnitNote {
+  id              String @id @default(cuid())
+  unitId          String
+  unit            WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  authorUserId    String
+  authorUsername  String
+  authorName      String
+  currentRevision Int @default(1)
+  state           String @default("active")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @default(now())
+  revisions       WarehouseUnitNoteRevision[]
+
+  @@index([unitId, id])
+}
+
+model WarehouseUnitNoteRevision {
+  id             String @id @default(cuid())
+  noteId         String
+  note           WarehouseUnitNote @relation(fields: [noteId], references: [id], onDelete: Restrict)
+  revision       Int
+  action         String
+  body           String
+  reason         String?
+  editedByUserId String
+  editorUsername String
+  editorName     String
+  correctedOtherAuthor Boolean @default(false)
+  createdAt      DateTime @default(now())
+
+  @@unique([noteId, revision])
 }
 
 model WarehouseIdentifier {
