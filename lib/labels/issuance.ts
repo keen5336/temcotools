@@ -109,6 +109,7 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
       return { dispatch: false, issuance: receipt(cancelled) };
     }
     if (row.workflowVersionId) {
+      await tx.$queryRaw`SELECT purpose FROM "LabelWorkflow" WHERE purpose=${row.purpose} FOR SHARE`;
       const workflow = await tx.labelWorkflow.findUnique({ where: { purpose: row.purpose }, select: { enabled: true, publishedVersionId: true } });
       if (!workflow?.enabled || (workflow.publishedVersionId !== row.workflowVersionId && !row.reprintOf)) {
         const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });
@@ -116,6 +117,7 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
         return { dispatch: false, issuance: receipt(cancelled) };
       }
     } else if (row.purpose === "legacy_manual") {
+      await tx.$queryRaw`SELECT id FROM "LabelTemplate" WHERE "isActive"=true FOR SHARE`;
       const templates = await tx.labelTemplate.findMany({ where: { isActive: true }, select: { zpl: true } });
       if (!matchesApprovedLegacyTemplate(row.renderedZpl, templates)) {
         const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });
@@ -123,6 +125,7 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
         return { dispatch: false, issuance: receipt(cancelled) };
       }
     }
+    await tx.$queryRaw`SELECT id FROM "LabelPrinter" WHERE id=${row.printerId} FOR SHARE`;
     const printer = await tx.labelPrinter.findUnique({ where: { id: row.printerId }, select: { id: true, name: true, endpoint: true, contentType: true, isActive: true } });
     if (!printer?.isActive) {
       const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });

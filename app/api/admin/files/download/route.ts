@@ -1,58 +1,12 @@
-import { promises as fs } from "fs";
-import path from "path";
-import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
-import { normalizeRelativePath, resolveAdminPath } from "@/lib/admin-files";
-
+import { getCurrentPrincipal } from "@/lib/auth";
+import { downloadAdminFile } from "@/lib/admin-file-service";
+import { adminFileFailure, adminFileReply } from "@/lib/admin-file-http";
 export const runtime = "nodejs";
-
-const MIME_TYPES: Record<string, string> = {
-  ".csv": "text/csv",
-  ".json": "application/json",
-  ".pdf": "application/pdf",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".txt": "text/plain; charset=utf-8",
-  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ".xls": "application/vnd.ms-excel",
-  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ".zip": "application/zip",
-};
-
-export async function GET(req: NextRequest) {
-  await requireAdmin();
-
+export async function GET(request: Request) {
   try {
-    const relativePath = normalizeRelativePath(req.nextUrl.searchParams.get("path"));
-    if (!relativePath) {
-      return NextResponse.json({ error: "Path is required." }, { status: 400 });
-    }
-
-    const { resolved } = resolveAdminPath(relativePath);
-    const stats = await fs.stat(resolved);
-
-    if (!stats.isFile()) {
-      return NextResponse.json({ error: "Only files can be downloaded." }, { status: 400 });
-    }
-
-    const buffer = await fs.readFile(resolved);
-    const filename = path.basename(resolved);
-    const extension = path.extname(filename).toLowerCase();
-    const contentType = MIME_TYPES[extension] || "application/octet-stream";
-
-    return new NextResponse(buffer, {
-      headers: {
-        "Content-Type": contentType,
-        "Content-Length": String(buffer.byteLength),
-        "Content-Disposition": `attachment; filename="${filename}"`,
-      },
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Download failed." },
-      { status: 400 }
-    );
-  }
+    const principal = await getCurrentPrincipal(); if (!principal) return adminFileReply({ error: "Sign in required." }, 401);
+    const file = await downloadAdminFile(principal, { path: new URL(request.url).searchParams.get("path") ?? "" });
+    const fallback = file.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    return new Response(Buffer.from(file.contentBase64, "base64"), { headers: { "Content-Type": file.contentType, "Content-Length": String(file.size), "Content-Disposition": `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(file.filename)}`, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
+  } catch (error) { return adminFileFailure(error); }
 }

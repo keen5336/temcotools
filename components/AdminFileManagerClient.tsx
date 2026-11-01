@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Entry = {
   name: string;
   path: string;
-  kind: "file" | "directory";
+  kind: "file" | "directory" | "blocked";
   size: number;
   modifiedAt: string;
+  fingerprint: string;
+  blockedReason?: string;
 };
 
 function formatBytes(bytes: number) {
@@ -25,6 +27,12 @@ function formatBytes(bytes: number) {
 function toUploadList(files: File[] | FileList | null | undefined) {
   return Array.from(files ?? []).filter((file) => file.size > 0);
 }
+async function fetchDirectory(path: string): Promise<{ currentPath: string; parentPath: string; entries: Entry[] }> {
+  const res = await fetch(`/api/admin/files?path=${encodeURIComponent(path)}`, { cache: "no-store" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load files.");
+  return data;
+}
 
 export default function AdminFileManagerClient() {
   const [currentPath, setCurrentPath] = useState("");
@@ -38,80 +46,64 @@ export default function AdminFileManagerClient() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [moving, setMoving] = useState<Entry | null>(null);
+  const [destination, setDestination] = useState("");
+  const [loadedAt, setLoadedAt] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  async function load(path = currentPath) {
-    setLoading(true);
-    setError("");
-    const res = await fetch(`/api/admin/files?path=${encodeURIComponent(path)}`);
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || "Failed to load files.");
-      setLoading(false);
-      return;
-    }
+  const showDirectory = useCallback((data: { currentPath: string; parentPath: string; entries: Entry[] }) => {
     setCurrentPath(data.currentPath);
     setParentPath(data.parentPath);
     setEntries(data.entries);
+    setLoadedAt(Date.now());
     setLoading(false);
-  }
-
-  useEffect(() => {
-    load("");
   }, []);
+  async function load(path: string) {
+    setLoading(true); setError("");
+    try { showDirectory(await fetchDirectory(path)); }
+    catch (error) { setError(error instanceof Error ? error.message : "Failed to load files."); setLoading(false); }
+  }
+  useEffect(() => {
+    let active = true;
+    void fetchDirectory("").then(data => { if (active) showDirectory(data); }).catch(error => { if (active) { setError(error instanceof Error ? error.message : "Failed to load files."); setLoading(false); } });
+    return () => { active = false; };
+  }, [showDirectory]);
 
-  async function createFolder(e: React.FormEvent) {
-    e.preventDefault();
-    if (!folderName.trim()) return;
+  async function changeFiles(url: string, init: RequestInit, operationId: string, success: string) {
     setBusy(true);
     setError("");
     setStatus("");
-
-    const res = await fetch("/api/admin/files", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: currentPath, folderName }),
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      setError(data.error || "Failed to create folder.");
-      setBusy(false);
-      return;
+    try {
+      const res = await fetch(url, init);
+      const data = await res.json();
+      if (!res.ok || !data.ok) { setError(`${data.error || "File action failed."} Operation: ${data.operationId || operationId}`); return false; }
+      setStatus(`${success} Operation: ${operationId}`); await load(currentPath); return true;
+    } catch {
+      setError(`The result is uncertain. Refresh and inspect the folder before a new operation. No automatic retry occurred. Operation: ${operationId}`); return false;
+    } finally { setBusy(false); }
+  }
+  async function createFolder(e: React.FormEvent) {
+    e.preventDefault();
+    if (!folderName.trim()) return;
+    const operationId = crypto.randomUUID();
+    if (await changeFiles("/api/admin/files", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: currentPath, folderName, operationId }) }, operationId, "Folder created.")) {
+      setFolderName("");
     }
-
-    setFolderName("");
-    setStatus("Folder created.");
-    await load(currentPath);
-    setBusy(false);
   }
 
   async function uploadSelectedFiles(files: File[]) {
     if (!files.length) return;
-    setBusy(true);
-    setError("");
-    setStatus("");
-
+    const collisions = files.map(file => entries.find(entry => entry.name === file.name)).filter((entry): entry is Entry => Boolean(entry));
+    if (collisions.some(entry => entry.kind !== "file")) { setError("An upload cannot replace a folder or blocked entry."); return; }
+    if (collisions.length && !window.confirm(`Replace these current files?\n\n${collisions.map(entry => entry.name).join("\n")}\n\nReplacement is checked against the versions shown. Cancel to keep them.`)) return;
+    const operationId = crypto.randomUUID();
     const formData = new FormData();
     formData.set("path", currentPath);
+    formData.set("operationId", operationId);
+    formData.set("replace", String(collisions.length > 0));
+    formData.set("expectedFingerprints", JSON.stringify(Object.fromEntries(collisions.map(entry => [entry.name, entry.fingerprint]))));
     files.forEach((file) => formData.append("files", file));
 
-    const res = await fetch("/api/admin/files", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await res.json().catch(() => ({}));
-
-    if (!res.ok) {
-      setError(data.error || "Upload failed.");
-      setBusy(false);
-      return;
-    }
-
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    setStatus(`${files.length} file${files.length === 1 ? "" : "s"} uploaded.`);
-    await load(currentPath);
-    setBusy(false);
+    if (await changeFiles("/api/admin/files", { method: "POST", body: formData }, operationId, `${files.length} file${files.length === 1 ? "" : "s"} uploaded.`)) if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function uploadFiles(e: React.FormEvent) {
@@ -125,30 +117,19 @@ export default function AdminFileManagerClient() {
     await uploadSelectedFiles(toUploadList(e.dataTransfer.files));
   }
 
-  async function removeEntry(path: string, kind: Entry["kind"]) {
+  async function removeEntry(entry: Entry) {
     const confirmed = window.confirm(
-      `Delete this ${kind === "directory" ? "folder" : "file"}?\n\n${path}`
+      `Delete this ${entry.kind === "directory" ? "folder and its contents" : "file"}?\n\n${entry.path}`
     );
     if (!confirmed) return;
 
-    setBusy(true);
-    setError("");
-    setStatus("");
-
-    const res = await fetch(`/api/admin/files?path=${encodeURIComponent(path)}`, {
-      method: "DELETE",
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      setError(data.error || "Delete failed.");
-      setBusy(false);
-      return;
-    }
-
-    setStatus(`${kind === "directory" ? "Folder" : "File"} deleted.`);
-    await load(currentPath);
-    setBusy(false);
+    const operationId = crypto.randomUUID();
+    await changeFiles(`/api/admin/files?${new URLSearchParams({ path: entry.path, expectedFingerprint: entry.fingerprint, operationId })}`, { method: "DELETE" }, operationId, `${entry.kind === "directory" ? "Folder" : "File"} deleted.`);
+  }
+  async function moveEntry(event: React.FormEvent) {
+    event.preventDefault(); if (!moving || !destination.trim()) return;
+    const operationId = crypto.randomUUID();
+    if (await changeFiles("/api/admin/files", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operationId, path: moving.path, destinationPath: destination.trim(), expectedFingerprint: moving.fingerprint }) }, operationId, "Entry moved.")) { setMoving(null); setDestination(""); }
   }
 
   const breadcrumbs = currentPath ? currentPath.split("/") : [];
@@ -156,7 +137,7 @@ export default function AdminFileManagerClient() {
   const modifiedCutoff =
     modifiedWithinDays === "all"
       ? null
-      : Date.now() - Number(modifiedWithinDays) * 24 * 60 * 60 * 1000;
+      : loadedAt - Number(modifiedWithinDays) * 24 * 60 * 60 * 1000;
   const filteredEntries = entries.filter((entry) => {
     if (entry.kind === "directory") return true;
     if (minSizeBytes > 0 && entry.size < minSizeBytes) return false;
@@ -172,12 +153,11 @@ export default function AdminFileManagerClient() {
             <div>
               <h2 className="card-title text-base">Swap Space</h2>
               <p className="text-sm text-base-content/60 mt-1">
-                Upload files, create folders, download files, and delete old items.
+                Upload, create folders, move or rename, download, and delete managed files.
               </p>
             </div>
             <div className="text-sm text-base-content/70">
-              Root:
-              <span className="font-mono ml-2">/data/admin-files</span>
+              Managed storage root
             </div>
           </div>
 
@@ -256,6 +236,7 @@ export default function AdminFileManagerClient() {
 
           {error && <div role="alert" className="alert alert-error text-sm">{error}</div>}
           {status && <div role="status" className="alert alert-success text-sm">{status}</div>}
+          {moving && <form onSubmit={moveEntry} className="rounded-lg border border-base-300 p-4 space-y-3"><p className="font-semibold break-all">Move or rename: {moving.path}</p><label className="form-control"><span className="label-text">Destination path from managed root, including the new name</span><input className="input input-bordered w-full" value={destination} onChange={event => setDestination(event.target.value)} placeholder="folder/new-name.csv" required /></label><p className="text-sm text-base-content/60">Choose an existing parent folder and an unused destination name. Existing files are kept.</p><div className="flex gap-2"><button className="btn btn-primary btn-sm" disabled={busy}>Move entry</button><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setMoving(null)}>Cancel</button></div></form>}
         </div>
       </div>
 
@@ -329,7 +310,7 @@ export default function AdminFileManagerClient() {
                   filteredEntries.map((entry) => (
                     <tr key={entry.path}>
                       <td className="font-medium">{entry.name}</td>
-                      <td>{entry.kind}</td>
+                      <td title={entry.blockedReason}>{entry.kind}</td>
                       <td>{entry.kind === "file" ? formatBytes(entry.size) : "—"}</td>
                       <td>{new Date(entry.modifiedAt).toLocaleString()}</td>
                       <td>
@@ -338,17 +319,19 @@ export default function AdminFileManagerClient() {
                             <button className="btn btn-xs" onClick={() => load(entry.path)}>
                               Open
                             </button>
-                          ) : (
+                          ) : entry.kind === "file" ? (
                             <a
                               className="btn btn-xs"
                               href={`/api/admin/files/download?path=${encodeURIComponent(entry.path)}`}
                             >
                               Download
                             </a>
-                          )}
+                          ) : <span className="text-xs text-warning">{entry.blockedReason}</span>}
+                          {entry.kind !== "blocked" && <button className="btn btn-xs" disabled={busy} onClick={() => { setMoving(entry); setDestination(entry.path); }}>Move / Rename</button>}
                           <button
                             className="btn btn-xs btn-error btn-outline"
-                            onClick={() => removeEntry(entry.path, entry.kind)}
+                            disabled={busy || entry.kind === "blocked"}
+                            onClick={() => removeEntry(entry)}
                           >
                             Delete
                           </button>

@@ -1,92 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireManager } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import {
-  ensureBuiltInLabelTemplates,
-  isLabelTemplateKind,
-  validateContentType,
-  validatePrinterEndpoint,
-} from "@/lib/label-configuration";
-
+import { getCurrentPrincipal } from "@/lib/auth";
+import { createPrinter, createTemplate, getManagedLabelConfiguration, setDefaultTemplate, setPrinterEnabled, setTemplateEnabled, updatePrinter, updateTemplate } from "@/lib/label-configuration-service";
+import { labelFailure, labelReply, readLabelBody } from "@/lib/labels/http";
+export const runtime = "nodejs";
 export async function GET() {
-  await requireManager();
-  await ensureBuiltInLabelTemplates();
-  const [printers, templates] = await Promise.all([
-    prisma.labelPrinter.findMany({ orderBy: { name: "asc" } }),
-    prisma.labelTemplate.findMany({ orderBy: [{ kind: "asc" }, { isDefault: "desc" }, { name: "asc" }] }),
-  ]);
-  return NextResponse.json({ printers, templates });
+  try { const principal = await getCurrentPrincipal(); return principal ? labelReply(await getManagedLabelConfiguration(principal)) : labelReply({ error: "Sign in required." }, 401); } catch (error) { return labelFailure(error); }
 }
-
-export async function POST(request: NextRequest) {
-  const session = await requireManager();
-  const body = await request.json().catch(() => null);
-  if (!body || (body.resource !== "printer" && body.resource !== "template")) {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
-  }
-
-  if (body.resource === "printer") {
-    const name = String(body.name ?? "").trim();
-    const endpoint = String(body.endpoint ?? "").trim();
-    const contentType = String(body.contentType ?? "text/plain");
-    if (!name || !validatePrinterEndpoint(endpoint) || !validateContentType(contentType)) {
-      return NextResponse.json({ error: "Name, an HTTP(S) endpoint, and a supported content type are required." }, { status: 400 });
-    }
-    const printer = await prisma.labelPrinter.create({
-      data: { name, endpoint, contentType, createdByUserId: session.userId, updatedByUserId: session.userId },
-    });
-    return NextResponse.json(printer, { status: 201 });
-  }
-
-  const name = String(body.name ?? "").trim();
-  const zpl = String(body.zpl ?? "").trim();
-  const kind = body.kind;
-  if (!name || !zpl || !isLabelTemplateKind(kind)) {
-    return NextResponse.json({ error: "Name, workflow, and ZPL are required." }, { status: 400 });
-  }
-  const template = await prisma.labelTemplate.create({
-    data: { name, kind, zpl, createdByUserId: session.userId, updatedByUserId: session.userId },
-  });
-  return NextResponse.json(template, { status: 201 });
+export async function POST(request: Request) {
+  try {
+    const principal = await getCurrentPrincipal(); if (!principal) return labelReply({ error: "Sign in required." }, 401);
+    const body = await readLabelBody(request) as { resource?: string };
+    if (body?.resource !== "printer" && body?.resource !== "template") return labelReply({ error: "Choose a printer or template." }, 400);
+    return labelReply(await (body.resource === "printer" ? createPrinter(principal, body) : createTemplate(principal, body)), 201);
+  } catch (error) { return labelFailure(error); }
 }
-
-export async function PATCH(request: NextRequest) {
-  const session = await requireManager();
-  const body = await request.json().catch(() => null);
-  if (!body || !body.id || (body.resource !== "printer" && body.resource !== "template")) {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
-  }
-
-  if (body.resource === "printer") {
-    const name = String(body.name ?? "").trim();
-    const endpoint = String(body.endpoint ?? "").trim();
-    const contentType = String(body.contentType ?? "text/plain");
-    if (!name || !validatePrinterEndpoint(endpoint) || !validateContentType(contentType)) {
-      return NextResponse.json({ error: "Name, an HTTP(S) endpoint, and a supported content type are required." }, { status: 400 });
-    }
-    const printer = await prisma.labelPrinter.update({
-      where: { id: String(body.id) },
-      data: { name, endpoint, contentType, isActive: body.isActive !== false, updatedByUserId: session.userId },
-    });
-    return NextResponse.json(printer);
-  }
-
-  const name = String(body.name ?? "").trim();
-  const zpl = String(body.zpl ?? "").trim();
-  const kind = body.kind;
-  if (!name || !zpl || !isLabelTemplateKind(kind)) {
-    return NextResponse.json({ error: "Name, workflow, and ZPL are required." }, { status: 400 });
-  }
-  const isDefault = body.isDefault === true;
-  const isActive = body.isActive !== false;
-  const template = await prisma.$transaction(async (tx) => {
-    if (isDefault) {
-      await tx.labelTemplate.updateMany({ where: { kind, isDefault: true, NOT: { id: String(body.id) } }, data: { isDefault: false } });
-    }
-    return tx.labelTemplate.update({
-      where: { id: String(body.id) },
-      data: { name, kind, zpl, isActive, isDefault: isActive && isDefault, updatedByUserId: session.userId },
-    });
-  });
-  return NextResponse.json(template);
+export async function PATCH(request: Request) {
+  try {
+    const principal = await getCurrentPrincipal(); if (!principal) return labelReply({ error: "Sign in required." }, 401);
+    const body = await readLabelBody(request) as { resource?: string; action?: string };
+    if (body?.resource !== "printer" && body?.resource !== "template") return labelReply({ error: "Choose a printer or template." }, 400);
+    if (body.action === "enabled") return labelReply(await (body.resource === "printer" ? setPrinterEnabled(principal, body) : setTemplateEnabled(principal, body)));
+    if (body.resource === "template" && body.action === "default") return labelReply(await setDefaultTemplate(principal, body));
+    return labelReply(await (body.resource === "printer" ? updatePrinter(principal, body) : updateTemplate(principal, body)));
+  } catch (error) { return labelFailure(error); }
 }

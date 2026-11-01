@@ -35,6 +35,7 @@ export async function revokePrintingDevice(principal: Principal, deviceId: strin
 }
 export async function currentPrintingDevice(tx: Prisma.TransactionClient, principal: Principal, deviceId: string, token: string) {
   await assertCurrentPrincipal(tx, principal, "labels.print");
+  await tx.$queryRaw`SELECT id FROM "PrintingDevice" WHERE id=${deviceId} FOR SHARE`;
   const device = await tx.printingDevice.findUnique({ where: { id: deviceId } });
   if (!device || device.userId !== principal.userId || device.sessionId !== principal.sessionId || device.authVersion !== principal.authVersion || device.revokedAt || device.leaseExpiresAt.getTime() <= Date.now() || device.tokenHash !== hashDeviceToken(token)) throw new LabelError("The selected printing device is unavailable or belongs to another session.", 403, "device_unavailable");
   return device;

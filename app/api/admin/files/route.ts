@@ -1,115 +1,30 @@
-import { promises as fs } from "fs";
-import path from "path";
-import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
-import {
-  ensureAdminFilesRoot,
-  listAdminDirectory,
-  normalizeRelativePath,
-  resolveAdminPath,
-} from "@/lib/admin-files";
-
+import { getCurrentPrincipal } from "@/lib/auth";
+import { createAdminDirectory, deleteAdminFile, listAdminFiles, moveAdminFile, uploadAdminFiles } from "@/lib/admin-file-service";
+import { MAX_ADMIN_FILE_BYTES, AdminFileError } from "@/lib/admin-files";
+import { adminFileFailure, adminFileReply, readAdminJson, readAdminUploadForm } from "@/lib/admin-file-http";
 export const runtime = "nodejs";
-
-export async function GET(req: NextRequest) {
-  await requireAdmin();
-  const requestedPath = req.nextUrl.searchParams.get("path") ?? "";
-
-  try {
-    const currentPath = normalizeRelativePath(requestedPath);
-    const entries = await listAdminDirectory(currentPath);
-    const parentPath = currentPath.includes("/")
-      ? currentPath.split("/").slice(0, -1).join("/")
-      : "";
-
-    return NextResponse.json({ currentPath, parentPath, entries });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to list files." },
-      { status: 400 }
-    );
-  }
+export async function GET(request: Request) {
+  try { const principal = await getCurrentPrincipal(); return principal ? adminFileReply(await listAdminFiles(principal, { path: new URL(request.url).searchParams.get("path") ?? "" })) : adminFileReply({ error: "Sign in required." }, 401); } catch (error) { return adminFileFailure(error); }
 }
-
-export async function POST(req: NextRequest) {
-  await requireAdmin();
-  await ensureAdminFilesRoot();
-
+export async function POST(request: Request) {
   try {
-    const formData = await req.formData();
-    const currentPath = normalizeRelativePath(String(formData.get("path") ?? ""));
-    const { resolved } = resolveAdminPath(currentPath);
-    await fs.mkdir(resolved, { recursive: true });
-
-    const uploads = formData
-      .getAll("files")
-      .filter((value): value is File => value instanceof File && value.size > 0);
-
-    if (!uploads.length) {
-      return NextResponse.json({ error: "No files selected." }, { status: 400 });
-    }
-
-    for (const upload of uploads) {
-      const safeName = path.basename(upload.name);
-      const target = path.join(resolved, safeName);
-      const buffer = Buffer.from(await upload.arrayBuffer());
-      await fs.writeFile(target, buffer);
-    }
-
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Upload failed." },
-      { status: 400 }
-    );
-  }
+    const principal = await getCurrentPrincipal(); if (!principal) return adminFileReply({ error: "Sign in required." }, 401);
+    const form = await readAdminUploadForm(request);
+    const uploads = form.getAll("files").filter((value): value is File => value instanceof File);
+    if (!uploads.length || uploads.length > 40 || uploads.some(file => file.size > MAX_ADMIN_FILE_BYTES)) throw new AdminFileError("Choose up to 40 files, each at most 64 MiB.", 413);
+    let expected: Record<string,string> = {};
+    try { expected = JSON.parse(String(form.get("expectedFingerprints") ?? "{}")); if (!expected || Array.isArray(expected) || typeof expected !== "object" || Object.values(expected).some(value => typeof value !== "string")) throw new Error(); } catch { throw new AdminFileError("Reload the current replacement versions."); }
+    const files = await Promise.all(uploads.map(async file => ({ name: file.name, contentBase64: Buffer.from(await file.arrayBuffer()).toString("base64"), replace: form.get("replace") === "true" && Boolean(expected[file.name]), expectedFingerprint: expected[file.name] })));
+    const receipt = await uploadAdminFiles(principal, { operationId: String(form.get("operationId") ?? ""), path: String(form.get("path") ?? ""), files });
+    return adminFileReply(receipt, receipt.ok ? 200 : 409);
+  } catch (error) { return adminFileFailure(error); }
 }
-
-export async function PUT(req: NextRequest) {
-  await requireAdmin();
-  await ensureAdminFilesRoot();
-
-  try {
-    const body = (await req.json()) as { path?: string; folderName?: string };
-    const currentPath = normalizeRelativePath(body.path);
-    const folderName = path.basename(String(body.folderName ?? "").trim());
-
-    if (!folderName || folderName === "." || folderName === "..") {
-      return NextResponse.json({ error: "Folder name is required." }, { status: 400 });
-    }
-
-    const { resolved } = resolveAdminPath(
-      currentPath ? `${currentPath}/${folderName}` : folderName
-    );
-    await fs.mkdir(resolved, { recursive: true });
-
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Folder creation failed." },
-      { status: 400 }
-    );
-  }
+export async function PUT(request: Request) {
+  try { const principal = await getCurrentPrincipal(); if (!principal) return adminFileReply({ error: "Sign in required." }, 401); const receipt = await createAdminDirectory(principal, await readAdminJson(request)); return adminFileReply(receipt, receipt.ok ? 200 : 409); } catch (error) { return adminFileFailure(error); }
 }
-
-export async function DELETE(req: NextRequest) {
-  await requireAdmin();
-
-  try {
-    const targetPath = normalizeRelativePath(req.nextUrl.searchParams.get("path"));
-    if (!targetPath) {
-      return NextResponse.json({ error: "Path is required." }, { status: 400 });
-    }
-
-    const { resolved } = resolveAdminPath(targetPath);
-    await fs.rm(resolved, { recursive: true, force: true });
-
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Delete failed." },
-      { status: 400 }
-    );
-  }
+export async function PATCH(request: Request) {
+  try { const principal = await getCurrentPrincipal(); if (!principal) return adminFileReply({ error: "Sign in required." }, 401); const receipt = await moveAdminFile(principal, await readAdminJson(request)); return adminFileReply(receipt, receipt.ok ? 200 : 409); } catch (error) { return adminFileFailure(error); }
 }
-
+export async function DELETE(request: Request) {
+  try { const principal = await getCurrentPrincipal(); if (!principal) return adminFileReply({ error: "Sign in required." }, 401); const params = new URL(request.url).searchParams; const receipt = await deleteAdminFile(principal, { operationId: params.get("operationId"), path: params.get("path"), expectedFingerprint: params.get("expectedFingerprint") }); return adminFileReply(receipt, receipt.ok ? 200 : 409); } catch (error) { return adminFileFailure(error); }
+}

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 import { DEFAULT_TEMPLATE_NAME, DEFAULT_TEMPLATE_ZPL } from "@/app/tools/rtv-label/marsLabelShared";
 import { DEFAULT_PICK_WAVE_TEMPLATE } from "@/components/pick-waves/pickWaveLabel";
 
@@ -9,35 +10,21 @@ export function isLabelTemplateKind(value: unknown): value is LabelTemplateKindV
   return LABEL_TEMPLATE_KINDS.includes(value as LabelTemplateKindValue);
 }
 
-export async function ensureBuiltInLabelTemplates() {
-  await prisma.$transaction([
-    prisma.labelTemplate.upsert({
-      where: { kind_name: { kind: "mars_return", name: DEFAULT_TEMPLATE_NAME } },
-      create: {
-        name: DEFAULT_TEMPLATE_NAME,
-        kind: "mars_return",
-        zpl: DEFAULT_TEMPLATE_ZPL,
-        isDefault: true,
-      },
-      update: {},
-    }),
-    prisma.labelTemplate.upsert({
-      where: { kind_name: { kind: "pick_wave", name: "Default Pick Wave 4x3" } },
-      create: {
-        name: "Default Pick Wave 4x3",
-        kind: "pick_wave",
-        zpl: DEFAULT_PICK_WAVE_TEMPLATE,
-        isDefault: true,
-      },
-      update: {},
-    }),
-  ]);
+export async function ensureBuiltInLabelTemplates(client?: Prisma.TransactionClient) {
+  const ensure = async (tx: Prisma.TransactionClient) => {
+    for (const item of [{ kind: "mars_return" as const, name: DEFAULT_TEMPLATE_NAME, zpl: DEFAULT_TEMPLATE_ZPL }, { kind: "pick_wave" as const, name: "Default Pick Wave 4x3", zpl: DEFAULT_PICK_WAVE_TEMPLATE }]) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`legacy-template:${item.kind}`}, 812))`;
+      const currentDefault = await tx.labelTemplate.findFirst({ where: { kind: item.kind, isActive: true, isDefault: true }, select: { id: true } });
+      await tx.labelTemplate.upsert({ where: { kind_name: { kind: item.kind, name: item.name } }, create: { ...item, isDefault: !currentDefault }, update: {} });
+    }
+  };
+  if (client) await ensure(client); else await prisma.$transaction(ensure);
 }
 
 export function validatePrinterEndpoint(value: string) {
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password && !url.hash && value.length <= 2048;
   } catch {
     return false;
   }
