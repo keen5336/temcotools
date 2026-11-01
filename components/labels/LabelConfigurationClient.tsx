@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DEFAULT_TEMPLATE_ZPL } from "@/app/tools/rtv-label/marsLabelShared";
 import { DEFAULT_PICK_WAVE_TEMPLATE } from "@/components/pick-waves/pickWaveLabel";
 import type { LabelTemplateKindValue } from "@/lib/label-configuration";
@@ -34,10 +34,14 @@ export default function LabelConfigurationClient() {
   const [newTemplate, setNewTemplate] = useState({ name: "", kind: "mars_return" as LabelTemplateKindValue, zpl: DEFAULT_TEMPLATE_ZPL });
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const loadSequence = useRef(0), alive = useRef(true);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequence.current;
     const response = await fetch("/api/management/label-config", { cache: "no-store" });
     const data = await response.json();
+    if (!alive.current || sequence !== loadSequence.current) return;
     if (!response.ok) throw new Error(data.error || "Unable to load label configuration.");
     setConfiguration(data);
     setPrinterDrafts(Object.fromEntries(data.printers.map((item: Printer) => [item.id, item])));
@@ -45,7 +49,9 @@ export default function LabelConfigurationClient() {
   }, []);
 
   useEffect(() => {
-    load().catch((error) => setMessage(error instanceof Error ? error.message : "Unable to load label configuration."));
+    alive.current = true;
+    load().catch((error) => setMessage(error instanceof Error ? error.message : "Unable to load label configuration.")).finally(() => setLoading(false));
+    return () => { alive.current = false; };
   }, [load]);
 
   async function send(method: "POST" | "PATCH", body: Record<string, unknown>) {
@@ -90,6 +96,7 @@ export default function LabelConfigurationClient() {
     <div className="space-y-8">
       {message && <div role="status" className="alert alert-info"><span>{message}</span></div>}
 
+      <fieldset disabled={busy || loading} className="min-w-0 space-y-8">
       <section className="card bg-base-100 border border-base-200 shadow-sm">
         <div className="card-body">
           <div>
@@ -151,6 +158,7 @@ export default function LabelConfigurationClient() {
           </form>
         </div>
       </section>
+      </fieldset>
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { LabelError, labelDraftInput, labelVersionHash, renderLabelVersion, validateLabelDraft } from "./model";
+import { dispatchDay } from "@/lib/dispatch/model";
+import { assertUnitContextScopes, deriveUnitLabelContext } from "./unit-context";
 import { LABEL_PURPOSES, type LabelDraft } from "./types";
 
 const purposeSchema = z.enum(LABEL_PURPOSES).exclude(["legacy_manual"]);
@@ -15,7 +17,7 @@ export const labelWorkflowPublishInput = z.object({ purpose: purposeSchema, expe
 export const labelWorkflowRollbackInput = labelWorkflowPublishInput.extend({ versionId: z.string().min(1).max(100) });
 export const labelWorkflowEnabledInput = labelWorkflowPublishInput.extend({ enabled: z.boolean() });
 export const labelPreviewInput = labelDraftInput.extend({ fields: z.record(z.string(), z.string().max(2000)) });
-export const labelEvaluationInput = z.object({ purpose: purposeSchema, unitId: z.string().min(1).max(100), fields: z.record(z.string(), z.string().max(2000)) });
+export const labelEvaluationInput = z.object({ purpose: purposeSchema, unitId: z.string().min(1).max(100), fields: z.record(z.string(), z.string().max(2000)).default({}).describe("Compatibility input only; identified-unit evaluation uses current authoritative warehouse context."), dispatchDay: dispatchDay.optional(), wmsScope: z.string().trim().min(1).max(100).default("warehouse") });
 const versionSummary = { id: true, version: true, name: true, contentHash: true, publishedAt: true, publishedByUserId: true, note: true } as const;
 async function lockedWorkflow(tx: Prisma.TransactionClient, purpose: string, expected: number) {
   await tx.$queryRaw`SELECT purpose FROM "LabelWorkflow" WHERE purpose = ${purpose} FOR UPDATE`;
@@ -103,10 +105,11 @@ export function previewLabelDraft(principal: Principal, input: unknown) {
   const { fields } = labelPreviewInput.parse(input);
   return { ...renderLabelVersion({ id: "draft-preview", ...draft }, fields), widthMm: draft.widthMm, heightMm: draft.heightMm, dpi: draft.dpi, limitation: "Content and ZPL preview only; actual printer raster/media qualification is separate." };
 }
-export async function evaluateLabel(principal: Principal, input: { purpose: LabelDraft["purpose"]; unitId: string; fields: unknown }) {
+export async function evaluateLabel(principal: Principal, input: { purpose: LabelDraft["purpose"]; unitId: string; fields?: unknown; dispatchDay?: string; wmsScope?: string }) {
   return prisma.$transaction(async tx => {
-  const current = await assertCurrentPrincipal(tx, principal, "labels.read"); assertCapability(current, "inventory.read");
-  const { purpose, unitId } = labelEvaluationInput.parse(input);
+  const current = await assertCurrentPrincipal(tx, principal, "labels.read"); assertUnitContextScopes(current);
+  const { purpose, unitId, dispatchDay, wmsScope } = labelEvaluationInput.parse(input);
+  const context = await deriveUnitLabelContext(tx, { unitId, dispatchDay, wmsScope });
   const [unit, workflow, observations, issued] = await Promise.all([
     tx.warehouseUnit.findUnique({ where: { id: unitId }, select: { id: true } }),
     tx.labelWorkflow.findUnique({ where: { purpose }, include: { publishedVersion: true } }),
@@ -122,12 +125,12 @@ export async function evaluateLabel(principal: Principal, input: { purpose: Labe
   const latest = observations[0];
   const conflicting = observations.some(item => item.type !== latest?.type || item.location !== latest?.location);
   const observed = latest ? { ...latest, certainty: "as_observed_not_live_presence", conflictingObservationIds: conflicting ? observations.map(item => item.id) : [] } : null;
-  if (!workflow?.enabled || !workflow.publishedVersion) return { available: false, reason: "No enabled published label workflow.", lastObserved: observed, issued };
-  const rendered = renderLabelVersion(workflow.publishedVersion, { ...(input.fields && typeof input.fields === "object" ? input.fields : {}), unitId });
+  if (!workflow?.enabled || !workflow.publishedVersion) return { unitId, context, available: false, reason: "No enabled published label workflow.", lastObserved: observed, issued };
+  const rendered = renderLabelVersion(workflow.publishedVersion, context.fields);
   const [same, unresolved] = await Promise.all([
     tx.labelIssuance.findFirst({ where: { unitId, purpose, contentFingerprint: rendered.contentFingerprint, state: { notIn: ["cancelled", "not_sent", "verified_not_printed"] } }, select: { id: true }, orderBy: { createdAt: "desc" } }),
     tx.labelIssuance.findFirst({ where: { unitId, purpose, state: { in: ["dispatching", "unknown"] } }, select: { id: true }, orderBy: { createdAt: "desc" } }),
   ]);
-  return { available: true, versionId: workflow.publishedVersion.id, contentFingerprint: rendered.contentFingerprint, due: !same, blockedByUnknownIssuanceId: unresolved?.id ?? null, decision: rendered.decision, lastObserved: observed, lastIssued: issued[0] ?? null, issued };
+  return { unitId, context, available: true, versionId: workflow.publishedVersion.id, contentFingerprint: rendered.contentFingerprint, due: !same, blockedByUnknownIssuanceId: unresolved?.id ?? null, decision: rendered.decision, lastObserved: observed, lastIssued: issued[0] ?? null, issued };
   });
 }

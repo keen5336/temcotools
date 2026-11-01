@@ -77,6 +77,29 @@ test("authoritative unit labels preserve A/B, relevant freshness, exact allocati
     await prisma.appAccessGrant.update({ where: { id: delegatedGrant.id }, data: { scopes: ["labels.print", "inventory.read"] } });
     const revokedSource = await effects.claimLabelDispatch(principal, { issuanceId: delegatedIntent.issuance.id, deviceId: device.device.id, deviceToken: device.deviceToken });
     assert.equal(revokedSource.dispatch, false); assert.equal("issuance" in revokedSource && revokedSource.issuance.state, "not_sent", "Queued actual dispatch rechecks source scopes even when labels.print remains granted.");
+    // These are the same canonical actions used by MCP; the HTTP evaluation
+    // route parses the identical schema. Caller A fields never bind unit B.
+    const { executeApplicationAction } = await import("../lib/application/actions");
+    const forgedFields = { lpn: "LPN-DEMO-A", instructions: "FORGED ORIGINAL A", deliveryDate: "2099-01-01", routeNumber: "FORGED-ROUTE-A", hold: "false", identityResolved: "true" };
+    const evaluation = await executeApplicationAction(principal, "labels.evaluate", { purpose: input.purpose, unitId: b, wmsScope: scope, fields: forgedFields }) as Awaited<ReturnType<typeof workflows.evaluateLabel>>;
+    assert.equal(evaluation.context.unitId, b); assert.equal(evaluation.context.fields.lpn, before.fields.lpn); assert.equal(evaluation.context.wmsScope, scope);
+    assert.ok(!JSON.stringify(evaluation.context.fields).includes("FORGED"));
+    await assert.rejects(effects.prepareLabelIssuance(limited, { ...input, operationId: randomUUID(), fields: forgedFields }), /permission/);
+    await assert.rejects(effects.prepareLabelIssuance(principal, { ...input, operationId: randomUUID(), observationId: undefined, fields: forgedFields }), /qualifying physical observation/);
+    await assert.rejects(effects.prepareLabelIssuance(principal, { ...input, operationId: randomUUID(), unitId: a, fields: forgedFields }), /qualifying physical observation/);
+    await assert.rejects(effects.prepareLabelIssuance(principal, { ...input, operationId: randomUUID(), fields: forgedFields, trustedContext: { unitId: b, fields: forgedFields } }), /unrecognized/i);
+    const genericInput = { ...input, operationId: randomUUID(), fields: forgedFields };
+    const generic = await executeApplicationAction(principal, "labels.prepare", genericInput) as Awaited<ReturnType<typeof effects.prepareLabelIssuance>>;
+    const genericRow = await prisma.labelIssuance.findUniqueOrThrow({ where: { id: generic.issuance.id } });
+    assert.ok(genericRow.renderedZpl.includes(before.fields.lpn!)); assert.ok(!genericRow.renderedZpl.includes("FORGED") && !genericRow.renderedZpl.includes("LPN-DEMO-A"));
+    const genericBinding = await prisma.labelIssuanceEvent.findFirstOrThrow({ where: { issuanceId: genericRow.id, action: "unit_context_bound" } });
+    assert.equal(JSON.parse(genericBinding.note).wmsScope, scope);
+    await prisma.officeDisposition.update({ where: { id: disposition.id }, data: { instruction: "REPLACEMENT B GENERIC QUEUE CHANGED" } });
+    const genericClaim = await effects.claimLabelDispatch(principal, { issuanceId: genericRow.id, deviceId: device.device.id, deviceToken: device.deviceToken }); assert.equal(genericClaim.dispatch, false);
+    assert.equal((await effects.prepareLabelIssuance(principal, genericInput)).issuance.id, genericRow.id, "Same operation returns its original receipt after context changes; it never emits a replacement.");
+    const unbound = await effects.prepareLabelIssuance(principal, { ...genericInput, operationId: randomUUID() });
+    await prisma.labelIssuanceEvent.deleteMany({ where: { issuanceId: unbound.issuance.id, action: "unit_context_bound" } });
+    assert.equal((await effects.claimLabelDispatch(principal, { issuanceId: unbound.issuance.id, deviceId: device.device.id, deviceToken: device.deviceToken })).dispatch, false, "An old unbound operational intent must not dispatch");
     await assert.rejects(context.prepareUnitLabel(principal, { ...input, fields: { deliveryDate: "2099-01-01" } }));
     const first = await context.prepareUnitLabel(principal, input); await prisma.officeDisposition.update({ where: { id: disposition.id }, data: { instruction: "REPLACEMENT B UPDATED HANDLING" } });
     const claim = (id: string) => effects.claimLabelDispatch(principal, { issuanceId: id, deviceId: device.device.id, deviceToken: device.deviceToken });
@@ -92,6 +115,11 @@ test("authoritative unit labels preserve A/B, relevant freshness, exact allocati
     const uncertain = await context.prepareUnitLabel(principal, { ...input, operationId: randomUUID() }), uncertainClaim = await claim(uncertain.issuance.id); assert.ok(uncertainClaim.dispatch);
     await effects.reportLabelDelivery(principal, { issuanceId: uncertain.issuance.id, deviceId: device.device.id, deviceToken: device.deviceToken, reportToken: uncertainClaim.reportToken, status: "unknown", note: "Synthetic uncertain result" });
     await assert.rejects(context.prepareUnitLabel(principal, { ...input, operationId: randomUUID() }), (error: unknown) => error instanceof LabelError && error.code === "unknown_effect");
+    const snapshotReprint = await effects.reprintLabelIssuance(principal, { operationId: randomUUID(), issuanceId: uncertain.issuance.id, mode: "direct", deviceId: device.device.id, reason: "Synthetic inspected original snapshot requested explicitly" });
+    await prisma.officeDisposition.update({ where: { id: disposition.id }, data: { instruction: "REPLACEMENT B AFTER ORIGINAL SNAPSHOT" } });
+    const originalSnapshot = await prisma.labelIssuance.findUniqueOrThrow({ where: { id: uncertain.issuance.id } });
+    const reprintClaim = await claim(snapshotReprint.issuance.id); assert.ok(reprintClaim.dispatch); assert.equal(reprintClaim.zpl, originalSnapshot.renderedZpl, "Explicit reprints intentionally preserve the inspected original content");
+    await effects.reportLabelDelivery(principal, { issuanceId: snapshotReprint.issuance.id, deviceId: device.device.id, deviceToken: device.deviceToken, reportToken: reprintClaim.reportToken, status: "not_sent", note: "Synthetic receipt only; no external printer request" });
     await effects.reconcileLabelIssuance(principal, { issuanceId: uncertain.issuance.id, outcome: "not_printed", reason: "Synthetic fixture confirms no actual device action" });
     await prisma.officeScheduleFact.update({ where: { id: schedule.id }, data: { nextDeliveryDate: tomorrow, sourceAsOf: new Date(now.getTime() + 1000) } });
     const conflict = await context.getUnitLabelContext(principal, { unitId: b, wmsScope: scope }); assert.equal(conflict.fields.hold, "true"); assert.equal(conflict.fields.deliveryDate, tomorrow); assert.equal(conflict.fields.routeNumber, undefined);

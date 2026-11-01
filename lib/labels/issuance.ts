@@ -6,11 +6,12 @@ import { assertCapability, AuthorizationError, CAPABILITIES, type Capability, ty
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { currentPrintingDevice, hashDeviceToken, printingDeviceAuthorityInput } from "./devices";
 import { fingerprint, LabelError, renderLabelVersion, matchesApprovedLegacyTemplate } from "./model";
+import { dispatchDay } from "@/lib/dispatch/model";
 import { LABEL_PURPOSES, type LabelDispatchClaim } from "./types";
 import { assertUnitContextScopes, deriveUnitLabelContext, unitLabelDispatchDay, validateAutomaticUnitLabelObservation } from "./unit-context";
 
 const idSchema = z.string().min(1).max(100);
-export const labelPrepareInput = z.object({ operationId: z.string().min(16).max(100).describe("Durable caller operation ID; retry the same ID and inputs after a lost response."), unitId: idSchema.optional(), purpose: z.enum(LABEL_PURPOSES), printerId: idSchema, versionId: idSchema.optional(), fields: z.record(z.string(), z.string().max(2000)).default({}), legacyZpl: z.string().min(1).max(128 * 1024).optional().describe("Explicit approved legacy-template content snapshot; at most 128 KiB UTF-8. Not arbitrary printer commands."), mode: z.enum(["direct", "relay"]), deviceId: idSchema.optional(), automatic: z.boolean().default(false), reprintOf: idSchema.optional(), reason: z.string().trim().min(3).max(500).optional() });
+export const labelPrepareInput = z.object({ operationId: z.string().min(16).max(100).describe("Durable caller operation ID; retry the same ID and inputs after a lost response."), unitId: idSchema.optional(), purpose: z.enum(LABEL_PURPOSES), printerId: idSchema, versionId: idSchema.optional(), fields: z.record(z.string(), z.string().max(2000)).default({}).describe("Compatibility only for identified units: current server context supplies operational label values."), dispatchDay: dispatchDay.optional(), wmsScope: z.string().trim().min(1).max(100).default("warehouse"), observationId: z.string().min(1).max(200).optional(), pickWaveItemId: z.string().min(1).max(200).optional(), legacyZpl: z.string().min(1).max(128 * 1024).optional().describe("Explicit approved legacy-template content snapshot; at most 128 KiB UTF-8. Not arbitrary printer commands."), mode: z.enum(["direct", "relay"]), deviceId: idSchema.optional(), automatic: z.boolean().default(false), reprintOf: idSchema.optional(), reason: z.string().trim().min(3).max(500).optional() }).strict();
 export const labelDispatchClaimInput = printingDeviceAuthorityInput.extend({ issuanceId: idSchema });
 export const labelDeliveryReportInput = labelDispatchClaimInput.extend({ reportToken: z.string().min(30).max(100).meta({ writeOnly: true, description: "One-use report authority returned by this actual device's successful dispatch claim." }), status: z.enum(["sent_unconfirmed", "unknown", "not_sent"]), note: z.string().trim().max(500).default("") });
 export const labelCancelInput = z.object({ issuanceId: idSchema, reason: z.string().trim().min(3).max(500) });
@@ -53,12 +54,15 @@ export async function prepareLabelIssuance(principal: Principal, input: unknown)
 export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionClient, principal: Principal, input: unknown) {
   const data = labelPrepareInput.parse(input), inputFingerprint = fingerprint(data);
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");
+    if (data.purpose !== "legacy_manual") assertUnitContextScopes(current);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`label-operation:${principal.userId}:${data.operationId}`}, 811))`;
     const existing = await tx.labelIssuance.findUnique({ where: { actorUserId_operationId: { actorUserId: principal.userId, operationId: data.operationId } } });
     if (existing) {
       if (existing.inputFingerprint !== inputFingerprint) throw new LabelError("This operation ID was used for different label inputs.", 409, "idempotency_conflict");
       return { created: false, issuance: receipt(existing) };
     }
+    if (data.reprintOf) throw new LabelError("Use the explicit original-snapshot reprint action with its receipt and reason.", 409);
+    let contextBinding: { unitId: string; dispatchDay?: string; wmsScope: string; observationId?: string; pickWaveItemId?: string } | undefined;
     if (data.unitId && !await tx.warehouseUnit.findUnique({ where: { id: data.unitId }, select: { id: true } })) throw new LabelError("Choose an identified warehouse unit.", 404);
     let zpl: string, contentFingerprint: string, workflowVersionId: string | undefined, ruleId: string | null = null;
     if (data.purpose === "legacy_manual") {
@@ -71,7 +75,11 @@ export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionCl
       if (!data.unitId) throw new LabelError("A shared physical-unit ID is required for this label workflow.");
       const workflow = await tx.labelWorkflow.findUnique({ where: { purpose: data.purpose }, include: { publishedVersion: true } });
       if (!workflow?.enabled || !workflow.publishedVersion || (data.versionId && data.versionId !== workflow.publishedVersion.id)) throw new LabelError("Use the current enabled published label version.", 409);
-      const rendered = renderLabelVersion(workflow.publishedVersion, { ...data.fields, unitId: data.unitId });
+      const selectedDay = await unitLabelDispatchDay(tx, { unitId: data.unitId, dispatchDay: data.dispatchDay, pickWaveItemId: data.pickWaveItemId });
+      const context = await deriveUnitLabelContext(tx, { unitId: data.unitId, dispatchDay: selectedDay, wmsScope: data.wmsScope });
+      if (data.automatic) await validateAutomaticUnitLabelObservation(tx, current.userId, context, data.observationId);
+      const rendered = renderLabelVersion(workflow.publishedVersion, context.fields);
+      contextBinding = { unitId: data.unitId, dispatchDay: selectedDay, wmsScope: data.wmsScope, observationId: data.observationId, pickWaveItemId: data.pickWaveItemId };
       if (data.automatic && !rendered.decision.automaticAllowed) throw new LabelError(rendered.decision.reason, 409, "automatic_rule_blocked");
       zpl = rendered.zpl; contentFingerprint = rendered.contentFingerprint; workflowVersionId = workflow.publishedVersion.id; ruleId = rendered.decision.ruleId;
     }
@@ -104,6 +112,7 @@ export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionCl
     if (!device) throw new LabelError("No authorized connected device is available for this printer/mode.", 409, "device_unavailable");
     const issuance = await tx.labelIssuance.create({ data: { operationId: data.operationId, actorUserId: current.userId, actorSessionId: current.sessionId!, actorAuthVersion: current.authVersion, actorGrantId: current.grantId, actorAuthSource: actorAuthSource(current), actorCapabilities: [...current.capabilities], unitId: data.unitId, purpose: data.purpose, printerId: data.printerId, workflowVersionId, contentFingerprint, inputFingerprint, renderedZpl: zpl, mode: data.mode, deviceId: device.id, automatic: data.automatic, reprintOf: data.reprintOf, reason: data.reason, ruleId } });
     await currentRequester(tx, issuance);
+    if (contextBinding) await event(tx, issuance, current.userId, "unit_context_bound", JSON.stringify(contextBinding));
     await event(tx, issuance, principal.userId, data.reprintOf ? "reprint_prepared" : "prepared", data.reason ?? "Authorized label intent; no physical send yet.");
     return { created: true, issuance: receipt(issuance) };
 }
@@ -140,18 +149,25 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
       }
     }
     const contextBinding = await tx.labelIssuanceEvent.findFirst({ where: { issuanceId: row.id, action: "unit_context_bound" }, orderBy: { createdAt: "asc" } });
-    if (contextBinding) {
+    if (row.purpose !== "legacy_manual") {
       try {
-        assertUnitContextScopes(requester);
-        const binding = z.object({ unitId: z.string(), dispatchDay: z.string().optional(), wmsScope: z.string(), observationId: z.string().optional(), pickWaveItemId: z.string().optional() }).parse(JSON.parse(contextBinding.note));
-        if (binding.unitId !== row.unitId || !row.workflowVersionId) throw new LabelError("The label's stored unit binding is invalid.", 409);
-        const dispatchDay = await unitLabelDispatchDay(tx, binding);
-        const context = await deriveUnitLabelContext(tx, { unitId: binding.unitId, dispatchDay, wmsScope: binding.wmsScope });
-        const version = await tx.labelWorkflowVersion.findUnique({ where: { id: row.workflowVersionId } });
-        if (!version) throw new LabelError("The label version is unavailable.", 409);
-        const rendered = renderLabelVersion(version, context.fields);
-        if (rendered.contentFingerprint !== row.contentFingerprint || (row.automatic && !rendered.decision.automaticAllowed)) throw new LabelError("Relevant unit context or label rule changed before dispatch.", 409);
-        if (row.automatic) await validateAutomaticUnitLabelObservation(tx, row.actorUserId, context, binding.observationId);
+        if (row.reprintOf) {
+          const proof = await tx.labelIssuanceEvent.findFirst({ where: { issuanceId: row.id, action: "reprint_snapshot_prepared" }, select: { id: true } });
+          const original = await tx.labelIssuance.findUnique({ where: { id: row.reprintOf } });
+          if (!proof || !original || original.unitId !== row.unitId || original.purpose !== row.purpose || original.workflowVersionId !== row.workflowVersionId || original.contentFingerprint !== row.contentFingerprint || original.renderedZpl !== row.renderedZpl) throw new LabelError("This is not a verified original-snapshot reprint.", 409);
+        } else {
+          if (!contextBinding) throw new LabelError("This queued operational label has no authoritative unit binding.", 409);
+          assertUnitContextScopes(requester);
+          const binding = z.object({ unitId: z.string(), dispatchDay: z.string().optional(), wmsScope: z.string(), observationId: z.string().optional(), pickWaveItemId: z.string().optional() }).parse(JSON.parse(contextBinding.note));
+          if (binding.unitId !== row.unitId || !row.workflowVersionId) throw new LabelError("The label's stored unit binding is invalid.", 409);
+          const dispatchDay = await unitLabelDispatchDay(tx, binding);
+          const context = await deriveUnitLabelContext(tx, { unitId: binding.unitId, dispatchDay, wmsScope: binding.wmsScope });
+          const version = await tx.labelWorkflowVersion.findUnique({ where: { id: row.workflowVersionId } });
+          if (!version) throw new LabelError("The label version is unavailable.", 409);
+          const rendered = renderLabelVersion(version, context.fields);
+          if (rendered.contentFingerprint !== row.contentFingerprint || (row.automatic && !rendered.decision.automaticAllowed)) throw new LabelError("Relevant unit context or label rule changed before dispatch.", 409);
+          if (row.automatic) await validateAutomaticUnitLabelObservation(tx, row.actorUserId, context, binding.observationId);
+        }
       } catch (error) {
         if (!(error instanceof LabelError || error instanceof AuthorizationError || error instanceof z.ZodError || error instanceof SyntaxError)) throw error;
         const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });

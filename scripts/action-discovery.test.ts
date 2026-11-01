@@ -8,9 +8,11 @@ import { CAPABILITIES, CURRENT_USER_SELECT, resolvePrincipal, type Principal } f
 import { labelWorkflowSaveInput, saveLabelWorkflow } from "../lib/labels/workflows";
 import { payloadDraftSaveInput } from "../lib/payloads/service";
 import { adminFileMoveInput, adminFilesListInput } from "../lib/admin-file-service";
+import { hashPassword } from "../lib/auth/passwords";
 
 interface JsonSchema {
   type?: string;
+  anyOf?: JsonSchema[];
   properties?: Record<string, JsonSchema>;
   required?: string[];
   enum?: unknown[];
@@ -32,7 +34,8 @@ function body(result: Record<string, unknown>) { return JSON.parse((result.conte
 async function describe(client: Client, action: string): Promise<{ name: string; inputSchema: JsonSchema; requiresUserInteraction?: boolean }> {
   const result = await client.callTool({ name: "application_action_info", arguments: { action } });
   assert.notEqual(result.isError, true, `${action} must be discoverable for its authorized principal.`);
-  const data = body(result); assert.equal(data.name, action); assert.equal(data.inputSchema?.type, "object");
+  const data = body(result); assert.equal(data.name, action);
+  assert.ok(data.inputSchema?.type === "object" || data.inputSchema?.anyOf?.every((branch: JsonSchema) => branch.type === "object"), "An action describes an object or explicit object alternatives.");
   return data;
 }
 
@@ -68,6 +71,9 @@ test("SDK discovery describes retained, file, payload and label contracts withou
     assert.deepEqual(render.required?.sort(), ["fields", "templateId"]); assert.equal(render.properties?.fields.properties?.submissionNumber.type, "string");
     assert.deepEqual((await describe(client, "labels.rtv.bookmarklet")).inputSchema.properties, {});
     assert.deepEqual((await describe(client, "scanner.diagnostics.open")).inputSchema.properties, {});
+    assert.ok((await describe(client, "identity.user.update")).inputSchema.required?.includes("expectedAuthVersion"));
+    const bundleUpdate = (await describe(client, "identity.bundle.save")).inputSchema.anyOf?.find(branch => branch.required?.includes("id"));
+    assert.ok(bundleUpdate?.required?.includes("expectedFingerprint"), "An existing bundle's current fingerprint must be advertised to MCP clients.");
     const ceremony = await describe(client, "identity.password.change");
     assert.equal(ceremony.requiresUserInteraction, true); assert.deepEqual(ceremony.inputSchema.properties, {}, "The agent initiates a human ceremony without collecting password/authenticator credentials.");
     assert.equal(JSON.stringify(claim).includes("synthetic-discovery-only"), false, "Schemas contain credential requirements, never an active credential.");
@@ -79,18 +85,32 @@ test("SDK-discovered inputs execute the native draft and scan-list commands with
   assert.ok(target.hostname === "127.0.0.1" && target.port === "55439" && target.pathname === "/temcotools_v2_test", "Dedicated local synthetic database required.");
   const { prisma } = await import("../lib/db");
   const suffix = randomUUID(), payloadId = `schema-${suffix}`, purpose = "office_disposition";
-  let userId = "", bundleId = "", workflowCreated = false, payloadCreated = false;
+  let userId = "", bundleId = "", targetId = "", editedBundleId = "", workflowCreated = false, payloadCreated = false;
   let connection: Awaited<ReturnType<typeof connect>> | undefined;
   try {
     assert.equal(await prisma.labelWorkflow.count({ where: { purpose } }), 0, "Preserve any existing workflow instead of overwriting it.");
     const bundle = await prisma.roleBundle.create({ data: { name: `Synthetic action discovery ${suffix}`, capabilities: [...CAPABILITIES] } }); bundleId = bundle.id;
-    const user = await prisma.user.create({ data: { username: `schema-${suffix}`, displayName: "Synthetic MCP discovery operator", role: "admin", pinHash: "not-a-usable-credential", roleBundles: { create: { bundleId } } } }); userId = user.id;
+    const user = await prisma.user.create({ data: { username: `schema-${suffix}`, displayName: "Synthetic MCP discovery operator", role: "admin", pinHash: "not-a-usable-credential", passwordHash: await hashPassword(`Synthetic discovery ${randomUUID()}`), roleBundles: { create: { bundleId } } } }); userId = user.id;
     const at = new Date(), session = await prisma.userSession.create({ data: { id: randomUUID(), userId, authVersion: user.authVersion, createdAt: at, lastActivityAt: at, lastStrongAuthenticatedAt: at, mfaVerifiedAt: at, expiresAt: new Date(at.getTime() + 3600_000), deviceLabel: "Synthetic discovery" } });
     const resolved = await resolvePrincipal({ userId, authVersion: user.authVersion, sessionId: session.id, issuedAt: at.getTime(), expiresAt: session.expiresAt.getTime() }, id => prisma.user.findUnique({ where: { id }, select: CURRENT_USER_SELECT }));
     assert.ok(resolved);
     const actor: Principal = { ...resolved, sessionId: session.id, strongAuthenticatedAt: at.getTime(), mfaVerifiedAt: at.getTime() };
     connection = await connect(actor); const { client } = connection;
     const execute = (action: string, input: Record<string, unknown>) => client.callTool({ name: "application_action", arguments: { action, input } });
+    const target = await execute("identity.user.create", { username: `schema-target-${suffix}`, displayName: "Synthetic SDK target" }); assert.notEqual(target.isError, true); targetId = body(target).id;
+    const targetVersion = body(target).authVersion;
+    assert.equal((await execute("identity.user.update", { id: targetId, displayName: "Missing target version" })).isError, true);
+    const changedTarget = await execute("identity.user.update", { id: targetId, expectedAuthVersion: targetVersion, displayName: "Synthetic SDK target updated" }); assert.notEqual(changedTarget.isError, true);
+    assert.equal(body(changedTarget).authVersion, targetVersion + 1);
+    assert.equal((await execute("identity.user.update", { id: targetId, expectedAuthVersion: targetVersion, isActive: true })).isError, true, "A discovered stale target version cannot be replayed through MCP.");
+    const createdBundle = await execute("identity.bundle.save", { name: `Synthetic discovered bundle ${suffix}`, capabilities: ["inventory.read"] }); assert.notEqual(createdBundle.isError, true); editedBundleId = body(createdBundle).id;
+    const originalFingerprint = body(createdBundle).fingerprint; assert.match(originalFingerprint, /^[a-f0-9]{64}$/);
+    const bundleUpdate = { id: editedBundleId, name: `Synthetic discovered updated bundle ${suffix}`, capabilities: ["inventory.read"] };
+    assert.equal((await execute("identity.bundle.save", bundleUpdate)).isError, true);
+    const savedBundle = await execute("identity.bundle.save", { ...bundleUpdate, expectedFingerprint: originalFingerprint }); assert.notEqual(savedBundle.isError, true);
+    assert.notEqual(body(savedBundle).fingerprint, originalFingerprint);
+    assert.equal((await execute("identity.bundle.save", { ...bundleUpdate, expectedFingerprint: originalFingerprint, capabilities: ["workflow.execute"] })).isError, true);
+    assert.deepEqual((await prisma.roleBundle.findUniqueOrThrow({ where: { id: editedBundleId } })).capabilities, ["inventory.read"]);
     const invalidMove = { operationId: randomUUID(), path: "../outside-root", destinationPath: "inside", expectedFingerprint: "a".repeat(64) };
     assert.throws(() => adminFileMoveInput.parse(invalidMove), /relative|traversal|path/i);
     const rejectedMove = await execute("files.move", invalidMove); assert.equal(rejectedMove.isError, true);
@@ -121,6 +141,8 @@ test("SDK-discovered inputs execute the native draft and scan-list commands with
     await connection?.close();
     if (workflowCreated) { await prisma.labelWorkflowAudit.deleteMany({ where: { purpose } }); await prisma.labelWorkflow.delete({ where: { purpose } }); }
     if (payloadCreated) { await prisma.payloadAudit.deleteMany({ where: { payloadId } }); await prisma.payload.delete({ where: { id: payloadId } }); }
+    if (targetId) await prisma.user.delete({ where: { id: targetId } });
+    if (editedBundleId) await prisma.roleBundle.delete({ where: { id: editedBundleId } });
     if (userId) { await prisma.scanListSession.deleteMany({ where: { createdByUserId: userId } }); await prisma.identityAudit.deleteMany({ where: { actorUserId: userId } }); await prisma.user.delete({ where: { id: userId } }); }
     if (bundleId) await prisma.roleBundle.delete({ where: { id: bundleId } });
     await prisma.$disconnect();

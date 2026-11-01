@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Status = { enabled: boolean; remainingRecoveryCodes: number; mfaVerifiedAt: number | null };
 type Setup = { secret: string; uri: string; expiresAt: string };
 
-export default function MfaClient() {
+export default function MfaClient({ onSessionChange }: { onSessionChange?: () => void } = {}) {
   const [status, setStatus] = useState<Status | null>(null);
   const [setup, setSetup] = useState<Setup | null>(null);
   const [password, setPassword] = useState("");
@@ -15,32 +15,44 @@ export default function MfaClient() {
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const reads = useRef(0), writes = useRef(0), alive = useRef(false), inFlight = useRef(false);
   const reload = useCallback(async () => {
-    const response = await fetch("/api/account/security/mfa", { cache: "no-store" });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Could not load authenticator status.");
-    setStatus(data);
+    const generation = ++reads.current;
+    try {
+      const response = await fetch("/api/account/security/mfa", { cache: "no-store" });
+      const data = await response.json();
+      if (!alive.current || generation !== reads.current) return;
+      if (!response.ok) throw new Error(data.error || "Could not load authenticator status.");
+      setStatus(data);
+    } catch (error) { if (alive.current && generation === reads.current) throw error; }
   }, []);
+  useEffect(() => { const readCounter = reads, writeCounter = writes; alive.current = true; return () => { alive.current = false; readCounter.current++; writeCounter.current++; }; }, []);
   useEffect(() => { const timer = window.setTimeout(() => { void reload().catch((error) => setMessage(error.message)); }, 0); return () => clearTimeout(timer); }, [reload]);
   const run = async (action: string) => {
+    if (inFlight.current) return;
+    inFlight.current = true; reads.current++;
+    const generation = ++writes.current;
     setBusy(true); setMessage("");
     try {
       const input = action === "begin" ? { password } : action === "confirm" ? { token }
         : { password, ...(useRecovery ? { recoveryCode } : { token }) };
       const response = await fetch("/api/account/security/mfa", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, input }) });
       const data = await response.json();
+      if (!alive.current || generation !== writes.current) return;
       if (!response.ok) throw new Error(data.error || "Authenticator action failed.");
       setPassword(""); setToken(""); setRecoveryCode("");
       if (action === "begin") { setSetup(data); setRecoveryCodes([]); setMessage("Add this key to your authenticator, then confirm its current code."); }
       else { setSetup(null); if (data.recoveryCodes) setRecoveryCodes(data.recoveryCodes); setMessage(data.message || (action === "confirm" ? "Authenticator enabled. Save your one-use recovery codes privately." : "Password and second factor confirmed for this session.")); }
+      onSessionChange?.();
       await reload();
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Authenticator action failed."); }
-    finally { setBusy(false); }
+    } catch (error) { if (alive.current && generation === writes.current) setMessage(error instanceof Error ? error.message : "Authenticator action failed."); }
+    finally { inFlight.current = false; if (alive.current && generation === writes.current) setBusy(false); }
   };
-  return <section className="card bg-base-100 border border-base-300"><div className="card-body space-y-3"><h2 className="card-title">Authenticator and privileged access</h2><p>Account administration, access changes and payload publication require your password plus a recently verified authenticator or recovery code. Ordinary warehouse sign-in can continue with your individual password.</p><p className="font-semibold">{status?.enabled ? `Authenticator enabled · ${status.remainingRecoveryCodes} recovery codes remaining` : "Authenticator not enrolled"}</p>
+  return <section className="card bg-base-100 border border-base-300"><div className="card-body space-y-3"><fieldset disabled={busy} className="contents"><h2 className="card-title">Authenticator and privileged access</h2><p>Account administration, access changes and payload publication require your password plus a recently verified authenticator or recovery code. Ordinary warehouse sign-in can continue with your individual password.</p><p className="font-semibold">{!status ? "Checking authenticator status…" : status.enabled ? `Authenticator enabled · ${status.remainingRecoveryCodes} recovery codes remaining` : "Authenticator not enrolled"}</p>
+    <button className="btn btn-sm btn-outline w-full sm:w-auto" disabled={busy} onClick={() => { void reload().catch(error => setMessage(error.message)); }}>Refresh authenticator status</button>
     {status?.mfaVerifiedAt && <p className="text-sm">Last second-factor confirmation {new Date(status.mfaVerifiedAt).toLocaleString()}. Privileged confirmation lasts 10 minutes.</p>}
     <label className="block">Current password<input className="input input-bordered w-full mt-1" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-    {!status?.enabled && !setup && <button className="btn btn-primary w-full" disabled={busy || !password} onClick={() => void run("begin")}>Set up authenticator</button>}
+    {status && !status.enabled && !setup && <button className="btn btn-primary w-full" disabled={busy || !password} onClick={() => void run("begin")}>Set up authenticator</button>}
     {setup && <div className="rounded-box border border-primary p-3 space-y-3"><p>Add a time-based account in a compatible authenticator: issuer TemcoTools, SHA-1, 6 digits, 30 seconds. Setup expires {new Date(setup.expiresAt).toLocaleTimeString()}.</p><label className="block">Manual setup key<textarea className="textarea textarea-bordered w-full font-mono break-all" readOnly value={setup.secret} /></label><button type="button" className="btn btn-outline w-full" onClick={() => { void navigator.clipboard.writeText(setup.secret).then(() => setMessage("Setup key copied. Keep it private.")).catch(() => setMessage("Select and copy the setup key.")); }}>Copy setup key</button><a href={setup.uri} className="btn btn-outline w-full">Open authenticator setup</a><details><summary className="cursor-pointer">Manual otpauth setup URI</summary><textarea className="textarea textarea-bordered w-full font-mono break-all mt-2" readOnly value={setup.uri} /></details><p className="text-sm">Opening an authenticator depends on the apps installed on this phone. Manual entry is available above.</p></div>}
     {(status?.enabled || setup) && <>
       {status?.enabled && <label className="flex gap-2 items-center"><input className="checkbox" type="checkbox" checked={useRecovery} onChange={(event) => setUseRecovery(event.target.checked)} />Use a one-use recovery code</label>}
@@ -51,5 +63,5 @@ export default function MfaClient() {
     </>}
     {recoveryCodes.length > 0 && <div className="rounded-box border border-warning p-3 space-y-2"><strong>Save these recovery codes now</strong><p>They are shown once and are not stored on this phone. Each code plus your password can restore second-factor access. Keep them privately, separate from the scanner.</p><textarea className="textarea textarea-bordered w-full min-h-64 font-mono" readOnly aria-label="One-use authenticator recovery codes" value={recoveryCodes.join("\n")} /><button className="btn btn-outline w-full" onClick={() => { void navigator.clipboard.writeText(recoveryCodes.join("\n")).then(() => setMessage("Recovery codes copied. Store them privately.")).catch(() => setMessage("Select and copy the recovery codes.")); }}>Copy recovery codes</button><button className="btn w-full" onClick={() => setRecoveryCodes([])}>I saved them · clear this display</button></div>}
     {message && <p role="status" className="alert break-words">{message}</p>}
-  </div></section>;
+  </fieldset></div></section>;
 }

@@ -172,14 +172,7 @@ export async function prepareUnitLabel(principal: Principal, raw: unknown) {
       if (!issuance) throw new LabelError("The original label receipt is unavailable. No retry was dispatched.", 409);
       return { created: false, issuance: labelIssuanceReceipt(issuance), replayed: true };
     }
-    const workflow = await tx.labelWorkflow.findUnique({ where: { purpose: input.purpose }, select: { enabled: true, publishedVersionId: true } });
-    if (!workflow?.enabled || !workflow.publishedVersionId) throw new LabelError("No enabled managed workflow is configured for this purpose.", 409, "workflow_unavailable");
-    const dispatchDay = await unitLabelDispatchDay(tx, input);
-    const context = await deriveUnitLabelContext(tx, { unitId: input.unitId, dispatchDay, wmsScope: input.wmsScope });
-    if (input.automatic) await validateAutomaticUnitLabelObservation(tx, current.userId, context, input.observationId);
-    const prepared = await prepareLabelIssuanceInTransaction(tx, current, { operationId: input.operationId, unitId: input.unitId, purpose: input.purpose, printerId: input.printerId, mode: input.mode, deviceId: input.deviceId, automatic: input.automatic, fields: context.fields });
-    if (prepared.created) await tx.labelIssuanceEvent.create({ data: { issuanceId: prepared.issuance.id, actorUserId: current.userId, action: "unit_context_bound", state: prepared.issuance.state, note: JSON.stringify({ unitId: input.unitId, dispatchDay, wmsScope: input.wmsScope, observationId: input.observationId, pickWaveItemId: input.pickWaveItemId }) } });
-    else if (prepared.issuance.state === "queued" && !await tx.labelIssuanceEvent.findFirst({ where: { issuanceId: prepared.issuance.id, action: "unit_context_bound" }, select: { id: true } })) throw new LabelError("A prior manual label intent is already queued. Inspect its receipt before issuing another unit label.", 409);
+    const prepared = await prepareLabelIssuanceInTransaction(tx, current, input);
     await tx.identityAudit.create({ data: { action: "unit_labels.intent", actorUserId: current.userId, sessionId: current.sessionId, sourceHash, reason: JSON.stringify({ requestFingerprint, issuanceId: prepared.issuance.id, grantId: current.grantId ?? null }) } });
     return { ...prepared, replayed: false };
   }, { timeout: 30_000 });

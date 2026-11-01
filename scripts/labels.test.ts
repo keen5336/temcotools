@@ -62,9 +62,9 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     return { ...principal, sessionId: session.id, strongAuthenticatedAt: at.getTime(), mfaVerifiedAt: at.getTime() } as Principal;
   }
   try {
-    const admin = await actor("admin", ["labels.read", "labels.print", "labels.manage", "inventory.read"]), requester = await actor("user", ["labels.read", "labels.print"]), receiver = await actor("user", ["labels.read", "labels.print"]);
+    const admin = await actor("admin", ["labels.read", "labels.print", "labels.manage", "inventory.read", "workflow.read"]), requester = await actor("user", ["labels.read", "labels.print", "inventory.read", "workflow.read"]), receiver = await actor("user", ["labels.read", "labels.print"]);
     const printer = await prisma.labelPrinter.create({ data: { name: `Synthetic printer ${suffix}`, endpoint: "http://printer.invalid:9100", contentType: "text/plain" } }); printerId = printer.id;
-    for (let i = 0; i < 4; i++) { const unit = await prisma.warehouseUnit.create({ data: { creationEvidence: "Synthetic label test only" } }); unitIds.push(unit.id); }
+    for (let i = 0; i < 4; i++) { const unit = await prisma.warehouseUnit.create({ data: { creationEvidence: "Synthetic label test only" } }); unitIds.push(unit.id); await prisma.warehouseIdentifier.create({ data: { unitId: unit.id, kind: "lpn", namespace: "wms", value: `SYNTHETIC-${suffix}-${i}`.toUpperCase(), rawValue: `SYNTHETIC-${suffix}-${i}`, evidence: "Synthetic actual unit alias for native operational label tests" } }); }
     await assert.rejects(workflow.saveLabelWorkflow(requester, { ...draft, expectedRevision: 0, note: "Unauthorized" }));
     const saved = await workflow.saveLabelWorkflow(admin, { ...draft, expectedRevision: 0, note: "Synthetic first draft" }); workflowCreated = true;
     const published = await workflow.publishLabelWorkflow(admin, { purpose: draft.purpose, expectedRevision: saved.revision, note: "Synthetic first publication" });
@@ -75,7 +75,10 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     await prisma.labelTemplate.update({ where: { id: legacyTemplate.id }, data: { isActive: false } });
     const disabledLegacy = await effect.claimLabelDispatch(receiver, { issuanceId: legacy.issuance.id, deviceId: device.device.id, deviceToken: device.deviceToken });
     assert.equal(disabledLegacy.dispatch, false); assert.equal("issuance" in disabledLegacy && disabledLegacy.issuance.state, "not_sent");
-    const base = { operationId: randomUUID(), unitId: unitIds[0], purpose: draft.purpose, printerId: printer.id, fields, mode: "relay", deviceId: device.device.id, automatic: true };
+    const base = { operationId: randomUUID(), unitId: unitIds[0], purpose: draft.purpose, printerId: printer.id, fields, mode: "relay", deviceId: device.device.id, automatic: false };
+    await assert.rejects(effect.prepareLabelIssuance(requester, { ...base, automatic: true }), /qualifying physical observation/);
+    const schedule = async (nextDeliveryDate: string) => prisma.officeScheduleFact.create({ data: { unitId: unitIds[0], deliveryDate: null, nextDeliveryDate, complete: true, sourceAsOf: new Date(), sourceRef: "Synthetic reviewed complete schedule", evidence: "Synthetic authoritative schedule change; caller fields are not operational facts", recordedByUserId: admin.userId } });
+    await schedule("2026-11-02");
     const prepared = await effect.prepareLabelIssuance(requester, base);
     assert.equal(prepared.created, true);
     assert.equal((await effect.prepareLabelIssuance(requester, { ...base, fields: Object.fromEntries(Object.entries(fields).reverse()) })).issuance.id, prepared.issuance.id);
@@ -95,14 +98,17 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     await assert.rejects(effect.getLabelIssuance({ ...receiver, capabilities: ["labels.print"] }, sent.id), "Print-only authority does not read somebody else's receipt.");
     assert.equal((await effect.reportLabelDelivery(receiver, report)).id, sent.id);
     await assert.rejects(effect.reportLabelDelivery(receiver, { ...report, status: "not_sent" }));
+    await schedule("2026-11-03");
     const updated = await effect.prepareLabelIssuance(requester, { ...base, operationId: randomUUID(), fields: { ...fields, deliveryDate: "2026-11-03" } });
     assert.equal(updated.created, true);
     const changedClaim = await effect.claimLabelDispatch(receiver, { ...claimInput, issuanceId: updated.issuance.id }); assert.ok(changedClaim.dispatch);
     await effect.reportLabelDelivery(receiver, { ...claimInput, issuanceId: updated.issuance.id, reportToken: changedClaim.reportToken, status: "unknown", note: "Synthetic lost result" });
+    await schedule("2026-11-04");
     await assert.rejects(effect.prepareLabelIssuance(requester, { ...base, operationId: randomUUID(), fields: { ...fields, deliveryDate: "2026-11-04" } }), (error: unknown) => error instanceof LabelError && error.code === "unknown_effect");
     const reprint = await effect.reprintLabelIssuance(requester, { operationId: randomUUID(), issuanceId: updated.issuance.id, mode: "relay", deviceId: device.device.id, reason: "Synthetic explicit inspected reprint authorization" });
     assert.equal(reprint.issuance.reprintOf, updated.issuance.id); assert.equal(reprint.issuance.automatic, false);
     await effect.reconcileLabelIssuance(requester, { issuanceId: sent.id, outcome: "applied", reason: "Synthetic operator confirmation only" });
+    await schedule("2026-11-03");
     const state = await workflow.evaluateLabel(admin, { purpose: draft.purpose, unitId: unitIds[0], fields });
     await assert.rejects(workflow.evaluateLabel({ ...admin, capabilities: ["labels.read"] }, { purpose: draft.purpose, unitId: unitIds[0], fields }), "Label-template read scope does not reveal warehouse physical observations.");
     assert.ok((await deviceCommands.listPrintingDevices(admin)).every(item => !("sessionId" in item)), "Shared device diagnostics do not expose another user's session binding.");
@@ -124,15 +130,15 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     const stalePublication = await effect.claimLabelDispatch(receiver, { ...claimInput, issuanceId: pendingOld.issuance.id });
     assert.equal(stalePublication.dispatch, false); assert.equal("issuance" in stalePublication && stalePublication.issuance.state, "not_sent");
     await workflow.rollbackLabelWorkflow(admin, { purpose: draft.purpose, expectedRevision: second.workflow.revision, versionId: published.published.id, note: "Synthetic rollback" });
-    const grant = await prisma.appAccessGrant.create({ data: { userId: requester.userId, sessionId: requester.sessionId, authVersion: requester.authVersion, tokenHash: `synthetic-${suffix}`, clientName: "Synthetic print client", scopes: ["labels.print"], expiresAt: new Date(Date.now() + 60_000) } });
-    const delegated: Principal = { ...requester, grantId: grant.id, capabilities: ["labels.print"] };
+    const grant = await prisma.appAccessGrant.create({ data: { userId: requester.userId, sessionId: requester.sessionId, authVersion: requester.authVersion, tokenHash: `synthetic-${suffix}`, clientName: "Synthetic print client", scopes: ["labels.print", "inventory.read", "workflow.read"], expiresAt: new Date(Date.now() + 60_000) } });
+    const delegated: Principal = { ...requester, grantId: grant.id, capabilities: ["labels.print", "inventory.read", "workflow.read"] };
     const grantPending = await effect.prepareLabelIssuance(delegated, { ...base, unitId: unitIds[2], operationId: randomUUID() });
     await prisma.appAccessGrant.update({ where: { id: grant.id }, data: { revokedAt: new Date() } });
     const revokedGrant = await effect.claimLabelDispatch(receiver, { ...claimInput, issuanceId: grantPending.issuance.id });
     assert.equal(revokedGrant.dispatch, false); assert.equal("issuance" in revokedGrant && revokedGrant.issuance.state, "not_sent");
     const oauthClient = await prisma.oAuthClient.create({ data: { id: `synthetic-label-${suffix}`, name: "Synthetic OAuth print client", metadata: {} } }); oauthClientIds.push(oauthClient.id);
-    const oauthGrant = await prisma.oAuthGrant.create({ data: { requestId: randomUUID(), clientId: oauthClient.id, userId: requester.userId, sessionId: requester.sessionId!, authVersion: requester.authVersion, issuer: "http://127.0.0.1:3997/", resource: "http://127.0.0.1:3997/mcp", scopes: ["labels.print"], expiresAt: new Date(Date.now() + 60_000) } });
-    const oauthPrincipal: Principal = { ...requester, grantId: `oauth:${oauthGrant.id}`, capabilities: ["labels.print"] };
+    const oauthGrant = await prisma.oAuthGrant.create({ data: { requestId: randomUUID(), clientId: oauthClient.id, userId: requester.userId, sessionId: requester.sessionId!, authVersion: requester.authVersion, issuer: "http://127.0.0.1:3997/", resource: "http://127.0.0.1:3997/mcp", scopes: ["labels.print", "inventory.read", "workflow.read"], expiresAt: new Date(Date.now() + 60_000) } });
+    const oauthPrincipal: Principal = { ...requester, grantId: `oauth:${oauthGrant.id}`, capabilities: ["labels.print", "inventory.read", "workflow.read"] };
     const oauthPending = await effect.prepareLabelIssuance(oauthPrincipal, { ...base, unitId: unitIds[2], operationId: randomUUID() });
     const oauthClaim = await effect.claimLabelDispatch(receiver, { ...claimInput, issuanceId: oauthPending.issuance.id }); assert.ok(oauthClaim.dispatch);
     await effect.reportLabelDelivery(receiver, { ...claimInput, issuanceId: oauthPending.issuance.id, reportToken: oauthClaim.reportToken, status: "not_sent", note: "Synthetic no physical dispatch" });
@@ -156,6 +162,8 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     await prisma.warehouseObservationCorrection.deleteMany({ where: { observationId: { in: observationIds } } });
     await prisma.warehousePhysicalObservation.deleteMany({ where: { id: { in: observationIds } } });
     if (workflowCreated) { await prisma.labelWorkflow.update({ where: { purpose: draft.purpose }, data: { publishedVersionId: null } }); await prisma.labelWorkflowAudit.deleteMany({ where: { purpose: draft.purpose } }); await prisma.labelWorkflowVersion.deleteMany({ where: { purpose: draft.purpose } }); await prisma.labelWorkflow.delete({ where: { purpose: draft.purpose } }); }
+    await prisma.officeScheduleFact.deleteMany({ where: { unitId: { in: unitIds } } });
+    await prisma.warehouseIdentifier.deleteMany({ where: { unitId: { in: unitIds } } });
     await prisma.warehouseUnit.deleteMany({ where: { id: { in: unitIds } } });
     if (printerId) await prisma.labelPrinter.delete({ where: { id: printerId } });
     if (legacyTemplateId) await prisma.labelTemplate.delete({ where: { id: legacyTemplateId } });

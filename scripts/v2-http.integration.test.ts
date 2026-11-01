@@ -52,7 +52,7 @@ test("HTTP APIs enforce current sessions, exact origin and private user grants",
     assert.equal(created.status, 201);
     const legacy = await sealData({ userId: user.id, role: "admin", isActive: true }, { password: secret });
     assert.equal((await fetch(`${origin}/api/warehouse/lookup?value=synthetic`, { headers: { Cookie: `temco_session=${legacy}` } })).status, 401);
-    const changed = await fetch(`${origin}/api/admin/users/${user.id}`, { method: "PATCH", headers: authorized, body: JSON.stringify({ role: "user" }) });
+    const changed = await fetch(`${origin}/api/admin/users/${user.id}`, { method: "PATCH", headers: authorized, body: JSON.stringify({ expectedAuthVersion: user.authVersion, role: "user" }) });
     assert.equal(changed.status, 200);
     assert.equal((await fetch(`${origin}/api/access-grants`, { headers: authorized })).status, 401);
     assert.equal((await fetch(`${origin}/api/label-relay/session`, { headers: authorized })).status, 401);

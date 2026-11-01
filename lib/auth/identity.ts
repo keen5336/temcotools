@@ -12,7 +12,7 @@ import { assertOAuthGrant } from "@/lib/oauth/grants";
 
 export { IdentityError } from "./passwords";
 const publicUser = {
-  id: true, username: true, displayName: true, role: true, isActive: true,
+  id: true, authVersion: true, username: true, displayName: true, role: true, isActive: true,
   lastLoginAt: true, createdAt: true, passwordChangedAt: true,
   roleBundles: { select: { bundle: { select: { id: true, name: true, capabilities: true } } } },
 } as const;
@@ -20,8 +20,12 @@ const idSchema = z.string().min(1).max(200);
 const usernameSchema = z.string().trim().min(1).max(80);
 export const identitySessionRevokeInput = z.object({ sessionId: idSchema });
 export const identityCreateUserInput = z.object({ username: usernameSchema, displayName: z.string().trim().min(1).max(100), role: z.enum(["admin", "manager", "user"]).default("user") }).strict();
-export const identityUpdateUserInput = z.object({ id: idSchema, username: usernameSchema.optional(), displayName: z.string().trim().min(1).max(100).optional(), role: z.enum(["admin", "manager", "user"]).optional(), isActive: z.boolean().optional(), revokeSessions: z.boolean().optional(), bundleIds: z.array(idSchema).max(20).optional() }).strict();
-export const identitySaveBundleInput = z.object({ id: idSchema.optional(), name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).default(""), capabilities: z.array(z.enum(CAPABILITIES)).max(CAPABILITIES.length) });
+export const identityUpdateUserInput = z.object({ id: idSchema, expectedAuthVersion: z.number().int().positive(), username: usernameSchema.optional(), displayName: z.string().trim().min(1).max(100).optional(), role: z.enum(["admin", "manager", "user"]).optional(), isActive: z.boolean().optional(), revokeSessions: z.boolean().optional(), bundleIds: z.array(idSchema).max(20).optional() }).strict();
+const identityBundleValues = z.object({ name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).default(""), capabilities: z.array(z.enum(CAPABILITIES)).max(CAPABILITIES.length) });
+export const identitySaveBundleInput = z.union([
+  identityBundleValues.strict().describe("Create a new custom bundle without an ID."),
+  identityBundleValues.extend({ id: idSchema, expectedFingerprint: z.string().regex(/^[a-f0-9]{64}$/).describe("Required for an existing custom bundle: copy its fingerprint from the current bundle list or prior save. Reload and review a stale bundle before saving again.") }).strict(),
+]);
 const NEUTRAL_RECOVERY = "If this account can recover, authorized office staff can arrange a one-use recovery code. No email has been sent.";
 export type IdentityContext = { source: string };
 
@@ -333,9 +337,11 @@ export async function updateIdentityUser(principal: Principal, input: unknown) {
     // Serializes access administration and prevents crossed actor/target locks.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(8110102)`;
     const current = await assertIdentityPrincipal(tx, principal, "users.manage", true);
-    await assertManageableAccess(tx, current, {targetUserId:data.id,role:data.role,bundleIds:data.bundleIds??(data.role?[`legacy-${data.role}`]:undefined)});
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id=${data.id} FOR UPDATE`;
     const target = await tx.user.findUnique({ where: { id: data.id } });
     if (!target) throw new IdentityError("User not found.", 404);
+    if (target.authVersion !== data.expectedAuthVersion) throw new IdentityError("This account changed after you opened it. Reload its current access before saving another change.", 409);
+    await assertManageableAccess(tx, current, {targetUserId:data.id,role:data.role,bundleIds:data.bundleIds??(data.role?[`legacy-${data.role}`]:undefined)});
     if (data.username) {
       const duplicate = await tx.user.findFirst({ where: { username: { equals: data.username, mode: "insensitive" }, NOT: { id: data.id } }, select: { id: true } });
       if (duplicate) throw new IdentityError("Username already exists.", 409);
@@ -347,36 +353,45 @@ export async function updateIdentityUser(principal: Principal, input: unknown) {
       await tx.userRoleBundle.deleteMany({ where: { userId: data.id } });
       await tx.userRoleBundle.createMany({ data: ids.map((bundleId) => ({ userId: data.id, bundleId })) });
     }
-    const securityChanged = data.username !== undefined || data.role !== undefined || data.isActive !== undefined || data.bundleIds !== undefined || data.revokeSessions;
+    // This existing generation is also the target CAS revision. Every accepted
+    // update advances it, including display-only changes, so another saved form
+    // cannot silently overwrite a later account edit or restore revoked access.
     const user = await tx.user.update({ where: { id: data.id }, data: {
       ...(data.username === undefined ? {} : { username: data.username }), ...(data.displayName === undefined ? {} : { displayName: data.displayName }),
       ...(data.role === undefined ? {} : { role: data.role }), ...(data.isActive === undefined ? {} : { isActive: data.isActive }),
-      ...(securityChanged ? { authVersion: { increment: 1 } } : {}),
+      authVersion: { increment: 1 },
     }, select: publicUser });
-    if (securityChanged) await tx.userSession.updateMany({ where: { userId: data.id, revokedAt: null }, data: { revokedAt: new Date() } });
+    await tx.userSession.updateMany({ where: { userId: data.id, revokedAt: null }, data: { revokedAt: new Date() } });
     await ensureRecoveryAdministrator(tx);
-    await audit(tx, "user_updated", { actorUserId: principal.userId, targetUserId: data.id, sessionId: principal.sessionId, reason: securityChanged ? "Access changed; existing sessions revoked." : "Display details changed." });
+    await audit(tx, "user_updated", { actorUserId: principal.userId, targetUserId: data.id, sessionId: principal.sessionId, reason: "Account version advanced; existing sessions revoked." });
     return user;
   });
 }
 
+type RoleBundleValue = { id: string; name: string; description: string; capabilities: string[]; isSystem: boolean; updatedAt: Date };
+function bundleFingerprint(bundle: RoleBundleValue) {
+  return createHash("sha256").update(JSON.stringify({ id: bundle.id, name: bundle.name, description: bundle.description, capabilities: [...bundle.capabilities].sort(), isSystem: bundle.isSystem, updatedAt: bundle.updatedAt.toISOString() })).digest("hex");
+}
+function bundleDto(bundle: RoleBundleValue) { return { ...bundle, fingerprint: bundleFingerprint(bundle) }; }
+
 export async function listRoleBundles(principal: Principal) {
   return prisma.$transaction(async (tx) => {
     await assertIdentityPrincipal(tx, principal, "users.manage");
-    return tx.roleBundle.findMany({ orderBy: { name: "asc" } });
+    return (await tx.roleBundle.findMany({ orderBy: { name: "asc" } })).map(bundleDto);
   });
 }
 
 export async function saveRoleBundle(principal: Principal, input: unknown) {
-  const data = identitySaveBundleInput.parse(input);
+  const data = identitySaveBundleInput.parse(input), bundleId = "id" in data ? data.id : undefined;
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(8110102)`;
     const current = await assertIdentityPrincipal(tx, principal, "users.manage", true);
-    const existing = data.id ? await tx.roleBundle.findUnique({ where: { id: data.id } }) : null;
-    if (data.id && !existing) throw new IdentityError("Bundle not found.", 404);
+    const existing = bundleId ? await tx.roleBundle.findUnique({ where: { id: bundleId } }) : null;
+    if (bundleId && !existing) throw new IdentityError("Bundle not found.", 404);
     if (existing?.isSystem) throw new IdentityError("Create a custom bundle instead of editing a system baseline.");
+    if (existing && (!("expectedFingerprint" in data) || data.expectedFingerprint !== bundleFingerprint(existing))) throw new IdentityError("This capability bundle changed after you opened it. Reload and review its current capabilities before saving another change.", 409);
     const values = { name: data.name, description: data.description, capabilities: [...new Set(data.capabilities)] };
-    await assertManageableAccess(tx, current, {bundleIds:data.id?[data.id]:undefined,capabilities:data.capabilities});
+    await assertManageableAccess(tx, current, {bundleIds:bundleId?[bundleId]:undefined,capabilities:data.capabilities});
     const bundle = existing ? await tx.roleBundle.update({ where: { id: existing.id }, data: values }) : await tx.roleBundle.create({ data: values });
     if (existing) {
       const assignments = await tx.userRoleBundle.findMany({ where: { bundleId: existing.id }, select: { userId: true } });
@@ -385,7 +400,7 @@ export async function saveRoleBundle(principal: Principal, input: unknown) {
     }
     await ensureRecoveryAdministrator(tx);
     await audit(tx, "bundle_saved", { actorUserId: principal.userId, sessionId: principal.sessionId, reason: `Bundle ${bundle.id}` });
-    return bundle;
+    return bundleDto(bundle);
   });
 }
 
