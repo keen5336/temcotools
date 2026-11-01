@@ -1,399 +1,60 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { CAPABILITIES, type Capability } from "@/lib/auth/principal";
+import { PasswordConfirmation } from "@/app/account/security/SecurityClient";
 
-interface User {
-  id: string;
-  username: string;
-  displayName: string;
-  role: "admin" | "manager" | "user";
-  isActive: boolean;
-  lastLoginAt: string | null;
-  createdAt: string;
+type Bundle = { id: string; name: string; description: string; capabilities: Capability[]; isSystem: boolean };
+type User = { id: string; username: string; displayName: string; role: "admin" | "manager" | "user"; isActive: boolean; passwordChangedAt: string | null; roleBundles: Array<{ bundle: { id: string; name: string; capabilities: Capability[] } }> };
+type Audit = { id: string; action: string; actorUserId: string | null; targetUserId: string | null; reason: string | null; createdAt: string };
+async function jsonRequest(url: string, method = "GET", body?: unknown) {
+  const response = await fetch(url, { method, cache: "no-store", headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Account administration failed.");
+  return data;
 }
-
-type EditFields = Partial<Pick<User, "username" | "displayName" | "role" | "isActive">> & {
-  pin?: string;
-};
-
-const EMPTY_CREATE: { username: string; displayName: string; pin: string; role: "admin" | "manager" | "user" } =
-  { username: "", displayName: "", pin: "", role: "user" };
 
 export default function AdminUsersClient() {
   const [users, setUsers] = useState<User[]>([]);
+  const [bundles, setBundles] = useState<Bundle[]>([]);
+  const [audit, setAudit] = useState<Audit[]>([]);
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Create user modal state
-  const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState(EMPTY_CREATE);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createLoading, setCreateLoading] = useState(false);
-
-  // Edit user modal state
-  const [editUser, setEditUser] = useState<User | null>(null);
-  const [editForm, setEditForm] = useState<EditFields>({});
-  const [editError, setEditError] = useState<string | null>(null);
-  const [editLoading, setEditLoading] = useState(false);
-
-  const fetchUsers = useCallback(async (q: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/admin/users?search=${encodeURIComponent(q)}`);
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || `Request failed with status ${res.status}`);
-      }
-      setUsers(await res.json());
-    } catch (err) {
-      console.error("Failed to fetch users:", err);
-      setError(err instanceof Error ? err.message : "Failed to load users.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => fetchUsers(search), 300);
-    return () => clearTimeout(timer);
-  }, [search, fetchUsers]);
-
-  async function quickUpdate(id: string, data: Partial<Pick<User, "role" | "isActive">>) {
-    try {
-      const res = await fetch(`/api/admin/users/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        alert(json.error || "Failed to update user.");
-        return;
-      }
-      const updated: User = await res.json();
-      setUsers((prev) => prev.map((u) => (u.id === id ? updated : u)));
-    } catch {
-      alert("Failed to update user.");
-    }
-  }
-
-  // Create user
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    setCreateError(null);
-    setCreateLoading(true);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(createForm),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setCreateError(json.error || "Failed to create user.");
-        return;
-      }
-      setUsers((prev) => [json, ...prev]);
-      setCreateForm(EMPTY_CREATE);
-      setShowCreate(false);
-    } catch {
-      setCreateError("Network error.");
-    } finally {
-      setCreateLoading(false);
-    }
-  }
-
-  // Open edit modal
-  function openEdit(user: User) {
-    setEditUser(user);
-    setEditForm({ username: user.username, displayName: user.displayName, pin: "" });
-    setEditError(null);
-  }
-
-  // Save edit
-  async function handleEdit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editUser) return;
-    setEditError(null);
-    setEditLoading(true);
-    try {
-      const payload: EditFields = {};
-      if (editForm.username !== editUser.username) payload.username = editForm.username;
-      if (editForm.displayName !== editUser.displayName) payload.displayName = editForm.displayName;
-      if (editForm.pin) payload.pin = editForm.pin;
-
-      if (Object.keys(payload).length === 0) {
-        setEditUser(null);
-        return;
-      }
-
-      const res = await fetch(`/api/admin/users/${editUser.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        setEditError(json.error || "Failed to update user.");
-        return;
-      }
-      setUsers((prev) => prev.map((u) => (u.id === editUser.id ? json : u)));
-      setEditUser(null);
-    } catch {
-      setEditError("Network error.");
-    } finally {
-      setEditLoading(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center gap-3">
-        <input
-          type="text"
-          placeholder="Search by username or display name…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="input input-bordered input-sm w-full sm:w-80"
-        />
-        <button
-          onClick={() => { setShowCreate(true); setCreateError(null); }}
-          className="btn btn-primary btn-sm ml-auto shrink-0"
-        >
-          + New User
-        </button>
-      </div>
-
-      {loading && <p className="text-sm text-base-content/60">Loading…</p>}
-      {error && <p className="text-sm text-error">{error}</p>}
-
-      {!loading && !error && (
-        <div className="overflow-x-auto rounded-lg border border-base-200">
-          <table className="table table-sm w-full">
-            <thead>
-              <tr>
-                <th>Display Name</th>
-                <th>Username</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Last Login</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="text-center text-base-content/40 py-6">
-                    No users found.
-                  </td>
-                </tr>
-              )}
-              {users.map((user) => (
-                <tr key={user.id} className="hover">
-                  <td>{user.displayName}</td>
-                  <td className="font-mono text-xs">{user.username}</td>
-                  <td>
-                    <span
-                      className={`badge badge-sm ${
-                        user.role === "admin" ? "badge-primary" : user.role === "manager" ? "badge-secondary" : "badge-ghost"
-                      }`}
-                    >
-                      {user.role}
-                    </span>
-                  </td>
-                  <td>
-                    <span
-                      className={`badge badge-sm ${
-                        user.isActive ? "badge-success" : "badge-error"
-                      }`}
-                    >
-                      {user.isActive ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="text-base-content/60">
-                    {user.lastLoginAt
-                      ? new Date(user.lastLoginAt).toLocaleString()
-                      : "Never"}
-                  </td>
-                  <td>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => openEdit(user)}
-                        className="btn btn-ghost btn-xs"
-                      >
-                        Edit
-                      </button>
-                      <select
-                        aria-label={`Role for ${user.displayName}`}
-                        value={user.role}
-                        onChange={(event) => quickUpdate(user.id, { role: event.target.value as User["role"] })}
-                        className="select select-bordered select-xs"
-                      >
-                        <option value="user">user</option>
-                        <option value="manager">manager</option>
-                        <option value="admin">admin</option>
-                      </select>
-                      <button
-                        onClick={() => quickUpdate(user.id, { isActive: !user.isActive })}
-                        className={`btn btn-ghost btn-xs ${user.isActive ? "text-error" : "text-success"}`}
-                      >
-                        {user.isActive ? "Deactivate" : "Activate"}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Create User Modal */}
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="card bg-base-100 shadow-xl w-full max-w-sm">
-            <div className="card-body">
-              <h2 className="card-title">Create User</h2>
-              <form onSubmit={handleCreate} className="space-y-4">
-                {createError && (
-                  <div role="alert" className="alert alert-error text-sm">{createError}</div>
-                )}
-                <div className="form-control">
-                  <label className="label"><span className="label-text font-medium">Username</span></label>
-                  <input
-                    type="text"
-                    autoCapitalize="none"
-                    value={createForm.username}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, username: e.target.value }))}
-                    className="input input-bordered input-sm w-full"
-                    required
-                  />
-                </div>
-                <div className="form-control">
-                  <label className="label"><span className="label-text font-medium">Display Name</span></label>
-                  <input
-                    type="text"
-                    value={createForm.displayName}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, displayName: e.target.value }))}
-                    className="input input-bordered input-sm w-full"
-                    required
-                  />
-                </div>
-                <div className="form-control">
-                  <label className="label"><span className="label-text font-medium">PIN (4–6 digits)</span></label>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    value={createForm.pin}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                    className="input input-bordered input-sm w-full"
-                    maxLength={6}
-                    required
-                  />
-                </div>
-                <div className="form-control">
-                  <label className="label"><span className="label-text font-medium">Role</span></label>
-                  <select
-                    value={createForm.role}
-                    onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as User["role"] }))}
-                    className="select select-bordered select-sm w-full"
-                  >
-                    <option value="user">user</option>
-                    <option value="manager">manager</option>
-                    <option value="admin">admin</option>
-                  </select>
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="submit"
-                    disabled={createLoading}
-                    className="btn btn-primary btn-sm flex-1"
-                  >
-                    {createLoading ? "Creating…" : "Create"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setShowCreate(false); setCreateForm(EMPTY_CREATE); }}
-                    className="btn btn-ghost btn-sm flex-1"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit User Modal */}
-      {editUser && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="card bg-base-100 shadow-xl w-full max-w-sm">
-            <div className="card-body">
-              <h2 className="card-title">Edit User</h2>
-              <form onSubmit={handleEdit} className="space-y-4">
-                {editError && (
-                  <div role="alert" className="alert alert-error text-sm">{editError}</div>
-                )}
-                <div className="form-control">
-                  <label className="label"><span className="label-text font-medium">Username</span></label>
-                  <input
-                    type="text"
-                    autoCapitalize="none"
-                    value={editForm.username ?? ""}
-                    onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))}
-                    className="input input-bordered input-sm w-full"
-                    required
-                  />
-                </div>
-                <div className="form-control">
-                  <label className="label"><span className="label-text font-medium">Display Name</span></label>
-                  <input
-                    type="text"
-                    value={editForm.displayName ?? ""}
-                    onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
-                    className="input input-bordered input-sm w-full"
-                    required
-                  />
-                </div>
-                <div className="form-control">
-                  <label className="label">
-                    <span className="label-text font-medium">New PIN</span>
-                    <span className="label-text-alt text-base-content/50">(leave blank to keep current)</span>
-                  </label>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    value={editForm.pin ?? ""}
-                    onChange={(e) => setEditForm((f) => ({ ...f, pin: e.target.value.replace(/\D/g, "").slice(0, 6) }))}
-                    className="input input-bordered input-sm w-full"
-                    maxLength={6}
-                    placeholder="4–6 digits"
-                  />
-                </div>
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="submit"
-                    disabled={editLoading}
-                    className="btn btn-primary btn-sm flex-1"
-                  >
-                    {editLoading ? "Saving…" : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditUser(null)}
-                    className="btn btn-ghost btn-sm flex-1"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [create, setCreate] = useState({ username: "", displayName: "", role: "user" });
+  const [edit, setEdit] = useState<User | null>(null);
+  const [editBundleIds, setEditBundleIds] = useState<string[]>([]);
+  const [recoveryUser, setRecoveryUser] = useState<User | null>(null);
+  const [reason, setReason] = useState("");
+  const [issued, setIssued] = useState<{ token: string; expiresAt: string } | null>(null);
+  const [bundleId, setBundleId] = useState<string | undefined>();
+  const [bundleName, setBundleName] = useState("");
+  const [bundleDescription, setBundleDescription] = useState("");
+  const [caps, setCaps] = useState<Capability[]>([]);
+  const reload = useCallback(async () => {
+    const [people, roles, events] = await Promise.all([jsonRequest(`/api/admin/users?search=${encodeURIComponent(search)}`), jsonRequest("/api/admin/users/bundles"), jsonRequest("/api/admin/users/recovery")]);
+    setUsers(people); setBundles(roles); setAudit(events);
+  }, [search]);
+  useEffect(() => { const timer = window.setTimeout(() => { void reload().catch((error) => setMessage(error.message)); }, 250); return () => clearTimeout(timer); }, [reload]);
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true); setMessage("");
+    try { await action(); await reload(); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Account action failed."); }
+    finally { setBusy(false); }
+  };
+  return <div className="space-y-5">
+    <section className="card bg-base-100 border border-base-300"><div className="card-body"><PasswordConfirmation /><p className="text-sm">Account, access and recovery changes require password and second-factor confirmation within 10 minutes. Existing sessions are revoked when access changes.</p></div></section>
+    {message && <p role="status" className="alert">{message}</p>}
+    <label className="block">Find a person<input className="input input-bordered w-full mt-1" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Username or display name" /></label>
+    <details className="rounded-box border border-base-300 bg-base-100 p-4"><summary className="font-bold cursor-pointer">Create account</summary><form className="space-y-3 mt-3" onSubmit={(event) => { event.preventDefault(); void run(async () => {
+      await jsonRequest("/api/admin/users", "POST", create); setCreate({ username: "", displayName: "", role: "user" }); setMessage("Account created. Verify the person's identity, then issue an enrollment code.");
+    }); }}><label className="block">Username<input className="input input-bordered w-full mt-1" value={create.username} onChange={(event) => setCreate({ ...create, username: event.target.value })} maxLength={80} required /></label><label className="block">Display name<input className="input input-bordered w-full mt-1" value={create.displayName} onChange={(event) => setCreate({ ...create, displayName: event.target.value })} maxLength={100} required /></label><label className="block">Initial bundle<select className="select select-bordered w-full mt-1" value={create.role} onChange={(event) => setCreate({ ...create, role: event.target.value })}><option value="user">Warehouse operator</option><option value="manager">Operations manager</option><option value="admin">System administrator</option></select></label><button className="btn btn-primary w-full" disabled={busy}>Create account for assisted enrollment</button></form></details>
+    <section className="space-y-3">{users.map((user) => <article key={user.id} className="rounded-box border border-base-300 bg-base-100 p-4 space-y-3"><div><h2 className="font-bold text-lg">{user.displayName}</h2><p>{user.username} · {user.isActive ? "Active" : "Inactive"} · {user.passwordChangedAt ? "Password enrolled" : "Needs password enrollment"}</p><p className="text-sm">Bundles: {user.roleBundles.map(({ bundle }) => bundle.name).join(", ") || "None"}</p></div><div className="grid grid-cols-1 sm:grid-cols-2 gap-2"><button className="btn btn-outline" disabled={busy} onClick={() => { setEdit(user); setEditBundleIds(user.roleBundles.map(({ bundle }) => bundle.id)); }}>Edit access</button><button className="btn btn-outline" disabled={busy || !user.isActive} onClick={() => { setRecoveryUser(user); setReason(""); setIssued(null); }}>{user.passwordChangedAt ? "Issue recovery code" : "Issue enrollment code"}</button><button className="btn btn-outline" disabled={busy} onClick={() => void run(async () => { await jsonRequest(`/api/admin/users/${encodeURIComponent(user.id)}`, "PATCH", { revokeSessions: true }); setMessage("Sessions revoked."); })}>Revoke all sessions</button></div></article>)}</section>
+    {edit && <section className="rounded-box border-2 border-primary bg-base-100 p-4 space-y-3"><h2 className="font-bold">Edit {edit.username}</h2><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => {
+      await jsonRequest(`/api/admin/users/${encodeURIComponent(edit.id)}`, "PATCH", { username: edit.username, displayName: edit.displayName, role: edit.role, isActive: edit.isActive, bundleIds: editBundleIds }); setEdit(null); setMessage("Account updated. Previous sessions revoked.");
+    }); }}><label className="block">Username<input className="input input-bordered w-full mt-1" value={edit.username} onChange={(event) => setEdit({ ...edit, username: event.target.value })} required /></label><label className="block">Display name<input className="input input-bordered w-full mt-1" value={edit.displayName} onChange={(event) => setEdit({ ...edit, displayName: event.target.value })} required /></label><label className="block">System role<select className="select select-bordered w-full mt-1" value={edit.role} onChange={(event) => { const role = event.target.value as User["role"]; setEdit({ ...edit, role }); setEditBundleIds([`legacy-${role}`]); }}><option value="user">User</option><option value="manager">Manager</option><option value="admin">System admin</option></select></label><label className="flex gap-2 items-center"><input type="checkbox" className="checkbox" checked={edit.isActive} onChange={(event) => setEdit({ ...edit, isActive: event.target.checked })} />Active account</label><fieldset className="space-y-2"><legend className="font-bold mb-2">Assigned capability bundles</legend>{bundles.map((bundle) => <label key={bundle.id} className="flex gap-2 items-start"><input className="checkbox shrink-0" type="checkbox" checked={editBundleIds.includes(bundle.id)} onChange={(event) => setEditBundleIds(event.target.checked ? [...editBundleIds, bundle.id] : editBundleIds.filter((id) => id !== bundle.id))} /><span>{bundle.name}<small className="block opacity-70">{bundle.description}</small></span></label>)}</fieldset><div className="grid grid-cols-2 gap-2"><button className="btn btn-primary" disabled={busy}>Save access</button><button type="button" className="btn" onClick={() => setEdit(null)}>Cancel</button></div></form></section>}
+    {recoveryUser && <section className="rounded-box border-2 border-warning bg-base-100 p-4 space-y-3"><h2 className="font-bold">{recoveryUser.passwordChangedAt ? "Recovery" : "Enrollment"} for {recoveryUser.displayName}</h2><p>Verify this person&#39;s identity. Privately deliver the code; never place it in shared notes, chat or public files.</p><label className="block">Verification reason<input className="input input-bordered w-full mt-1" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={300} /></label><button className="btn btn-warning w-full" disabled={busy || reason.trim().length < 5} onClick={() => void run(async () => { setIssued(await jsonRequest("/api/admin/users/recovery", "POST", { userId: recoveryUser.id, purpose: recoveryUser.passwordChangedAt ? "reset" : "enroll", reason })); })}>Issue one-use code</button>{issued && <div className="space-y-2"><textarea className="textarea textarea-bordered font-mono w-full break-all" readOnly aria-label="One-use recovery code" value={issued.token} /><p>Shown only here. Expires {new Date(issued.expiresAt).toLocaleString()}. The person sets their own password at Sign in → Enrollment or recovery.</p></div>}<button className="btn w-full" onClick={() => { setRecoveryUser(null); setIssued(null); }}>Close and clear code</button></section>}
+    <details className="rounded-box border border-base-300 bg-base-100 p-4"><summary className="font-bold cursor-pointer">Manage capability bundles</summary><div className="space-y-3 mt-3">{bundles.map((bundle) => <div key={bundle.id} className="border-b border-base-300 py-2"><strong>{bundle.name}</strong><p className="text-xs break-all">{bundle.capabilities.join(", ")}</p>{!bundle.isSystem && <button className="btn btn-sm mt-2" onClick={() => { setBundleId(bundle.id); setBundleName(bundle.name); setBundleDescription(bundle.description); setCaps(bundle.capabilities); }}>Edit bundle</button>}</div>)}<form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void run(async () => { await jsonRequest("/api/admin/users/bundles", "POST", { id: bundleId, name: bundleName, description: bundleDescription, capabilities: caps }); setBundleId(undefined); setBundleName(""); setBundleDescription(""); setCaps([]); setMessage("Bundle saved; affected sessions revoked."); }); }}><h3 className="font-bold">{bundleId ? "Edit custom bundle" : "New custom bundle"}</h3><input aria-label="Bundle name" className="input input-bordered w-full" value={bundleName} onChange={(event) => setBundleName(event.target.value)} placeholder="Bundle name" required /><input aria-label="Bundle description" className="input input-bordered w-full" value={bundleDescription} onChange={(event) => setBundleDescription(event.target.value)} placeholder="Purpose" />{CAPABILITIES.map((cap) => <label key={cap} className="flex gap-2 items-center"><input type="checkbox" className="checkbox" checked={caps.includes(cap)} onChange={(event) => setCaps(event.target.checked ? [...caps, cap] : caps.filter((item) => item !== cap))} /><span>{cap}</span></label>)}<button className="btn btn-primary w-full" disabled={busy}>Save custom bundle</button><button type="button" className="btn w-full" onClick={() => { setBundleId(undefined); setBundleName(""); setBundleDescription(""); setCaps([]); }}>Clear form</button></form></div></details>
+    <details className="rounded-box border border-base-300 bg-base-100 p-4"><summary className="font-bold cursor-pointer">Recent account audit</summary><div className="space-y-2 mt-3">{audit.map((row) => <div className="border-b border-base-300 pb-2 text-sm break-all" key={row.id}><strong>{row.action}</strong> · {new Date(row.createdAt).toLocaleString()}<p>Actor {row.actorUserId || "Public recovery"} · Account {row.targetUserId || "Unmatched"}</p>{row.reason && <p>{row.reason}</p>}</div>)}</div></details>
+  </div>;
 }

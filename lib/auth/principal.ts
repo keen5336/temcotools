@@ -3,9 +3,10 @@
 export type UserRole = "admin" | "manager" | "user";
 
 export const CAPABILITIES = [
-  "inventory.read", "inventory.write", "workflow.read", "workflow.execute",
+  "inventory.read", "inventory.write", "inventory.identify", "workflow.read", "workflow.execute",
   "labels.read", "labels.print", "labels.manage", "users.manage",
   "files.manage", "payloads.manage", "diagnostics.use",
+  "office.decide", "office.authorize_rtv",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -16,6 +17,10 @@ export interface Principal {
   role: UserRole;
   authVersion: number;
   capabilities: readonly Capability[];
+  sessionId?: string;
+  strongAuthenticatedAt?: number;
+  mfaVerifiedAt?: number;
+  grantId?: string;
 }
 
 export interface CurrentUser {
@@ -25,6 +30,7 @@ export interface CurrentUser {
   role: UserRole;
   isActive: boolean;
   authVersion: number;
+  roleBundles?: Array<{ bundle: { capabilities: string[] } }>;
 }
 
 export interface SessionClaim {
@@ -36,6 +42,12 @@ export interface SessionClaim {
 }
 
 export const SESSION_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+export const SESSION_IDLE_MS = 30 * 60 * 1000;
+export const RECENT_AUTH_MS = 10 * 60 * 1000;
+export const CURRENT_USER_SELECT = {
+  id: true, username: true, displayName: true, role: true, isActive: true, authVersion: true,
+  roleBundles: { select: { bundle: { select: { capabilities: true } } } },
+} as const;
 const COMMON_CAPABILITIES: readonly Capability[] = [
   "inventory.read", "inventory.write", "workflow.read", "workflow.execute",
   "labels.read", "labels.print",
@@ -72,7 +84,10 @@ export async function resolvePrincipal(
   if (user.role !== "admin" && user.role !== "manager" && user.role !== "user") return null;
   return {
     userId: user.id, username: user.username, displayName: user.displayName,
-    role: user.role, authVersion: user.authVersion, capabilities: capabilitiesForRole(user.role),
+    role: user.role, authVersion: user.authVersion,
+    capabilities: user.roleBundles
+      ? [...new Set(user.roleBundles.flatMap(({ bundle }) => bundle.capabilities))].filter((cap): cap is Capability => CAPABILITIES.includes(cap as Capability))
+      : capabilitiesForRole(user.role),
   };
 }
 
@@ -86,4 +101,40 @@ export class AuthorizationError extends Error {
 
 export function assertCapability(principal: Principal, capability: Capability): void {
   if (!principal.capabilities.includes(capability)) throw new AuthorizationError();
+}
+
+export function assertRecentPasswordAuthentication(principal: Principal, now = Date.now()): void {
+  const at = principal.strongAuthenticatedAt;
+  if (!principal.sessionId || !Number.isSafeInteger(at) || at! <= 0 || at! > now + 5000 || now - at! > RECENT_AUTH_MS) {
+    throw new AuthorizationError("Confirm your password in Account security before this sensitive action.");
+  }
+}
+
+export function assertRecentAuthentication(principal: Principal, now = Date.now()): void {
+  assertRecentPasswordAuthentication(principal, now);
+  const at = principal.mfaVerifiedAt;
+  if (!Number.isSafeInteger(at) || at! <= 0 || at! > now + 5000 || now - at! > RECENT_AUTH_MS) {
+    throw new AuthorizationError("Confirm an authenticator or recovery code with your password in Account security before this sensitive action.");
+  }
+}
+
+export interface PersistentSession {
+  id: string;
+  userId: string;
+  authVersion: number;
+  expiresAt: Date;
+  lastActivityAt: Date;
+  lastStrongAuthenticatedAt: Date;
+  mfaVerifiedAt?: Date | null;
+  revokedAt: Date | null;
+  lockedAt: Date | null;
+}
+
+export function isLivePersistentSession(session: PersistentSession, claim: SessionClaim, now = Date.now()): boolean {
+  return isLiveSessionClaim(claim, now) && session.id === claim.sessionId
+    && session.userId === claim.userId && session.authVersion === claim.authVersion
+    && !session.revokedAt && !session.lockedAt && session.expiresAt.getTime() > now
+    && session.expiresAt.getTime() === claim.expiresAt
+    && session.lastActivityAt.getTime() <= now + 5000
+    && now - session.lastActivityAt.getTime() < SESSION_IDLE_MS;
 }

@@ -16,7 +16,8 @@
     "test:inventory-audit": "tsx --test scripts/inventory-audit.test.ts",
     "test:favorites": "tsx --test scripts/tool-favorites.test.ts",
     "test:v2": "tsx --test scripts/access.test.ts scripts/warehouse-lookup.test.ts",
-    "test:v2:integration": "tsx --test scripts/v2-*.integration.test.ts"
+    "test:v2:integration": "tsx --test scripts/v2-*.integration.test.ts",
+    "test:v2:identity": "tsx --test scripts/access.test.ts scripts/identity.test.ts scripts/identity.integration.test.ts scripts/mfa.test.ts scripts/mfa.integration.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -26,9 +27,11 @@
     "bcryptjs": "^3.0.3",
     "daisyui": "^5.5.19",
     "exceljs": "^4.4.0",
+    "express": "5.3.0",
     "iron-session": "^8.0.4",
     "jszip": "^3.10.1",
-    "next": "16.2.2",
+    "next": "16.4.3",
+    "otplib": "13.6.0",
     "pg": "^8.20.0",
     "prisma": "^7.6.0",
     "react": "19.2.4",
@@ -37,13 +40,15 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
+    "@types/express": "5.0.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.2",
+    "eslint-config-next": "16.4.3",
     "tailwindcss": "^4",
     "tsx": "^4.21.0",
     "typescript": "^5"

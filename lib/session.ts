@@ -11,6 +11,8 @@ export interface SessionData {
   issuedAt?: number;
   expiresAt?: number;
   sessionId?: string;
+  strongAuthenticatedAt?: number;
+  mfaVerifiedAt?: number;
   capabilities?: readonly Capability[];
   apiRelaySessionId?: string;
 }

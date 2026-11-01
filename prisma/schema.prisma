@@ -783,12 +783,3 @@ model WarehouseObservationCorrection {
   @@index([observationId, createdAt])
   @@unique([observationId, revision])
 }
-
-
-
-
-
-
-
-
-

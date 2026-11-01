@@ -1,133 +1,32 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-const LAST_USERNAME_KEY = "temco_last_username";
-
+// Keep the old import name while replacing public PIN authentication.
 export default function PinLoginForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const usernameRef = useRef<HTMLInputElement>(null);
-  const pinRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(LAST_USERNAME_KEY);
-    if (saved) {
-      setUsername(saved);
-      pinRef.current?.focus();
-    } else {
-      usernameRef.current?.focus();
-    }
-  }, []);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    if (!username.trim()) {
-      setError("Username is required.");
-      return;
-    }
-    if (!/^\d{4,6}$/.test(pin)) {
-      setError("PIN must be 4 to 6 digits.");
-      return;
-    }
-
-    setLoading(true);
+  const [password, setPassword] = useState("");
+  const [deviceLabel, setDeviceLabel] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  return <form className="space-y-4" onSubmit={async (event) => {
+    event.preventDefault(); setBusy(true); setError("");
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), pin }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Login failed.");
-        setPin("");
-        pinRef.current?.focus();
-        return;
-      }
-
-      localStorage.setItem(LAST_USERNAME_KEY, username.trim());
-      router.push("/");
-      router.refresh();
-    } catch (err) {
-      console.error("Login request failed:", err);
-      setError("Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handlePinInput(e: React.ChangeEvent<HTMLInputElement>) {
-    const value = e.target.value.replace(/\D/g, "").slice(0, 6);
-    setPin(value);
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {error && (
-        <div role="alert" className="alert alert-error text-sm">
-          {error}
-        </div>
-      )}
-
-      <div className="form-control">
-        <label htmlFor="username" className="label">
-          <span className="label-text font-medium">Username</span>
-        </label>
-        <input
-          ref={usernameRef}
-          id="username"
-          type="text"
-          autoComplete="username"
-          autoCapitalize="none"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onBlur={() => {
-            if (username.trim()) pinRef.current?.focus();
-          }}
-          className="input input-bordered w-full"
-          placeholder="Enter username"
-          disabled={loading}
-        />
-      </div>
-
-      <div className="form-control">
-        <label htmlFor="pin" className="label">
-          <span className="label-text font-medium">PIN</span>
-        </label>
-        <input
-          ref={pinRef}
-          id="pin"
-          type="password"
-          inputMode="numeric"
-          autoComplete="current-password"
-          value={pin}
-          onChange={handlePinInput}
-          className="input input-bordered w-full tracking-widest"
-          placeholder="••••"
-          disabled={loading}
-          maxLength={6}
-        />
-        <div className="label">
-          <span className="label-text-alt text-base-content/50">4 to 6 digits</span>
-        </div>
-      </div>
-
-      <button
-        type="submit"
-        disabled={loading}
-        className="btn btn-primary w-full"
-      >
-        {loading ? "Signing in…" : "Sign In"}
-      </button>
-    </form>
-  );
+      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username.trim(), password, deviceLabel: deviceLabel.trim() || "Browser" }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Sign-in failed.");
+      setPassword(""); router.push("/"); router.refresh();
+    } catch (error) { setPassword(""); setError(error instanceof Error ? error.message : "Sign-in failed."); }
+    finally { setBusy(false); }
+  }}>
+    {error && <p role="alert" className="alert alert-error text-sm">{error}</p>}
+    <label className="block">Username<input name="username" className="input input-bordered w-full mt-1" autoComplete="username" autoCapitalize="none" autoCorrect="off" value={username} onChange={(event) => setUsername(event.target.value)} required maxLength={80} disabled={busy} /></label>
+    <label className="block">Password or passphrase<input name="password" type="password" className="input input-bordered w-full mt-1" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required maxLength={512} disabled={busy} /></label>
+    <label className="block">Device name <span className="text-sm opacity-60">(optional)</span><input className="input input-bordered w-full mt-1" placeholder="Zebra 3 or Office phone" value={deviceLabel} onChange={(event) => setDeviceLabel(event.target.value)} maxLength={80} disabled={busy} /></label>
+    <button className="btn btn-primary w-full" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+    <Link href="/signin/recovery" className="link block text-center">First password enrollment or account recovery</Link>
+  </form>;
 }

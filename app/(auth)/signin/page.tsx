@@ -5,12 +5,12 @@ import PinLoginForm from "@/components/PinLoginForm";
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; returnTo?: string }>;
 }) {
-  const session = await getSession();
-  if (session.userId) redirect("/");
-
   const params = await searchParams;
+  const returnTo = typeof params.returnTo === "string" && /^\/account\/authorize\?request=tc_req_[A-Za-z0-9_-]{43}$/.test(params.returnTo) ? params.returnTo : "/";
+  const session = await getSession();
+  if (session.userId) redirect(returnTo);
 
   return (
     <div className="min-h-screen bg-base-200 flex items-center justify-center p-4">
@@ -25,7 +25,7 @@ export default async function SignInPage({
             </div>
           )}
 
-          <PinLoginForm />
+          <PinLoginForm returnTo={returnTo} />
         </div>
       </div>
     </div>
