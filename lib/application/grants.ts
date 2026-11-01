@@ -16,6 +16,7 @@ export const hashGrantToken = (token: string) => createHash("sha256").update(tok
 // User-bound development/stdio grants; remote OAuth is a separate integration.
 // No environment variable can assert a role or choose an arbitrary user ID.
 export async function createAccessGrant(principal: Principal, input: unknown) {
+  if (principal.grantId) throw new GrantError("Client grants cannot mint independent replacement grants. Use your own authenticated account to create a new client connection.");
   const data = inputSchema.parse(input);
   if (data.scopes.some((scope) => !principal.capabilities.includes(scope))) throw new GrantError("A grant cannot exceed your current permissions.");
   const token = `temco_${randomBytes(32).toString("base64url")}`;

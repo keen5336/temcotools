@@ -16,6 +16,10 @@ import { pickActions } from "./pick-actions";
 import { inventoryActions } from "./inventory-actions";
 import { dispatchActions } from "./dispatch-actions";
 import { listActions } from "./list-actions";
+import { noteActions } from "./note-actions";
+import { marsActions } from "./mars-actions";
+import { utilityActions } from "./utility-actions";
+import { getUnitLabelContext, evaluateUnitLabels, prepareUnitLabel, unitLabelContextInput, prepareUnitLabelInput } from "@/lib/labels/unit-context";
 import { getOperationalDashboard, saveDashboardPreferences } from "@/lib/dashboard";
 import * as dmp from "@/lib/api-relay/service";
 import { validatePayloadDraft, buildPayloadBookmarklet } from "@/lib/payloads/model";
@@ -23,7 +27,7 @@ import { lookupWarehouseInventory } from "@/lib/warehouse-lookup";
 import { ingestWarehouseScan } from "./scan-ingestion";
 import { createAccessGrant, listAccessGrants, revokeAccessGrant } from "./grants";
 
-type Action = { capability?: Capability; capabilitiesAny?: readonly Capability[]; adminOnly?: boolean; description: string; run: (principal: Principal, input: unknown) => unknown | Promise<unknown> };
+type Action = { capability?: Capability; capabilitiesAll?: readonly Capability[]; capabilitiesAny?: readonly Capability[]; adminOnly?: boolean; description: string; inputSchema?: z.ZodType; run: (principal: Principal, input: unknown) => unknown | Promise<unknown> };
 const record = (input: unknown) => z.record(z.string(), z.unknown()).parse(input);
 const text = (input: unknown, key: string) => z.string().trim().min(1).max(200).parse(record(input)[key]);
 const withInput = <T>(fn: (principal: Principal, input: T) => unknown | Promise<unknown>) => (principal: Principal, input: unknown) => fn(principal, input as T);
@@ -40,6 +44,12 @@ export const applicationActions = {
   ...inventoryActions,
   ...dispatchActions,
   ...listActions,
+  ...noteActions,
+  ...marsActions,
+  ...utilityActions,
+  "warehouse.unit.context": { capability: "inventory.read", capabilitiesAll: ["workflow.read"], description: "Read source-qualified unit, office, exchange, return and label field context without claiming upstream qualification", inputSchema: unitLabelContextInput, run: getUnitLabelContext },
+  "labels.unit.evaluate": { capability: "labels.read", capabilitiesAll: ["inventory.read", "workflow.read"], description: "Evaluate due unit labels from server-derived dates/routes/instructions; unrelated scans do not reissue", inputSchema: unitLabelContextInput, run: evaluateUnitLabels },
+  "labels.unit.prepare": { capability: "labels.print", capabilitiesAll: ["inventory.read", "workflow.read"], description: "Prepare an identified unit label using authoritative current context and an authorized connected device", inputSchema: prepareUnitLabelInput, run: prepareUnitLabel },
   "dashboard.get": { description: "Read authorized operational priorities, progress and source timestamps", run: getOperationalDashboard },
   "dashboard.save": { capability: "account.self", description: "Select and reorder your authorized home widgets", run: saveDashboardPreferences },
   "dmp.status": { capability: "workflow.read", description: "List your paired DMP tabs and named operations", run: dmp.getDmpStatus },
@@ -88,7 +98,7 @@ export const applicationActions = {
   "identity.bundle.save": { capability: "users.manage", description: "Create/change a bundle without silently granting legacy users new rights", run: identity.saveRoleBundle },
   "identity.audit": { capability: "users.manage", description: "Review access and recovery attribution without credentials", run: identity.listIdentityAudit },
   "access.grants": { capability: "account.self", description: "List your scoped client grants", run: listAccessGrants },
-  "access.grant.create": { capability: "account.self", description: "Create an expiring user/session-bound grant within your client scope", run: createAccessGrant },
+  "access.grant.create": { capability: "account.self", description: "Initiate a user/session-bound client grant through your own account; delegated clients cannot mint replacements", run: (p: Principal, input: unknown) => userCeremony(p, () => createAccessGrant(p, input), "/account/access") },
   "access.grant.revoke": { capability: "account.self", description: "Revoke your client grant", run: (p: Principal, input: unknown) => revokeAccessGrant(p, text(input, "id")) },
   "access.oauth.grants": { capability: "account.self", description: "List your remote MCP client grants", run: listOAuthGrants },
   "access.oauth.revoke": { capability: "account.self", description: "Revoke your remote MCP client grant", run: (p: Principal, input: unknown) => revokeOAuthGrant(p, text(input, "id")) },
@@ -110,6 +120,7 @@ export const applicationActions = {
   "office.evaluate": { capabilitiesAny: ["inventory.write", "office.decide"], description: "Evaluate a bounded page using current inventory-write or office-decision authority", run: office.evaluateOfficeWork },
   "office.observation.review": { capability: "inventory.write", description: "Evaluate instructions triggered by your captured physical event", run: office.reviewOfficeObservation },
   "payloads.list": { capability: "payloads.manage", adminOnly: true, description: "List managed external-page payloads", run: payloads.listPayloads },
+  "payloads.builtin-sources": { capability: "payloads.manage", adminOnly: true, description: "Read built-in DMP and review-only MARS helper source for an explicit managed draft", run: (p: Principal) => payloads.getBuiltinPayloadSources(p) },
   "payloads.get": { capability: "payloads.manage", adminOnly: true, description: "Read private source/draft/version history", run: (p: Principal, input: unknown) => payloads.getPayload(p, text(input, "id")) },
   "payloads.version": { capability: "payloads.manage", adminOnly: true, description: "Inspect an immutable source version", run: (p: Principal, input: unknown) => payloads.getPayloadVersion(p, text(input, "id"), text(input, "versionId")) },
   "payloads.create": { capability: "payloads.manage", adminOnly: true, description: "Create a named purpose/origin-constrained draft", run: withInput(payloads.createPayload) },
@@ -123,18 +134,22 @@ export const applicationActions = {
 } satisfies Record<string, Action>;
 
 export type ApplicationAction = keyof typeof applicationActions;
-export function listApplicationActions(principal: Principal) {
+export function listApplicationActions(principal: Principal, options: { prefix?: string; includeSchemas?: boolean } = {}) {
   return Object.entries(applicationActions).filter(([, definition]) => {
     const action: Action = definition;
-    return (!action.capability || principal.capabilities.includes(action.capability)) && (!action.capabilitiesAny || action.capabilitiesAny.some(cap => principal.capabilities.includes(cap))) && (!action.adminOnly || principal.role === "admin");
-  }).map(([name, definition]) => ({ name, description: definition.description }));
+    return (!action.capability || principal.capabilities.includes(action.capability)) && (!action.capabilitiesAll || action.capabilitiesAll.every(cap => principal.capabilities.includes(cap))) && (!action.capabilitiesAny || action.capabilitiesAny.some(cap => principal.capabilities.includes(cap))) && (!action.adminOnly || principal.role === "admin");
+  }).filter(([name]) => !options.prefix || name.startsWith(options.prefix)).map(([name, definition]) => { const action: Action = definition; return { name, description: action.description, ...(options.includeSchemas && action.inputSchema ? { inputSchema: z.toJSONSchema(action.inputSchema, { unrepresentable: "any" }) } : {}) }; });
 }
 export async function executeApplicationAction(principal: Principal, name: string, input: unknown) {
-  if (!Object.hasOwn(applicationActions, name)) throw new Error("Unknown application action.");
+  if (!Object.hasOwn(applicationActions, name)) throw new identity.IdentityError("Unknown application action.", 404);
   const action: Action = applicationActions[name as ApplicationAction];
   if (action.capability) assertCapability(principal, action.capability);
+  for (const cap of action.capabilitiesAll ?? []) assertCapability(principal, cap);
   if (action.capabilitiesAny && !action.capabilitiesAny.some(cap => principal.capabilities.includes(cap))) throw new identity.IdentityError("Your current permissions do not allow this action.", 403);
   if (action.adminOnly && principal.role !== "admin") throw new identity.IdentityError("System administrator access required.", 403);
-  await prisma.$transaction(tx => identity.assertCurrentPrincipal(tx, principal, action.capability));
-  return action.run(principal, input);
+  const current = await prisma.$transaction(tx => identity.assertCurrentPrincipal(tx, principal, action.capability));
+  for (const cap of action.capabilitiesAll ?? []) assertCapability(current, cap);
+  if (action.capabilitiesAny && !action.capabilitiesAny.some(cap => current.capabilities.includes(cap))) throw new identity.IdentityError("Your current client scope no longer allows this action.", 403);
+  if (action.adminOnly && current.role !== "admin") throw new identity.IdentityError("System administrator access required.", 403);
+  return action.run(current, action.inputSchema ? action.inputSchema.parse(input) : input);
 }

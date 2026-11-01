@@ -3,10 +3,12 @@ import { prisma } from "@/lib/db";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import type { Capability, Principal } from "@/lib/auth/principal";
 import { businessDay } from "@/lib/office/domain";
+import { getDispatchDashboardInTransaction } from "@/lib/dispatch/service";
 
 export const WIDGETS = [
   { id: "priorities", name: "Office priorities", capability: "workflow.read", href: "/tools/office" },
   { id: "picks", name: "Pick work", capability: "workflow.read", href: "/tools/pick-waves" },
+  { id: "dispatch", name: "Dispatch day progress", capability: "workflow.read", href: "/tools/dispatch" },
   { id: "observations", name: "Physical observations", capability: "inventory.read", href: "/tools/warehouse-scan" },
   { id: "sources", name: "Source freshness", capability: "inventory.read", href: "/tools/inventory-audit" },
   { id: "labels", name: "Label follow-up", capability: "labels.read", href: "/management/label-workflows" },
@@ -17,7 +19,7 @@ const widgetSchema = z.enum(WIDGETS.map(widget => widget.id) as [WidgetId, ...Wi
 export class DashboardError extends Error { constructor(message: string, readonly status = 409) { super(message); } }
 export function authorizedWidgets(capabilities: readonly Capability[]) { return WIDGETS.filter(widget => capabilities.includes(widget.capability)); }
 export function defaultWidgets(capabilities: readonly Capability[]) {
-  const order: WidgetId[] = capabilities.includes("office.decide") ? ["priorities", "picks", "observations", "sources", "labels", "access"] : ["picks", "observations", "priorities", "sources", "labels", "access"];
+  const order: WidgetId[] = capabilities.includes("office.decide") ? ["priorities", "dispatch", "picks", "observations", "sources", "labels", "access"] : ["picks", "dispatch", "observations", "priorities", "sources", "labels", "access"];
   return order.filter(id => authorizedWidgets(capabilities).some(widget => widget.id === id));
 }
 export async function saveDashboardPreferences(principal: Principal, input: unknown) {
@@ -55,6 +57,9 @@ export async function getOperationalDashboard(principal: Principal) {
         const total = await tx.pickWaveItem.count({ where: { pickWave: { archivedAt: null } } });
         const confirmed = await tx.pickWaveItem.count({ where: { pickWave: { archivedAt: null }, scannedAt: { not: null } } });
         widgets.push({ id, title: definition.name, href: definition.href, summary: `${confirmed} / ${total} active pick rows scanned`, lines: ["Pick progress does not replace dispatch-day lane confirmation."], items: waves.map(wave => ({ id: wave.id, text: `${wave.name} · ${wave._count.items} rows`, href: `/tools/pick-waves/${wave.id}` })) });
+      } else if (id === "dispatch") {
+        const progress = await getDispatchDashboardInTransaction(tx, day);
+        widgets.push({ id, title: definition.name, href: definition.href, summary: progress.scopes.some(scope => scope.unavailable) ? "Verification incomplete — scope data unavailable" : progress.scopes.length ? `${progress.scopes.reduce((sum, scope) => sum + scope.confirmed, 0)} / ${progress.scopes.reduce((sum, scope) => sum + scope.required, 0)} lane units confirmed` : "No accepted demand for today", lines: [progress.sourceNotice, `${progress.scopes.reduce((sum, scope) => sum + scope.signedLanes, 0)} current signed lanes · ${progress.scopes.reduce((sum, scope) => sum + scope.recheckLanes, 0)} need verification/recheck`, ...(progress.hasMore ? ["Showing five recent scopes. Open dispatch for all scopes."] : []), ...(progress.scopes.some(scope => scope.unavailable) ? ["Some accepted demand has no verification session; open dispatch to review it."] : [])], items: progress.scopes.map(scope => ({ id: scope.boardId, text: `${scope.scope}: ${scope.unavailable ? "verification unavailable" : `${scope.confirmed}/${scope.required} confirmed · ${scope.recheckLanes} lanes to review`}`, href: "/tools/dispatch" })) });
       } else if (id === "observations") {
         const [counts] = await tx.$queryRaw<{ count: number; unresolved: number }[]>`
           SELECT count(*)::int AS count, count(*) FILTER (WHERE CASE WHEN c.id IS NOT NULL THEN c."unitId" ELSE o."unitId" END IS NULL)::int AS unresolved

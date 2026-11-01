@@ -19,7 +19,12 @@ export function createApplicationMcpServer(authenticate: () => Promise<Principal
       return { isError: true, content: [{ type: "text" as const, text: message }] };
     }
   }
-  server.registerTool("application_actions", { title: "Your available application actions", description: "List the shared actions allowed by your current account and client scope.", inputSchema: {} }, () => execute(listApplicationActions));
+  server.registerTool("application_actions", { title: "Your available application actions", description: "List shared actions allowed by your current account/client scope; optionally filter by prefix.", inputSchema: { prefix: z.string().max(100).optional() } }, input => execute(principal => listApplicationActions(principal, input)));
+  server.registerTool("application_action_info", { title: "Inspect an available application action", description: "Read a permitted action's description and its canonical input schema when published. Domain validation always applies.", inputSchema: { action: z.string().min(1).max(100) } }, input => execute(principal => {
+    const action = listApplicationActions(principal, { includeSchemas: true, prefix: input.action }).find(action => action.name === input.action);
+    if (!action) throw new AuthorizationError("This action is unavailable to your current account/client scope.");
+    return action;
+  }));
   server.registerTool("application_action", { title: "Run a shared application action", description: "Use a name from application_actions. The same validation, current authority and domain receipts apply as in the UI. Hardware and human authenticator steps still require their real device/user.", inputSchema: { action: z.string().min(1).max(100), input: z.record(z.string(), z.unknown()).default({}) } }, input => execute(principal => executeApplicationAction(principal, input.action, input.input)));
   server.registerTool("warehouse_lookup", {
     title: "Find warehouse inventory", description: "Look up one exact WMS LPN or list order candidates. A report row does not prove physical stock.",

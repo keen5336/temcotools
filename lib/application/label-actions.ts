@@ -14,7 +14,7 @@ export const labelActions = {
   "labels.rollback": { capability: "labels.manage", description: "Select a prior published label version", run: workflows.rollbackLabelWorkflow },
   "labels.enabled": { capability: "labels.manage", description: "Enable or disable a label purpose", run: workflows.setLabelWorkflowEnabled },
   "labels.preview": { capability: "labels.manage", description: "Render synthetic content/ZPL without printing", run: workflows.previewLabelDraft },
-  "labels.evaluate": { capability: "labels.read", description: "Evaluate relevant content changes independently of last physical observation", run: (p: Principal, input: unknown) => workflows.evaluateLabel(p, input as Parameters<typeof workflows.evaluateLabel>[1]) },
+  "labels.evaluate": { capability: "labels.read", capabilitiesAll: ["inventory.read"], description: "Evaluate relevant content changes independently of last physical observation", run: (p: Principal, input: unknown) => workflows.evaluateLabel(p, input as Parameters<typeof workflows.evaluateLabel>[1]) },
   "labels.devices": { capability: "labels.read", description: "List currently authorized connected printing devices", run: devices.listPrintingDevices },
   "labels.device.register": { capability: "labels.print", description: "Lease a session-bound device; a server grant does not supply LAN hardware", run: devices.registerPrintingDevice },
   "labels.device.revoke": { capability: "labels.print", description: "Revoke your connected device", run: (p: Principal, input: unknown) => devices.revokePrintingDevice(p, id(input, "deviceId")) },
@@ -25,6 +25,6 @@ export const labelActions = {
   "labels.cancel": { capability: "labels.print", description: "Cancel an intent that has not been dispatched", run: issuance.cancelQueuedLabel },
   "labels.reconcile": { capability: "labels.print", description: "Record attributed physical/reconciliation evidence separately from browser delivery", run: issuance.reconcileLabelIssuance },
   "labels.reprint": { capability: "labels.print", description: "Prepare an explicit new reprint with a reason and separate operation ID", run: issuance.reprintLabelIssuance },
-  "labels.issuance": { capability: "labels.read", description: "Read one issuance receipt and its event history", run: (p: Principal, input: unknown) => issuance.getLabelIssuance(p, id(input, "issuanceId")) },
+  "labels.issuance": { capabilitiesAny: ["labels.read", "labels.print"], description: "Read an authorized issuance receipt; print-only access is limited to your own", run: (p: Principal, input: unknown) => issuance.getLabelIssuance(p, id(input, "issuanceId")) },
   "labels.issuances": { capability: "labels.read", description: "Read recent label receipts; optionally constrain to an exact unit", run: (p: Principal, input: unknown) => issuance.listLabelIssuances(p, z.object({ unitId: z.string().min(1).max(100).optional() }).parse(input).unitId) },
 } as const;

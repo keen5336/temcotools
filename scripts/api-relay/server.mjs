@@ -211,8 +211,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const authorize = async (owner, context) => {
     if (!owner.authSessionId || !Number.isSafeInteger(owner.authVersion) || !context.operation) return false;
     const check = async (currentOwner) => {
-      const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({owner:currentOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation,requestMethod:context.requestMethod}),redirect:"error",signal:AbortSignal.timeout(5000)});
-      return response.ok && (await response.json()).authorized === true;
+      const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({authorizationProtocol:2,owner:currentOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation,requestMethod:context.requestMethod}),redirect:"error",signal:AbortSignal.timeout(5000)});
+      if (!response.ok) return false;
+      const result = await response.json();
+      return result.authorized === true && result.authorizationProtocol === 2;
     };
     return (await check(context.connectionOwner)) && (await check(owner));
   };
