@@ -128,7 +128,9 @@ services:
 networks:
   pilot_net:
     name: temcotools-v2-pilot-${PILOT_SLUG}-private
-    internal: true
+    # A normal dedicated bridge preserves Docker's explicit loopback publishing.
+    # An internal bridge suppressed those bindings in actual local qualification.
+    internal: false
     driver: bridge
     labels:
       com.temcotools.pilot.project: temcotools-v2-pilot-${PILOT_SLUG}

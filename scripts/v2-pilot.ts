@@ -87,7 +87,7 @@ export function validatePilotComposition(input: unknown, env: Record<string, str
   requireGuard(config.name === identity.project && sameKeys(services, ["db", "storage-init", "app", "api-relay", "mcp-http", "migrate"]), "Resolved pilot project/service inventory changed; label relays and extra services are refused.");
   requireGuard(sameKeys(networks, ["pilot_net"]) && sameKeys(volumes, ["db_data", "admin_files"]), "Pilot must use only its two private named volumes and private network.");
   const net = record(networks.pilot_net);
-  requireGuard(net.name === `${identity.project}-private` && net.driver === "bridge" && net.internal === true && !net.external && !net.driver_opts, "Pilot network must be internal, dedicated and non-external without host bridge overrides.");
+  requireGuard(net.name === `${identity.project}-private` && net.driver === "bridge" && (net.internal === false || net.internal === undefined) && !net.external && !net.driver_opts, "Pilot network must be a dedicated normal bridge, non-external and without host bridge overrides; explicit loopback publications are required.");
   for (const [key, suffix] of [["db_data", "db"], ["admin_files", "admin-files"]]) {
     const volume = record(volumes[key]);
     requireGuard(volume.name === `${identity.project}-${suffix}` && !volume.external && !volume.driver_opts && (!volume.driver || volume.driver === "local"), "Production/external/bind-backed volumes are refused.");
@@ -178,7 +178,7 @@ export function inspectLocalMetadata(context: string, env: NodeJS.ProcessEnv, pi
       if (kind === "volume") {
         const driver = docker("volume", "inspect", "--format", "{{.Driver}}\n{{json .Options}}", name).split("\n");
         requireGuard(driver[0] === "local" && ["null", "{}"].includes(driver[1]), "Existing pilot storage must be a plain local named volume without host bind options.");
-      } else requireGuard(docker("network", "inspect", "--format", "{{.Driver}} {{.Internal}}", name) === "bridge true", "Existing pilot network must remain an isolated internal bridge.");
+      } else requireGuard(docker("network", "inspect", "--format", "{{.Driver}} {{.Internal}}", name) === "bridge false", "Existing pilot network must be its dedicated normal bridge; do not adopt or alter another network.");
     }
   }
   for (const port of Object.values(PILOT_PORTS)) {

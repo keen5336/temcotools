@@ -81,7 +81,7 @@ test("actual standalone Compose render isolates all resources and rejects escapi
     reject(c => { c.volumes.db_data.external = true; });
     reject(c => { c.volumes.db_data.name = "temcotools_db_data"; });
     reject(c => { c.volumes.admin_files.driver_opts = { type: "none", device: "/srv/temcotools/runtime", o: "bind" }; });
-    reject(c => { c.networks.pilot_net.internal = false; });
+    reject(c => { c.networks.pilot_net.internal = true; });
     reject(c => { c.services.app.networks = { temco_net: null }; });
     reject(c => { c.services["storage-init"].network_mode = "host"; });
     for (const [key, value] of Object.entries({ DATABASE_URL: "postgresql://synthetic:synthetic@production/ops_tools", NEXT_PUBLIC_APP_URL: "https://temco.chronchive.com", MCP_RESOURCE_URL: "https://temco.chronchive.com/mcp", TEMCO_SESSION_COOKIE_NAME: "temco_session", API_RELAY_AUDIENCE: "production", TEMCO_PILOT_MODE: "off", ADMIN_FILE_MANAGER_ROOT: "/production" })) reject(c => { c.services.app.environment[key] = value; });
@@ -108,7 +108,7 @@ test("actual explicit synthetic pilot image/resource metadata supports the upstr
   const filename = process.env.PILOT_METADATA_FIXTURE_ENV_FILE!;
   assert.ok(filename.startsWith("/Volumes/MacDev/ProjectArchive/Development/Qualification/") && filename.endsWith("/pilot.env"), "Native metadata qualification requires an explicitly selected task-private synthetic environment.");
   const env = parsePilotEnvironment(readFileSync(filename, "utf8"));
-  assert.equal(env.PILOT_SLUG, "synthetic");
+  assert.ok(["synthetic", "synthetic-bridge"].includes(env.PILOT_SLUG));
   assert.equal(env.PILOT_PUBLIC_ORIGIN, "https://app.pilot.localhost:43101");
   const identity = validatePilotEnvironment(env, env.PILOT_SOURCE_HEAD);
   const result = inspectLocalMetadata("desktop-linux", process.env, identity, pilotImageExpectations(env, env.PILOT_SOURCE_HEAD));
