@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import type { PrismaClient } from "@prisma/client";
+import { decryptMfaSecret } from "../lib/auth/mfa-crypto";
 import { hasColumn, inventoryRepairCounts, maintenanceClient, maintenanceFailure, maintenanceTarget, migrationState, printMaintenance, tableExists, MaintenanceError } from "./v2-preflight-support";
 
 export async function inspectV2Readiness(prisma: PrismaClient, phase: "migrate" | "launch" = "migrate") {
@@ -24,6 +25,26 @@ export async function inspectV2Readiness(prisma: PrismaClient, phase: "migrate" 
           count(*) FILTER(WHERE "isActive" AND cardinality(caps)=0) AS "activeUsersWithoutWarehouseBundles"
         FROM accounts`;
       identity = Object.fromEntries(Object.entries(counts).map(([key, value]) => [key, Number(value)]));
+      // A restored enabled flag alone does not establish a usable recovery
+      // administrator. Verify envelope/key compatibility without emitting any
+      // account, ciphertext, secret or live authenticator code.
+      const factors = await tx.$queryRaw<{ userId: string; encryptedSecret: string; recoveryAdministrator: boolean }[]>`
+        SELECT m."userId",m."encryptedSecret",
+          (u.role='admin' AND u."passwordHash" IS NOT NULL AND EXISTS (
+            SELECT 1 FROM "UserRoleBundle" a JOIN "RoleBundle" b ON b.id=a."bundleId"
+            WHERE a."userId"=u.id AND 'users.manage'=ANY(b.capabilities)
+          )) AS "recoveryAdministrator"
+        FROM "UserMfa" m JOIN "User" u ON u.id=m."userId"
+        WHERE u."isActive" AND m."enabledAt" IS NOT NULL`;
+      identity.unreadableEnabledMfaFactors = 0;
+      for (const factor of factors) {
+        try { decryptMfaSecret(factor.userId, factor.encryptedSecret); }
+        catch {
+          identity.unreadableEnabledMfaFactors++;
+          if (factor.recoveryAdministrator) identity.readyRecoveryAdministrators--;
+        }
+      }
+      if (identity.unreadableEnabledMfaFactors) (phase === "launch" ? blockers : warnings).push("Active authenticators cannot be decrypted with this runtime configuration. Restore the preserved MFA key or complete the authorized recovery procedure before opening admission.");
       if (identity.activeUsersNeedingEnrollment) (phase === "launch" ? blockers : warnings).push("Active legacy accounts require individual enrollment, or deliberate deactivation before launch; public PIN login is disabled.");
       if (identity.unsupportedCredentials) blockers.push("Unsupported strong credential format requires recovery; do not fall back to PIN.");
       if (identity.privilegedUsersNeedingMfa) (phase === "launch" ? blockers : warnings).push("Privileged accounts need authenticator enrollment; ordinary floor login is not forced to adopt MFA.");
@@ -38,11 +59,14 @@ export async function inspectV2Readiness(prisma: PrismaClient, phase: "migrate" 
     } else if (phase === "launch") blockers.push("Shared warehouse identity schema is not installed.");
     const labelStates = await tableExists(tx, "LabelIssuance") ? await tx.$queryRaw<{ state: string; count: bigint }[]>`SELECT state,count(*) FROM "LabelIssuance" GROUP BY state ORDER BY state` : [];
     const dmpStates = await tableExists(tx, "DmpOperation") ? await tx.$queryRaw<{ state: string; count: bigint }[]>`SELECT state,count(*) FROM "DmpOperation" GROUP BY state ORDER BY state` : [];
+    const marsStates = await tableExists(tx, "MarsSubmissionIntent") ? await tx.$queryRaw<{ state: string; count: bigint }[]>`SELECT state,count(*) FROM "MarsSubmissionIntent" GROUP BY state ORDER BY state` : [];
     if (labelStates.some((row) => ["queued", "dispatching"].includes(row.state) && row.count > BigInt(0))) (phase === "launch" ? blockers : warnings).push("Drain or explicitly reconcile pending durable label jobs before the cutover snapshot; never replay uncertain dispatch.");
     if (labelStates.some((row) => ["unknown", "sent_unconfirmed"].includes(row.state) && row.count > BigInt(0))) warnings.push("Retain and review uncertain/unconfirmed label receipts. A network send is not physical output.");
     if (dmpStates.some(row => row.state === "dispatching" && row.count > BigInt(0))) (phase === "launch" ? blockers : warnings).push("Resolve durable in-flight DMP intents before the cutover snapshot; no automatic replay.");
     if (dmpStates.some(row => row.state === "unknown" && row.count > BigInt(0))) warnings.push("Preserve uncertain DMP intents and reconcile upstream separately; a restored database must not replay them.");
-    return { phase, migrations, identity, inventory, labelStates, dmpStates, blockers, warnings, limits: ["Aggregate database inspection does not establish live relay quiescence, operator/device acceptance, upstream mapping, backup restoration, secret custody or production authorization.", "No source rows, identifiers, customer data, tokens, hashes or connection URLs are emitted."] };
+    if (marsStates.some(row => row.state === "in_progress" && row.count > BigInt(0))) (phase === "launch" ? blockers : warnings).push("Reconcile in-progress human MARS handoffs before the cutover snapshot; local intent state is not proof of upstream completion.");
+    if (marsStates.some(row => row.state === "unknown" && row.count > BigInt(0))) warnings.push("Preserve uncertain MARS intents and their original evidence; inspect the external outcome without automatically resubmitting.");
+    return { phase, migrations, identity, inventory, labelStates, dmpStates, marsStates, blockers, warnings, limits: ["Aggregate database inspection does not establish live relay quiescence, operator/device acceptance, upstream mapping, backup restoration, secret custody or production authorization.", "No source rows, identifiers, customer data, tokens, hashes or connection URLs are emitted."] };
   }, { isolationLevel: "RepeatableRead", timeout: 60_000 });
 }
 

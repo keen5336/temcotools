@@ -79,7 +79,27 @@ test("cutover enrollment, conservative backfill and recovery on the dedicated sy
       await mfa.confirmMfaEnrollment(await principalFor(claim), { token: await generate({ secret: setup.secret }) }, { source: prefix });
       const readiness = await inspectV2Readiness(prisma);
       assert.equal(readiness.identity?.readyRecoveryAdministrators, 1);
+      assert.equal(readiness.identity?.unreadableEnabledMfaFactors, 0);
       await assert.rejects(bootstrapV2Administrator(prisma, bootstrap), /already exists/);
+    });
+
+    await suite.test("launch inspection rejects a wrong preserved MFA key without exposing or altering factor custody", async () => {
+      const originalKey = process.env.MFA_ENCRYPTION_KEY;
+      const factor = await prisma.userMfa.findUniqueOrThrow({ where: { userId: adminId } });
+      try {
+        process.env.MFA_ENCRYPTION_KEY = Buffer.alloc(32, 0x57).toString("base64url");
+        const blocked = await inspectV2Readiness(prisma, "launch");
+        assert.equal(blocked.identity?.unreadableEnabledMfaFactors, 1);
+        assert.equal(blocked.identity?.readyRecoveryAdministrators, 0);
+        assert.ok(blocked.blockers.some(message => message.includes("cannot be decrypted")));
+        assert.equal(JSON.stringify(blocked).includes(factor.encryptedSecret), false);
+        assert.equal(JSON.stringify(blocked).includes(process.env.MFA_ENCRYPTION_KEY), false);
+        assert.equal((await prisma.userMfa.findUniqueOrThrow({ where: { userId: adminId } })).encryptedSecret, factor.encryptedSecret);
+      } finally {
+        if (originalKey === undefined) delete process.env.MFA_ENCRYPTION_KEY;
+        else process.env.MFA_ENCRYPTION_KEY = originalKey;
+      }
+      assert.equal((await inspectV2Readiness(prisma, "launch")).identity?.readyRecoveryAdministrators, 1);
     });
 
     await suite.test("backfill resumes safely, preserves corrections/scans and refuses immutable conflicts", async () => {
@@ -109,6 +129,27 @@ test("cutover enrollment, conservative backfill and recovery on the dedicated sy
       await assert.rejects(backfillV2Inventory(prisma, { apply: true, reason }), /immutable/);
       assert.equal((await inspectV2Readiness(prisma)).inventory?.conflictingCurrentRevisions, 1);
       await prisma.inventorySourceRevision.update({ where: { inventoryItemId_revision: { inventoryItemId: missing.id, revision: 1 } }, data: { contentHash: missing.contentHash } });
+    });
+
+    await suite.test("launch inspection preserves MARS custody and distinguishes a handoff from an unknown result", async () => {
+      const intent = await prisma.marsSubmissionIntent.create({ data: {
+        unitId: unitIds[0], authorizedByUserId: adminId, preparedByUserId: adminId,
+        authorizationExpiresAt: new Date(Date.now() + 60_000), evidence: "Synthetic local handoff; no upstream request made",
+      } });
+      const prepared = await inspectV2Readiness(prisma, "launch");
+      assert.deepEqual(prepared.marsStates.map(row => ({ ...row, count: Number(row.count) })), [{ state: "prepared", count: 1 }]);
+      assert.equal(prepared.blockers.some(message => message.includes("MARS")), false);
+      await prisma.marsSubmissionIntent.update({ where: { id: intent.id }, data: { state: "in_progress", startedAt: new Date() } });
+      const handoff = await inspectV2Readiness(prisma, "launch");
+      assert.ok(handoff.blockers.some(message => message.includes("in-progress human MARS")));
+      await prisma.marsSubmissionIntent.update({ where: { id: intent.id }, data: { state: "unknown" } });
+      const unknown = await inspectV2Readiness(prisma, "launch");
+      assert.equal(unknown.blockers.some(message => message.includes("MARS")), false);
+      assert.ok(unknown.warnings.some(message => message.includes("uncertain MARS")));
+      const retained = await prisma.marsSubmissionIntent.findUniqueOrThrow({ where: { id: intent.id } });
+      assert.equal(retained.state, "unknown"); assert.equal(retained.evidence, intent.evidence);
+      assert.equal(retained.unitId, intent.unitId); assert.equal(retained.revision, intent.revision);
+      assert.equal(await prisma.marsSubmissionIntentEvent.count({ where: { intentId: intent.id } }), 0, "Read-only inspection creates no execution or reconciliation evidence.");
     });
 
     await suite.test("explicit lost-factor admin recovery revokes access without promoting anyone or losing unit history", async () => {

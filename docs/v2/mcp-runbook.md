@@ -49,6 +49,8 @@ Apply the ordinary Prisma migrations, including `20261101100000_authenticated_mc
 
 Start with `npx tsx scripts/mcp-http-server.ts` (or the composition's equivalent). The process defaults to loopback and accepts only the configured public Host header. A private container can explicitly bind its internal interface while publishing only on host loopback; verify that exact composition instead of assuming one container can reach another's `127.0.0.1`. Main deployment composition changes are separate from this source implementation.
 
+The existing Docker composition derives the app and relay origins plus default issuer/resource from `TEMCO_PUBLIC_ORIGIN` (exact HTTPS origin, no path/trailing slash). Bare local Node processes use explicit local URLs instead. Compose forwards `VCS_REF` into both MCP builds so the image revision can be checked with the app/migrator. A future approved published-main deploy shortcut runs read-only launch preflight before any restart and starts `mcp-http` only after those gates pass; first migration/enrollment still follows the [manual cutover procedure](cutover-runbook.md#apply-enroll-verify-and-open-admission). Preparing these settings changes no live proxy or service.
+
 Route only these public paths to this process through the existing HTTPS proxy, preserving Host:
 
 - `/mcp`
