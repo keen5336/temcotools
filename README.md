@@ -6,7 +6,8 @@ The proposed v2 direction and source-grounded current-state map are in
 [`docs/v2/strategy.md`](docs/v2/strategy.md), with the
 [`implementation plan`](docs/v2/implementation-plan.md) and
 [`bounded open questions`](docs/v2/open-questions.md). These are planning
-documents, not implemented runtime behavior. `REPO_MAP.json` is older orientation
+documents; current implementation and validation are tracked in
+[`build status`](docs/v2/build-status.md). `REPO_MAP.json` is older orientation
 material and omits current features; prefer the v2 source map when planning work.
 
 ## Tech Stack

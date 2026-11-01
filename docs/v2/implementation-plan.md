@@ -1,6 +1,6 @@
 # TemcoTools v2 implementation plan
 
-Status: proposed sequence, 2026-10-31. The [strategy](strategy.md) defines owner requirements and design choices; [open questions](open-questions.md) bounds the evidence still needed. This commit contains planning/orientation artifacts only. It does not enable a new runtime or authorize deployment/external effects.
+Status: active build sequence under the standing owner mandate, 2026-10-31. See [build status](build-status.md) for exact implemented/tested state. The [strategy](strategy.md) defines owner requirements and design choices; [open questions](open-questions.md) bounds the evidence still needed. The initial plan commit contained documents only. The subsequent owner directive authorizes continuous implementation, testing, review, correction, commit and publication on `v2`; no separate implementation assignment is required. Production deployment/external effects remain separately bounded.
 
 ## Baseline and working discipline
 
@@ -9,7 +9,7 @@ Status: proposed sequence, 2026-10-31. The [strategy](strategy.md) defines owner
 - Planning checkout: `/Users/openclaw/.t3/worktrees/temcotools/v2`, resolving to `/Volumes/MacDev/ProjectArchive/Development/worktrees/t3code/temcotools/v2`, branch `v2`, initially at that baseline. Recheck status/remotes/remote heads before each build task. Leave the original checkout and unrelated local work untouched.
 - Follow applicable `AGENTS.md`. Use mounted MacDev storage for repositories, scratch, caches and qualification artifacts; use `dev-run -- <command>` for substantial builds. No fixed free-space reserve applies. Do not silently create an internal fallback.
 - Keep commits small and coherent; stage named files, never indiscriminate local data/config. Rebase/merge any later published `main` changes only after inspecting drift and preserving local work. Do not force-push or advance `main`/`v1` as part of planning. A published `v2` plan is not production approval.
-- Continuing owner authorization: focused bounded subagents are permitted when useful, superseding the initial single-agent restriction. Inherit GPT-6.1 Sol, `reasoningEffort=xhigh`, without model substitution. The main thread owns synthesis and integration; avoid duplicated work and proof infrastructure. A future task still needs its own implementation/deployment/external-action scope.
+- Continuing owner authorization: focused bounded subagents are permitted when useful, superseding the initial single-agent restriction. Inherit GPT-6.1 Sol, `reasoningEffort=xhigh`, without model substitution. The main thread owns synthesis and integration; avoid duplicated work and proof infrastructure. Implementation is now authorized by the standing mandate. Production deployment and external operational effects remain outside it.
 
 ## Sequenced vertical slices
 
@@ -50,7 +50,7 @@ Primary seams: [auth helpers](../../lib/auth/index.ts), [session](../../lib/sess
 
 Use additive tables/columns and migration steps. Keep current IDs, source rows, submissions, audit sessions/reports, scans, archived waves/recons, printer definitions, templates, favorites and files. Do not rename/drop existing fields just to obtain cleaner v2 terminology. A compatibility adapter should read old records and call the new shared services; avoid independent bidirectional dual writes. Where two stored projections must coexist, write them in the same transaction from one command and record a checkpoint for safe backfill.
 
-Backfill can run in bounded restartable chunks with old-record ID as an idempotent key. Report counts and unresolved mappings before cutover; do not mutate production in this planning task. Full backups and a verified restoration procedure precede eventual production migration. Source history, actual data backups and diagnostics belong in protected external storage, not this public repository.
+Backfill can run in bounded restartable chunks with old-record ID as an idempotent key. Report counts and unresolved mappings before cutover; do not mutate production under the source build mandate. Full backups and a verified restoration procedure precede eventual production migration. Source history, actual data backups and diagnostics belong in protected external storage, not this public repository.
 
 | Existing data | Safe backfill / compatibility rule |
 | --- | --- |
@@ -74,7 +74,7 @@ Observation ingestion can safely replay the **same captured event ID** to obtain
 ### Cut over by workflow, with explicit rollback limits
 
 1. Develop with synthetic data in a separate database/composition. Validate migrations/backfill on a disposable representative dataset; preserve failure diagnostics, without adding an elaborate evidence platform.
-2. After separately authorized data access, compare old/new WMS views and new DMP worklists read-only against supported private samples and actual official finals. Resolve differences in domain rules, not by copying a customer's payload into Git.
+2. Using available authorized read-only evidence, compare old/new WMS views and new DMP worklists read-only against supported private samples and actual official finals. Resolve differences in domain rules, not by copying a customer's payload into Git.
 3. Establish strong identity/recovery and complete retained-action UI/MCP parity before a v2 pilot. Select an authorized workflow/cohort, preserve current tools as fallback and prevent two execution paths from independently dispatching the same effects. Enable flags for behavior rollout, not as a substitute for server permissions.
 4. Qualify the exact Zebra browser/scanner and direct/laptop printer paths. Demonstrate the finite operational scenarios with the people doing the work. Obtain owner acceptance for workflow/role choices; separately obtain deployment and any live mutation authority.
 5. Retire Report Engine and redundant entry points only after useful replacements and retained exports/history are accessible. Mark legacy pages with a destination first; delete data only under an explicit retention decision. Update orientation docs to the actual final runtime at that point.
@@ -130,4 +130,4 @@ For future authorized MARS creation, add the action to A12/A13 using the confirm
 
 Next build task should begin with slice 1, not a runtime rewrite. Record its exact scope, baseline and exclusions, preserve current DMP behavior, and deliver one reviewable operator improvement with its shared UI/MCP boundary. Resolve Q1/Q2 before making promises about automated demand/history/finals, and Q3 before any automated MARS creation. Do not block source-independent foundations on those samples.
 
-At each slice handoff report changed behavior, relevant validation, remaining limits, branch/HEAD and publication state. Retain only useful receipts/diagnostics and normal tests; no separate proof bureaucracy. Deployment, real mail, DNS changes and live upstream mutations require explicit task authority and concrete readiness checks beyond this planning approval.
+At each slice handoff report changed behavior, relevant validation, remaining limits, branch/HEAD and publication state. Retain only useful receipts/diagnostics and normal tests; no separate proof bureaucracy. Deployment, real mail, DNS changes and live upstream mutations require explicit task authority and concrete readiness checks beyond the standing source build mandate.

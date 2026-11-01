@@ -1,6 +1,6 @@
 # TemcoTools v2 strategy
 
-Planning baseline: 2026-10-31, GitHub [`keen5336/temcotools`](https://github.com/keen5336/temcotools), published `main` and preserved version-one baseline `v1` at `fea1f22af1b2fae788388f2aefed3e3998e98d09`. This document describes proposed work, not implemented v2 behavior. Read with the [implementation plan](implementation-plan.md) and [bounded open questions](open-questions.md).
+Planning baseline: 2026-10-31, GitHub [`keen5336/temcotools`](https://github.com/keen5336/temcotools), published `main` and preserved version-one baseline `v1` at `fea1f22af1b2fae788388f2aefed3e3998e98d09`. This document records the agreed direction; implementation/tested state is tracked in [build status](build-status.md). Read with the [implementation plan](implementation-plan.md) and [bounded open questions](open-questions.md).
 
 ## Direction and boundaries
 
@@ -10,7 +10,7 @@ Zebra Android handhelds are the primary interface. Ordinary phones must work, an
 
 Use the existing Next.js/React/TypeScript/Tailwind application, Prisma and PostgreSQL, plus the existing DMP and printer relays. No Citadel, ClioDB, NATS, Quill, new platform, generic workflow engine or wholesale rewrite is proposed. Receiving cutoff timing is outside the immediate problem.
 
-This assignment authorizes planning documents, their commit and publication on `v2`. It does not authorize runtime implementation, tool deletion, production data changes, deployment, DNS/mail changes, email sending or live MARS/DMP operations. Keep actual customer data, credentials, production payloads and private operational notes out of this public repository. Examples below are synthetic.
+Standing build mandate, 2026-10-31: implement, test, review, correct, commit and push the agreed v2 build continuously on `v2`, advancing useful unblocked work until completion or a genuine owner-dependent blocker. This supersedes the initial documents-only assignment; no separate implementation assignment is required. Existing relevant read-only source/integration inspection is authorized. Production deployment/data changes, paid provisioning, DNS/mail changes, real email sending and live operational mutations remain outside this mandate. Keep actual customer data, credentials, production payloads and private operational notes out of this public repository. Examples below are synthetic.
 
 Continuing owner authorization, updated 2026-10-31: Codex may use focused, bounded subagents when effective in later TemcoTools v2 planning/build tasks. This supersedes the original single-agent restriction. Inherit GPT-6.1 Sol with `reasoningEffort=xhigh`; no model substitution is authorized. The main thread owns integration and synthesis. Avoid duplicate investigation, delegation overhead and tests that merely test test infrastructure. This permission does not expand deployment or external-action authority.
 
