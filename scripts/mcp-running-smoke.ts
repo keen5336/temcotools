@@ -5,9 +5,11 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { generate } from "otplib";
 import { prisma } from "../lib/db";
 import { hashPassword } from "../lib/auth/passwords";
 
+let phase = "guarded target setup";
 async function main() {
   const target = new URL(process.env.DATABASE_URL || "");
   assert.ok(target.hostname === "127.0.0.1" && target.port === "55439" && target.pathname === "/temcotools_v2_preview_test", "Only the task-owned isolated preview database is allowed.");
@@ -17,10 +19,12 @@ async function main() {
   const user = await prisma.user.create({ data: { username: `synthetic-mcp-smoke-${suffix}`, displayName: "Synthetic MCP smoke fixture", pinHash: "disabled:v2", passwordHash: await hashPassword(password), passwordChangedAt: new Date(), roleBundles: { create: { bundleId: "legacy-user" } } } });
   let clientId: string | undefined; const sdk = new Client({ name: "synthetic-running-verification", version: "1" });
   try {
+    phase = "discovery and password sign-in";
     const metadata = await fetch(new URL("/.well-known/oauth-authorization-server", issuer)); assert.equal(metadata.status, 200);
     const login = await fetch(new URL("/api/auth/login", app), { method: "POST", headers: { "Content-Type": "application/json", Origin: app.origin }, body: JSON.stringify({ username: user.username, password, deviceLabel: "Synthetic runtime verification" }) }); assert.equal(login.status, 200);
     const cookie = login.headers.getSetCookie().map(value => value.split(";")[0]).join("; "); assert.ok(cookie);
     const headers = { "Content-Type": "application/json", Origin: app.origin, Cookie: cookie };
+    phase = "client registration and PKCE request";
     const callback = "http://127.0.0.1:55379/synthetic-callback";
     const registration = await fetch(new URL("/register", issuer), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_name: "Synthetic running verification", redirect_uris: [callback], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }) }); assert.equal(registration.status, 201);
     clientId = (await registration.json()).client_id; assert.ok(clientId);
@@ -29,7 +33,14 @@ async function main() {
     const start = await fetch(new URL(`/authorize?${params}`, issuer), { redirect: "manual" }); assert.equal(start.status, 302);
     const requestId = new URL(start.headers.get("location")!).searchParams.get("request"); assert.ok(requestId);
     const bound = await fetch(new URL(`/api/oauth-consent?request=${encodeURIComponent(requestId!)}`, app), { headers }); assert.equal(bound.status, 200);
+    phase = "privileged-scope proof and synthetic MFA enrollment";
+    const consentInput = { requestId, decision: "approve", scopes: ["inventory.read", "account.self"] };
+    const unverified = await fetch(new URL("/api/oauth-consent", app), { method: "POST", headers, body: JSON.stringify(consentInput) }); assert.equal(unverified.status, 403, "Delegating account.self requires the actual person's recent MFA proof.");
+    const enrollment = await fetch(new URL("/api/account/security/mfa", app), { method: "POST", headers, body: JSON.stringify({ action: "begin", input: { password } }) }); assert.equal(enrollment.status, 200);
+    const setup = await enrollment.json(); assert.equal(typeof setup.secret, "string");
+    const confirmation = await fetch(new URL("/api/account/security/mfa", app), { method: "POST", headers, body: JSON.stringify({ action: "confirm", input: { token: await generate({ secret: setup.secret }) } }) }); assert.equal(confirmation.status, 200);
     const approved = await fetch(new URL("/api/oauth-consent", app), { method: "POST", headers, body: JSON.stringify({ requestId, decision: "approve", scopes: ["inventory.read", "account.self"] }) }); assert.equal(approved.status, 200);
+    phase = "token exchange and SDK connection";
     const code = new URL((await approved.json()).redirectTo).searchParams.get("code"); assert.ok(code);
     const exchange = await fetch(new URL("/token", issuer), { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: clientId!, grant_type: "authorization_code", code: code!, code_verifier: verifier, redirect_uri: callback, resource: resource.href }) }); assert.equal(exchange.status, 200);
     const tokens = await exchange.json(); assert.ok(tokens.access_token);
@@ -43,6 +54,7 @@ async function main() {
     const physical = await sdk.callTool({ name: "application_action", arguments: { action: "warehouse.physical-stock", input: { search: `SYNTHETIC-NOT-STOCK-${suffix}`, limit: 1 } } }); assert.equal(physical.isError, undefined);
     const physicalText = CallToolResultSchema.parse(physical).content.find(item => item.type === "text"); assert.ok(physicalText && physicalText.type === "text");
     const physicalPage = JSON.parse(physicalText.text); assert.deepEqual(physicalPage.items, []); assert.equal(physicalPage.hasMore, false); assert.equal(physicalPage.view, "present");
+    phase = "scoped UI and MCP tool catalogs";
     const catalog = await sdk.callTool({ name: "application_action", arguments: { action: "tools.favorites", input: {} } }); assert.equal(catalog.isError, undefined);
     const catalogText = CallToolResultSchema.parse(catalog).content.find(item => item.type === "text"); assert.ok(catalogText && catalogText.type === "text");
     const catalogPage = JSON.parse(catalogText.text) as { tools: { id: string; name: string; href: string }[]; capabilities: string[] };
@@ -51,6 +63,7 @@ async function main() {
     assert.equal(catalogPage.tools.some(tool => ["office", "users", "payloads", "labels"].includes(tool.id)), false, "The catalog must preserve the client's actual scope even when the person has broader warehouse rights.");
     const uiCatalog = await fetch(new URL("/api/tool-favorites", app), { headers }); assert.equal(uiCatalog.status, 200);
     assert.ok((await uiCatalog.json()).tools.some((tool: { id: string }) => tool.id === "inventory-audit"), "The UI API uses the same catalog query.");
+    phase = "writer denial and session revocation";
     const refreshDenied = await sdk.callTool({ name: "application_action", arguments: { action: "office.refresh.advance", input: { operationId: randomUUID() } } }); assert.equal(refreshDenied.isError, true, "An inventory-read OAuth grant cannot advance Office evaluation.");
     const query = await sdk.callTool({ name: "warehouse_lookup", arguments: { kind: "lpn", value: `SYNTHETIC-NOT-STOCK-${suffix}` } }); assert.equal(query.isError, undefined);
     const denied = await sdk.callTool({ name: "application_action", arguments: { action: "identity.users", input: {} } }); assert.equal(denied.isError, true);
@@ -60,7 +73,7 @@ async function main() {
     let revoked = false;
     try { revoked = (await sdk.callTool({ name: "warehouse_lookup", arguments: { kind: "lpn", value: "SYNTHETIC" } })).isError === true; } catch { revoked = true; }
     assert.equal(revoked, true);
-    console.log("PASS: running MCP discovery, actual password/PKCE/consent, SDK connection, action/schema discovery, shared lookup/physical-stock defaults, Office writer scope denial and session revocation. Synthetic fixtures only; owner enrollment untouched.");
+    console.log("PASS: running MCP discovery, actual password/TOTP/PKCE/consent, SDK connection, scoped UI/MCP catalogs, shared lookup/physical-stock defaults, Office writer denial and session revocation. Synthetic fixtures only; owner enrollment untouched.");
   } finally {
     await sdk.close().catch(() => undefined);
     await prisma.user.delete({ where: { id: user.id } });
@@ -69,4 +82,4 @@ async function main() {
     await prisma.$disconnect();
   }
 }
-main().catch(() => { console.error("Running MCP verification failed; inspect protected diagnostics without printing credentials."); process.exitCode = 1; });
+main().catch(() => { console.error(`Running MCP verification failed during ${phase}; inspect protected diagnostics without printing credentials.`); process.exitCode = 1; });

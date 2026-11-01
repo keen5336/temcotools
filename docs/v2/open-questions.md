@@ -38,6 +38,8 @@ Late-night owner steering: Adam is home without DMP access. Q1/Q2 reference requ
 
 **Verified:** [ScannerCapture](../../components/scanner/ScannerCapture.tsx) handles keyboard-wedge scans; [printing](../../lib/label-printing.ts) supports direct and laptop relay browser sends. Neither establishes camera/OCR support, DataWedge configuration, managed bookmark installation or physical print acknowledgement on a particular device.
 
+**Local qualification limit checked 2026-11-01:** the native T3 device inventory returned no configured devices and reported Android Emulator unavailable on the local host. Source/Chromium phone-viewport qualification does not substitute for the warehouse hardware.
+
 **Needed evidence:** actual Zebra model/Android/browser versions and scanner output profile; supported bookmark/`javascript:` invocation on that browser; camera permission/OCR feasibility; shared-device identity/lock workflow; printer model/media/DPI, LAN reachability and laptop relay availability. Test source editing, diff/publish and loader installation on phone width and real devices. A plain **Open loader** link cannot inject into another site's signed-in page. Do not bypass CSP or browser/network policy.
 
 **Proposal until resolved:** wedge/manual capture and existing managed printer/relay modes are baseline; camera/OCR and special managed-browser installation are optional adapters. Keep physical print confirmation separate from a successful send. **Gate:** device-specific promises in slices 3/4/8 and final mobile acceptance, not the source plan or first lookup slice.
