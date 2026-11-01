@@ -1,6 +1,7 @@
 import { requireCapability } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
 import BarcodeGeneratorClient from "./BarcodeGeneratorClient";
+import { pilotPolicy } from "@/scripts/pilot-policy.mjs";
 
 export default async function BarcodeGeneratorPage() {
   const session = await requireCapability("labels.read");
@@ -13,7 +14,7 @@ export default async function BarcodeGeneratorPage() {
         <p className="text-base-content/70 mb-6">
           Paste a list of values (one per line) to generate a batch of barcodes ready to print.
         </p>
-        <BarcodeGeneratorClient />
+        <BarcodeGeneratorClient printingAllowed={pilotPolicy().permitsLivePrinting} />
       </main>
     </div>
   );

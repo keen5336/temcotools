@@ -50,7 +50,7 @@ interface RouteGroup {
   items: RouteReconItem[];
 }
 
-export default function RouteReconWorkspaceClient({ initialReport }: { initialReport: RouteReconDetail }) {
+export default function RouteReconWorkspaceClient({ initialReport, printingAllowed = true }: { initialReport: RouteReconDetail; printingAllowed?: boolean }) {
   const groups = useMemo(() => groupItemsByRoute(initialReport.items), [initialReport.items]);
   const [selectedRouteKey, setSelectedRouteKey] = useState(ALL_ROUTES);
   const [search, setSearch] = useState("");
@@ -103,11 +103,12 @@ export default function RouteReconWorkspaceClient({ initialReport }: { initialRe
   }, []);
 
   function printRoutes(routeKey: string) {
+    if (!printingAllowed) return;
     flushSync(() => setPrintRouteKey(routeKey));
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => window.print()));
   }
 
-  const printingDisabled = hasBarcodes && !barcodeReady;
+  const printingDisabled = !printingAllowed || hasBarcodes && !barcodeReady;
 
   return (
     <div className="route-recon-root">

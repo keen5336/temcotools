@@ -33,6 +33,7 @@ function contract(payloadId: string, draft: PayloadDraft) {
   if (payloadId === "dmp-relay" && draft.purpose !== "dmp_relay") throw new PayloadError("The default DMP loader must keep its DMP relay purpose.");
   if (payloadId === MARS_LABEL_PAYLOAD_ID && draft.purpose !== "mars_label_helper") throw new PayloadError("The default MARS detail loader must keep its MARS helper purpose.");
   if (draft.purpose === "mars_label_helper" && draft.operationNames.length) throw new PayloadError("MARS label helpers do not grant upstream mutation operations.");
+  if (draft.purpose === "route_planner_relay" && draft.operationNames.length) throw new PayloadError("Route Planner is review/manual-intake only until its identity and operation contract is qualified. It grants no DMP or upstream operations.");
   if (draft.purpose === "dmp_relay") {
     const known = dmpConfig().operations;
     if (draft.operationNames.some(name => !Object.hasOwn(known, name))) throw new PayloadError("Declare only named operations already configured on the server.");
@@ -55,8 +56,8 @@ export async function listPayloads(principal: Principal) {
 export async function getBuiltinPayloadSources(principal: Principal, fallbackOrigin?: string) {
   await prisma.$transaction(tx => currentAdmin(tx, principal));
   const origin = new URL(process.env.NEXT_PUBLIC_APP_URL || process.env.API_RELAY_PUBLIC_ORIGIN || fallbackOrigin || "http://localhost:3000").origin;
-  const { builtinDmpSource, builtinMarsLabelSource } = await import("./builtin");
-  return { builtinDmp: builtinDmpSource(origin), builtinMarsLabel: builtinMarsLabelSource(origin) };
+  const { builtinDmpSource, builtinMarsLabelSource, builtinRoutePlannerSource } = await import("./builtin");
+  return { builtinDmp: builtinDmpSource(origin), builtinMarsLabel: builtinMarsLabelSource(origin), builtinRoutePlanner: builtinRoutePlannerSource(origin) };
 }
 export async function getPayload(principal: Principal, payloadId: string) {
   admin(principal);

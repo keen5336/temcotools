@@ -3,7 +3,7 @@ import { getCurrentPrincipal } from "@/lib/auth";
 import { executeApplicationAction } from "@/lib/application/actions";
 export const runtime = "nodejs";
 export const maxDuration = 150;
-const actions: Record<string, string> = { status: "dmp.status", pair: "dmp.pair", lease: "dmp.lease", request: "dmp.request", disconnect: "dmp.disconnect", receipts: "dmp.receipts", receipt: "dmp.receipt" };
+const actions: Record<string, string> = { status: "dmp.status", pair: "dmp.pair", lease: "dmp.lease", request: "dmp.request", disconnect: "dmp.disconnect", receipts: "dmp.receipts", receipt: "dmp.receipt", share: "dmp.share.approve", unshare: "dmp.share.revoke" };
 export async function POST(request: NextRequest, { params }: { params: Promise<{ action: string }> }) {
   const principal = await getCurrentPrincipal();
   if (!principal) return NextResponse.json({ error: "Sign in to use DMP relay." }, { status: 401 });

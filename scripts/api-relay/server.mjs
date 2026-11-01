@@ -4,16 +4,18 @@ import { pathToFileURL } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { LEASE_MS, MAX_CONCURRENT, MAX_QUEUE, MAX_RESPONSE_BYTES, subjectFromBody, validateRequest } from "./protocol.mjs";
 
-export function controlKey(secret) {
-  if (!secret || secret.length < 32) throw new Error("API relay requires a SESSION_SECRET of at least 32 characters.");
-  return createHash("sha256").update(`temco-api-relay-control-v1:${secret}`).digest("hex");
-}
+import { controlKey } from "./control-key.mjs";
+import { assertPilotReadMethod } from "../pilot-policy.mjs";
+export { controlKey } from "./control-key.mjs";
 const digest = (token) => createHash("sha256").update(token).digest("hex");
 const send = (ws, message) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); };
 const fault = (message, status = 400) => Object.assign(new Error(message), { status });
 
-export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs = 10000, leaseMs = LEASE_MS, pairMs = 90000, maxConcurrent = MAX_CONCURRENT, maxQueue = MAX_QUEUE, authorize = async () => false }) {
-  const key = controlKey(secret);
+/**
+ * @param {{ secret: string, audience?: string, allowedOrigins?: string[], heartbeatMs?: number, leaseMs?: number, pairMs?: number, maxConcurrent?: number, maxQueue?: number, authorize?: (owner: Record<string, unknown>, context: Record<string, unknown>) => Promise<boolean> }} options
+ */
+export function createApiRelayServer({ secret, audience = process.env.API_RELAY_AUDIENCE || "", allowedOrigins = [], heartbeatMs = 10000, leaseMs = LEASE_MS, pairMs = 90000, maxConcurrent = MAX_CONCURRENT, maxQueue = MAX_QUEUE, authorize = async () => false }) {
+  const key = controlKey(secret, audience);
   const tokens = new Map();
   const connections = new Map();
   const leases = new Map();
@@ -31,9 +33,11 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
     }
     leases.set(id, Date.now() + leaseMs);
   };
-  const owned = (owner, id) => {
+  const sameOwner = (a, b) => leaseKey(a) === leaseKey(b) && (a.grantId || null) === (b.grantId || null);
+  const sharedWith = (c, owner, operation) => [...c.shares.values()].find(s => s.expiresAt > Date.now() && sameOwner(s.requester, owner) && (!operation || s.operations.includes(operation)));
+  const owned = (owner, id, allowShared = false, operation) => {
     const c = connections.get(id);
-    if (!c || c.owner.userId !== owner.userId || !live(c.owner)) throw fault("DMP connection is unavailable.", 404);
+    if (!c || !live(c.owner) || (!sameOwner(c.owner, owner) && !(allowShared && sharedWith(c, owner, operation)))) throw fault("DMP connection is unavailable.", 404);
     return c;
   };
   const complete = (c, id, result) => {
@@ -62,8 +66,9 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
       if (job.started) continue;
       if ([...c.pending.values()].filter(j => j.started).length >= maxConcurrent) break;
       let allowed = false;
-      try { allowed = await authorize(job.owner || c.owner, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation: job.operation, requestMethod: job.request.method }); } catch { /* unavailable authorization fails closed */ }
+      try { assertPilotReadMethod(job.request.method); allowed = await authorize(job.owner || c.owner, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation: job.operation, requestMethod: job.request.method, share: job.share }); } catch { /* unavailable authorization fails closed */ }
       if (!connections.has(c.id) || c.pending.get(requestId) !== job || !live(c.owner) || c.ws.readyState !== WebSocket.OPEN) continue;
+      if (job.share && (!sharedWith(c, job.owner, job.operation) || !["GET", "HEAD"].includes(job.request.method) || !c.shares.has(job.share.id))) allowed = false;
       if (!allowed) { complete(c, requestId, { ok: false, error: "Current user, client grant or payload authorization is unavailable. This queued request was not dispatched." }); continue; }
       job.started = true;
       clearTimeout(job.timer);
@@ -114,17 +119,49 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
         json(res, 200, { token, expiresIn: pairMs / 1000 }); return;
       }
       if (action === "connections") {
-        json(res, 200, { connections: [...connections.values()].filter((c) => c.owner.userId === owner.userId && live(c.owner)).map((c) => ({ id: c.id, origin: c.origin, ready: c.ready, dmpUser: c.subject || null, pending: c.pending.size, connectedAt: c.connectedAt })) }); return;
+        const visible = [];
+        for (const c of connections.values()) {
+          if (!live(c.owner)) continue;
+          const original = sameOwner(c.owner, owner), share = original ? null : sharedWith(c, owner);
+          if (!original && !share) continue;
+          // Shared status also rechecks both sessions and the current exact grant.
+          if (share && !(await authorize(owner, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation: share.operations[0], requestMethod: "GET", share }))) continue;
+          visible.push({ id: c.id, origin: c.origin, ready: c.ready, dmpUser: c.subject || null, pending: c.pending.size, connectedAt: c.connectedAt, access: original ? "owner" : "shared_read", ...(share ? { operations: share.operations, shareExpiresAt: share.expiresAt } : { shares: [...c.shares.values()].filter(s => s.expiresAt > Date.now()).map(({ id, requester, operations, expiresAt }) => ({ id, oauthGrantId: requester.grantId?.slice(6), operations, expiresAt })) }) });
+        }
+        json(res, 200, { connections: visible }); return;
       }
-      const c = owned(owner, data.connectionId);
+      const c = owned(owner, data.connectionId, action === "request", data.operation);
       if (action === "disconnect") { disconnect(c); json(res, 200, { ok: true }); return; }
+      if (action === "share") {
+        if (owner.grantId || !c.ready) throw fault("Approve sharing from the original signed-in browser after pairing.", 403);
+        const { requester, operations, expiresAt, operationConfigHash } = data;
+        if (!requester || requester.userId !== owner.userId || typeof requester.grantId !== "string" || !/^oauth:.{1,200}$/.test(requester.grantId) || !requester.authSessionId || !requester.sessionId || !Number.isSafeInteger(requester.authVersion) || !Array.isArray(operations) || !operations.length || operations.length > 32 || new Set(operations).size !== operations.length || operations.some(op => typeof op !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(op)) || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + 60 * 60_000 || !/^[a-f0-9]{64}$/.test(operationConfigHash || "")) throw fault("Invalid bounded OAuth read sharing approval.");
+        const share = { id: randomUUID(), requester, operations, operationConfigHash, expiresAt: Math.min(expiresAt, c.expires) };
+        for (const operation of operations) if (!(await authorize(requester, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation, requestMethod: "GET", share }))) throw fault("The current connection, named read operation or OAuth grant cannot be shared.", 403);
+        if (!connections.has(c.id) || !live(c.owner)) throw fault("Original connection ended before approval.", 409);
+        // One current approval per exact grant; replacement never moves ownership.
+        for (const [id, old] of c.shares) if (old.requester.grantId === requester.grantId) c.shares.delete(id);
+        for (const [id, old] of c.shares) if (old.expiresAt <= Date.now()) c.shares.delete(id);
+        if (c.shares.size >= 16) throw fault("Too many active read sharing approvals.", 429);
+        c.shares.set(share.id, share);
+        json(res, 200, { shared: true, share: { id: share.id, oauthGrantId: requester.grantId.slice(6), operations, expiresAt: share.expiresAt } }); return;
+      }
+      if (action === "unshare") {
+        if (owner.grantId) throw fault("Only the original signed-in browser can revoke this approval.", 403);
+        const removed = c.shares.delete(data.shareId);
+        for (const [id, job] of c.pending) if (!job.started && job.share?.id === data.shareId) complete(c, id, { ok: false, error: "Read sharing was revoked before dispatch." });
+        json(res, 200, { revoked: removed }); return;
+      }
       if (action !== "request") throw fault("Unknown API relay action.");
       if (!c.ready) throw fault("DMP identity is still being checked.", 409);
       if (c.pending.size >= maxQueue) throw fault("DMP request queue is full.", 429);
       const request = validateRequest(data.request);
+      assertPilotReadMethod(request.method);
+      const share = sameOwner(c.owner, owner) ? null : sharedWith(c, owner, data.operation);
+      if (share && !["GET", "HEAD"].includes(request.method)) throw fault("Shared connections permit approved GET/HEAD operations only.", 403);
       const requestId = randomUUID();
       const result = await new Promise((resolve) => {
-        c.pending.set(requestId, { request, operation: data.operation, owner, resolve, started: false, timer: setTimeout(() => complete(c, requestId, { ok: false, error: "DMP request expired in the queue without being sent." }), 60000) });
+        c.pending.set(requestId, { request, operation: data.operation, owner, share, resolve, started: false, timer: setTimeout(() => complete(c, requestId, { ok: false, error: "DMP request expired in the queue without being sent." }), 60000) });
         dispatch(c);
         res.on("close", () => {
           if (res.writableEnded || !c.pending.has(requestId)) return;
@@ -158,7 +195,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
             if (!t || t.expires <= Date.now() || !live(t.owner) || t.origin !== req.headers.origin) throw fault("Pairing expired.");
             tokens.delete(hash);
             clearTimeout(timer);
-            c = { id: randomUUID(), ws, owner: t.owner, origin: t.origin, identity: t.identity, subjectPath: t.subjectPath, payloadGrant: t.payloadGrant, ready: false, pending: new Map(), lastSeen: Date.now(), connectedAt: new Date().toISOString(), expires: Date.now() + 8 * 60 * 60 * 1000 };
+            c = { id: randomUUID(), ws, owner: t.owner, origin: t.origin, identity: t.identity, subjectPath: t.subjectPath, payloadGrant: t.payloadGrant, ready: false, shares: new Map(), pending: new Map(), lastSeen: Date.now(), connectedAt: new Date().toISOString(), expires: Date.now() + 8 * 60 * 60 * 1000 };
             connections.set(c.id, c);
             send(ws, { type: "paired", connectionId: c.id, identity: c.identity, subjectPath: c.subjectPath, maxConcurrent, maxResponseBytes: MAX_RESPONSE_BYTES });
             c.identityTimer = setTimeout(() => disconnect(c, "DMP identity check timed out."), c.identity.timeoutMs + 1000);
@@ -191,6 +228,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
     for (const [hash, t] of tokens) if (t.expires <= now || !live(t.owner)) tokens.delete(hash);
     for (const [id, expires] of leases) if (expires <= now) leases.delete(id);
     for (const c of connections.values()) {
+      for (const [id, share] of c.shares) if (share.expiresAt <= now) c.shares.delete(id);
       if (!live(c.owner) || c.expires <= now || now - c.lastSeen > heartbeatMs * 3) disconnect(c, "Relay session expired. Pair again.");
       else c.ws.ping();
     }
@@ -210,13 +248,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const key = controlKey(process.env.SESSION_SECRET);
   const authorize = async (owner, context) => {
     if (!owner.authSessionId || !Number.isSafeInteger(owner.authVersion) || !context.operation) return false;
-    const check = async (currentOwner) => {
-      const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({authorizationProtocol:2,owner:currentOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation,requestMethod:context.requestMethod}),redirect:"error",signal:AbortSignal.timeout(5000)});
-      if (!response.ok) return false;
-      const result = await response.json();
-      return result.authorized === true && result.authorizationProtocol === 2;
-    };
-    return (await check(context.connectionOwner)) && (await check(owner));
+    const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({authorizationProtocol:3,owner,connectionOwner:context.connectionOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation,requestMethod:context.requestMethod,share:context.share}),redirect:"error",signal:AbortSignal.timeout(5000)});
+    if (!response.ok) return false;
+    const result = await response.json();
+    return result.authorized === true && result.authorizationProtocol === 3;
   };
   const relay = createApiRelayServer({ secret: process.env.SESSION_SECRET, allowedOrigins: (process.env.DMP_ORIGINS ?? "https://dmp.extapps.homedepot.com").split(",").map((s) => s.trim()).filter(Boolean), authorize });
   relay.server.listen(Number(process.env.API_RELAY_PORT || 3003), process.env.API_RELAY_HOST || "127.0.0.1", () => console.log("API relay listening"));

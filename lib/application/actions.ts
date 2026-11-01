@@ -6,6 +6,10 @@ import * as mfa from "@/lib/auth/mfa";
 import * as units from "@/lib/warehouse/units";
 import * as reports from "@/lib/warehouse/reports";
 import * as payloads from "@/lib/payloads/service";
+import * as samples from "@/lib/dmp-samples";
+import * as sites from "@/lib/relay-sites/service";
+import { connectTemcoBookmarklet } from "@/lib/relay-sites/model";
+import { pilotPolicy, pilotCapabilityAllowed } from "../../scripts/pilot-policy.mjs";
 import * as office from "@/lib/office/service";
 import { listOAuthGrants, revokeOAuthGrant } from "@/lib/oauth/service";
 import { getToolFavorites, saveToolFavorites } from "@/lib/tool-favorites-store";
@@ -59,6 +63,19 @@ export const applicationActions = {
   "dashboard.get": { description: "Read authorized operational priorities, progress and source timestamps", inputSchema: z.object({}), run: getOperationalDashboard },
   "dashboard.save": { capability: "account.self", description: "Select and reorder your authorized home widgets", inputSchema: dashboardPreferencesInput, run: saveDashboardPreferences },
   "dmp.status": { capability: "workflow.read", description: "List your paired DMP tabs and named operations", inputSchema: z.object({}), run: dmp.getDmpStatus },
+  "environment.policy": { capability: "account.self", description: "Read environment restrictions without credentials or a claim of live connectivity", inputSchema: z.object({}).strict(), run: () => pilotPolicy() },
+  "relay.connect.bookmarklet": { capability: "workflow.read", description: "Generate the single stable Connect TemcoTools injector; reports only origin/pathname, with no caller-supplied URL or source execution", inputSchema: z.object({}).strict(), run: () => ({ bookmarklet: connectTemcoBookmarklet(z.string().url().parse(process.env.NEXT_PUBLIC_APP_URL)), context: "origin_and_pathname_only", authority: "Published site selection is not authentication; per-system pairing remains required." }) },
+  "relay.sites.list": { capability: "payloads.manage", adminOnly: true, description: "List exact-origin/path payload mappings and their current revisions", inputSchema: sites.siteProfilesListInput, run: sites.listSiteProfiles },
+  "relay.sites.save": { capability: "payloads.manage", adminOnly: true, description: "Create or revise an approved site mapping with current strong administrator authority and revision", inputSchema: sites.siteProfileSaveInput, run: sites.saveSiteProfile },
+  "relay.sites.enabled": { capability: "payloads.manage", adminOnly: true, description: "Enable or disable a site mapping after current administrator and revision checks", inputSchema: sites.siteProfileEnabledInput, run: sites.setSiteProfileEnabled },
+  "relay.sites.remove": { capability: "payloads.manage", adminOnly: true, description: "Remove a site mapping retaining denial/history; deliberate restoration uses its current revision", inputSchema: sites.siteProfileRemoveInput, run: sites.removeSiteProfile },
+  "dmp.share.approve": { capability: "workflow.read", humanInteraction: true, description: "Open the human approval page for an expiring named-read share with your own OAuth client; a client cannot approve itself", run: (p: Principal, input: unknown) => userCeremony(p, () => dmp.approveDmpShare(p, input), "/tools/api-relay") },
+  "dmp.share.revoke": { capability: "workflow.read", humanInteraction: true, description: "Open your human DMP connection page to revoke a read share", run: (p: Principal, input: unknown) => userCeremony(p, () => dmp.revokeDmpShare(p, input), "/tools/api-relay") },
+  "dmp.samples.list": { capability: "workflow.read", description: "List your privately retained body-only source samples; no live adapter or global coverage is implied", inputSchema: samples.dmpSamplesListInput, run: samples.listDmpSamples },
+  "dmp.samples.save": { capability: "workflow.read", description: "Explicitly retain a bounded private JSON/CSV/XML body or authorized managed export with source/date/method provenance; rejects credentials and HAR", inputSchema: samples.dmpSamplesSaveInput, run: samples.saveDmpSample },
+  "dmp.samples.inspect": { capability: "workflow.read", description: "Inspect bounded structure/counts/types; explicit fieldPath reveals only bounded values from your own private sample", inputSchema: samples.dmpSamplesInspectInput, run: samples.inspectDmpSample },
+  "dmp.samples.routeContext": { capability: "workflow.read", description: "Inspect route-local ordered XML stop/line context without deduplicating legs or inferring code meanings, unit identity or movement completion", inputSchema: samples.dmpSamplesRouteContextInput, run: samples.getDmpSampleRouteContext },
+  "dmp.samples.remove": { capability: "workflow.read", description: "Remove your retained sample using its current content hash and a durable operation ID", inputSchema: samples.dmpSamplesRemoveInput, run: samples.removeDmpSample },
   "dmp.pair": { capability: "workflow.read", description: "Issue a one-use pairing approval for a configured signed-in DMP page", inputSchema: dmp.dmpPairInput, run: dmp.pairDmp },
   "dmp.lease": { capability: "workflow.read", description: "Renew the live relay lease within your current individual session", inputSchema: z.object({}), run: dmp.renewDmpLease },
   "dmp.disconnect": { capability: "workflow.read", description: "Disconnect one of your external-page relays", inputSchema: dmp.dmpConnectionInput, run: dmp.disconnectDmp },
@@ -143,9 +160,10 @@ export const applicationActions = {
 
 export type ApplicationAction = keyof typeof applicationActions;
 export function listApplicationActions(principal: Principal, options: { prefix?: string; includeSchemas?: boolean } = {}) {
+  const has = (cap: Capability) => principal.capabilities.includes(cap) && pilotCapabilityAllowed(cap);
   return Object.entries(applicationActions).filter(([, definition]) => {
     const action: Action = definition;
-    return (!action.capability || principal.capabilities.includes(action.capability)) && (!action.capabilitiesAll || action.capabilitiesAll.every(cap => principal.capabilities.includes(cap))) && (!action.capabilitiesAny || action.capabilitiesAny.some(cap => principal.capabilities.includes(cap))) && (!action.adminOnly || principal.role === "admin");
+    return (!action.capability || has(action.capability)) && (!action.capabilitiesAll || action.capabilitiesAll.every(has)) && (!action.capabilitiesAny || action.capabilitiesAny.some(has)) && (!action.adminOnly || principal.role === "admin");
   }).filter(([name]) => !options.prefix || name.startsWith(options.prefix)).map(([name, definition]) => {
     const action: Action = definition;
     const schema = action.humanInteraction ? humanHandoffInput : action.inputSchema;

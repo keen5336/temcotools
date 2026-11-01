@@ -2,15 +2,22 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
-import type { Principal } from "@/lib/auth/principal";
+import { AuthorizationError, type Principal } from "@/lib/auth/principal";
+import { principalForOAuthGrant } from "@/lib/oauth/grants";
 import { apiRelayControl } from "./control";
 import { dmpConfig, buildDmpRequest } from "./config";
-import { authorizeDmpPayload } from "./payload-policy";
+import { dmpOperationConfigHash, authorizeDmpPayload } from "./payload-policy";
 
 export class DmpError extends Error { constructor(message: string, readonly status = 400) { super(message); } }
 const hash = (input: unknown) => createHash("sha256").update(JSON.stringify(input)).digest("hex");
 export const dmpPairInput = z.object({ origin: z.string().url(), payload: z.unknown().optional() });
 export const dmpConnectionInput = z.object({ connectionId: z.string().min(1).max(100) });
+export const dmpShareInput = dmpConnectionInput.extend({
+  oauthGrantId: z.string().min(1).max(200),
+  operations: z.array(z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)).min(1).max(32).refine(value => new Set(value).size === value.length, "Choose each operation once."),
+  expiresInMinutes: z.number().int().min(5).max(60).default(30),
+}).strict();
+export const dmpShareRevokeInput = dmpConnectionInput.extend({ shareId: z.string().uuid() }).strict();
 export const dmpReceiptInput = z.object({ operationId: z.string().min(16).max(100) });
 export const dmpReconcileInput = dmpReceiptInput.extend({ outcome: z.enum(["verified_applied", "verified_not_applied"]), evidence: z.string().trim().min(10).max(2000) }).strict();
 export const dmpRequestInput = dmpReceiptInput.extend({ connectionId: z.string().min(1).max(100), operation: z.string().min(1).max(64), input: z.unknown().default({}).describe("Scalar parameters for the configured named operation; no arbitrary endpoint or method.") }).strict();
@@ -20,7 +27,19 @@ async function current(principal: Principal, capability: "workflow.read" | "work
 export async function getDmpStatus(principal: Principal) {
   const actor = await current(principal), config = dmpConfig();
   const data = await apiRelayControl("connections", owner(actor));
-  return { ...data, configured: config.configured, origins: config.origins, operations: Object.entries(config.operations).filter(([, op]) => ["GET", "HEAD"].includes(op.method || "GET") || actor.capabilities.includes("workflow.execute")).map(([id, op]) => ({ id, label: op.label, method: op.method || "GET" })) };
+  const shareCandidates = actor.grantId ? [] : await prisma.$transaction(async tx => {
+    await assertCurrentPrincipal(tx, actor, "workflow.read");
+    const grants = await tx.oAuthGrant.findMany({ where: { userId: actor.userId, revokedAt: null, expiresAt: { gt: new Date() }, scopes: { has: "workflow.read" } }, include: { client: { select: { name: true } }, session: { select: { deviceLabel: true } } }, orderBy: { createdAt: "desc" }, take: 100 });
+    const eligible = [];
+    for (const grant of grants) {
+      try {
+        const requester = await principalForOAuthGrant(tx, grant.id);
+        if (requester.userId === actor.userId && requester.capabilities.includes("workflow.read")) eligible.push({ id: grant.id, clientName: grant.client.name, deviceLabel: grant.session.deviceLabel, expiresAt: grant.expiresAt });
+      } catch { /* Ended sessions/clients/grants are not eligible. */ }
+    }
+    return eligible;
+  });
+  return { ...data, shareCandidates, configured: config.configured, origins: config.origins, operations: Object.entries(config.operations).filter(([, op]) => ["GET", "HEAD"].includes(op.method || "GET") || actor.capabilities.includes("workflow.execute")).map(([id, op]) => ({ id, label: op.label, method: op.method || "GET" })) };
 }
 export async function renewDmpLease(principal: Principal) { return apiRelayControl("lease", owner(await current(principal))); }
 export async function pairDmp(principal: Principal, raw: unknown) {
@@ -33,6 +52,36 @@ export async function pairDmp(principal: Principal, raw: unknown) {
 export async function disconnectDmp(principal: Principal, raw: unknown) {
   const actor = await current(principal), { connectionId } = dmpConnectionInput.parse(raw);
   return apiRelayControl("disconnect", owner(actor), { connectionId });
+}
+// A remote client cannot approve its own connection access. The current human
+// in the original work browser chooses the exact already-consented OAuth grant.
+export async function approveDmpShare(principal: Principal, raw: unknown) {
+  if (principal.grantId) throw new AuthorizationError("Approve read sharing in the original paired browser, after confirming your authenticator.");
+  const data = dmpShareInput.parse(raw), config = dmpConfig();
+  if (data.operations.some(name => !Object.hasOwn(config.operations, name) || !["GET", "HEAD"].includes(config.operations[name].method || "GET"))) throw new DmpError("Choose only configured GET/HEAD operations. POST-based RPCs cannot be shared.");
+  const prepared = await prisma.$transaction(async tx => {
+    const actor = await assertCurrentPrincipal(tx, principal, "workflow.read", true);
+    const target = await tx.oAuthGrant.findUnique({ where: { id: data.oauthGrantId } });
+    if (!target || target.userId !== actor.userId) throw new AuthorizationError("Choose a current OAuth grant belonging to your own account.");
+    const requester = await principalForOAuthGrant(tx, target.id);
+    if (!requester.capabilities.includes("workflow.read")) throw new AuthorizationError("The remote client's current grant requires workflow.read.");
+    const expiresAt = Math.min(Date.now() + data.expiresInMinutes * 60_000, target.expiresAt.getTime());
+    await tx.identityAudit.create({ data: { action: "dmp_read_share_authorization_recorded", actorUserId: actor.userId, sessionId: actor.sessionId, reason: JSON.stringify({ connectionId: data.connectionId, requesterGrantId: requester.grantId, requesterSessionId: requester.sessionId, operations: data.operations, expiresAt, phase: "authorization_recorded" }) } });
+    return { actor, requester, expiresAt };
+  });
+  const result = await apiRelayControl("share", owner(prepared.actor), { connectionId: data.connectionId, requester: owner(prepared.requester), operations: data.operations, expiresAt: prepared.expiresAt, operationConfigHash: dmpOperationConfigHash() });
+  await prisma.identityAudit.create({ data: { action: "dmp_read_share_activated", actorUserId: prepared.actor.userId, sessionId: prepared.actor.sessionId, reason: JSON.stringify({ connectionId: data.connectionId, shareId: result.share?.id, requesterGrantId: prepared.requester.grantId, requesterSessionId: prepared.requester.sessionId, operations: data.operations, expiresAt: result.share?.expiresAt }) } });
+  return result;
+}
+export async function revokeDmpShare(principal: Principal, raw: unknown) {
+  if (principal.grantId) throw new AuthorizationError("Revoke sharing in the original paired browser.");
+  const data = dmpShareRevokeInput.parse(raw);
+  const actor = await prisma.$transaction(async tx => {
+    const actor = await assertCurrentPrincipal(tx, principal, "workflow.read");
+    await tx.identityAudit.create({ data: { action: "dmp_read_share_revocation_requested", actorUserId: actor.userId, sessionId: actor.sessionId, reason: JSON.stringify(data) } });
+    return actor;
+  });
+  return apiRelayControl("unshare", owner(actor), data);
 }
 const publicReceipt = { id: true, operationId: true, operation: true, method: true, state: true, requestId: true, upstreamStatus: true, responseHash: true, note: true, createdAt: true, completedAt: true } as const;
 export async function listDmpReceipts(principal: Principal) {

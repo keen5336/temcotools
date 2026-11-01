@@ -5,6 +5,7 @@ import type { Capability, Principal } from "@/lib/auth/principal";
 import { oauthConfig } from "@/lib/oauth/config";
 import { listOAuthGrants } from "@/lib/oauth/service";
 import { listAccessGrants } from "./grants";
+import { pilotPolicy } from "../../scripts/pilot-policy.mjs";
 
 export const connectedClientSetupInput = z.object({}).strict();
 const loopback = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -30,7 +31,7 @@ export async function getConnectedClientSetup(principal: Principal, raw: unknown
   connectedClientSetupInput.parse(raw);
   const current = await prisma.$transaction(tx => assertCurrentPrincipal(tx, principal, "account.self"));
   const [stdioGrants, remote] = await Promise.all([listAccessGrants(current), listOAuthGrants(current)]);
-  return { actorUserId: current.userId, asOf: new Date().toISOString(), connection: describeMcpConnection({ issuerUrl: process.env.MCP_ISSUER_URL, resourceUrl: process.env.MCP_RESOURCE_URL, appUrl: process.env.NEXT_PUBLIC_APP_URL }),
+  return { actorUserId: current.userId, asOf: new Date().toISOString(), environmentPolicy: pilotPolicy(), connection: describeMcpConnection({ issuerUrl: process.env.MCP_ISSUER_URL, resourceUrl: process.env.MCP_RESOURCE_URL, appUrl: process.env.NEXT_PUBLIC_APP_URL }),
     availableReadScopes: (["inventory.read", "workflow.read"] as Capability[]).filter(scope => current.capabilities.includes(scope)),
     stdioGrants, oauthGrants: remote.map(grant => ({ id: grant.id, clientName: grant.client.name, clientId: grant.clientId, resource: safeStoredResource(grant.resource), scopes: grant.scopes, createdAt: grant.createdAt, expiresAt: grant.expiresAt, revokedAt: grant.revokedAt })),
     limitation: "Each list contains up to 100 most recent recorded permissions, not live connection health. Grants also stop working when their issuing session ends, locks or idles out, or current permissions change. No camera or LAN printer is supplied by a server connection." };

@@ -8,5 +8,11 @@ export default async function ApiRelayPairPage({ searchParams }: { searchParams:
   const nonce = typeof query.nonce === "string" ? query.nonce : "";
   const config = dmpConfig();
   const session = await getSession();
-  return <ApiRelayPairClient payload={typeof query.payload === "string" && query.payload.length < 1024 ? query.payload : undefined} origin={origin} nonce={nonce} allowed={config.configured && config.origins.includes(origin) && /^[a-f0-9-]{36}$/i.test(nonce)} displayName={session.userId && session.isActive ? session.displayName : null} />;
+  const payload = typeof query.payload === "string" && query.payload.length > 0 && Buffer.byteLength(query.payload) <= 8192 ? query.payload : undefined;
+  // Never silently drop a supplied oversized/malformed binding and pair using
+  // the legacy default instead. Actual payload/profile authority is checked by
+  // the shared pair command after the human confirms.
+  let validPayload = query.payload === undefined;
+  if (payload) { try { const value = JSON.parse(payload); validPayload = Boolean(value && typeof value === "object" && !Array.isArray(value)); } catch { /* Invalid pairing metadata fails closed. */ } }
+  return <ApiRelayPairClient payload={payload} origin={origin} nonce={nonce} allowed={validPayload && config.configured && config.origins.includes(origin) && /^[a-f0-9-]{36}$/i.test(nonce)} displayName={session.userId && session.isActive ? session.displayName : null} />;
 }

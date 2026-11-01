@@ -9,7 +9,7 @@ export function requiresUiContext(method: string, pathname: string): boolean {
   if (!pathname.startsWith("/api/") || verb === "OPTIONS") return false;
   if (verb === "POST" && (pathname === "/api/auth/login" || pathname === "/api/auth/recovery" || pathname === "/api/internal/api-relay-authorization")) return false;
   if (verb === "GET" || verb === "HEAD") {
-    if (pathname === "/api/api-relay/loader") return false;
+    if (pathname === "/api/api-relay/loader" || pathname === "/api/connect-temco/loader") return false;
     if (/^\/api\/payloads\/[^/]+\/loader$/.test(pathname)) return false;
     if (/^\/api\/payloads\/[^/]+\/versions\/[^/]+\/[a-f0-9]{64}$/.test(pathname)) return false;
   }

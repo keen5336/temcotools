@@ -719,6 +719,28 @@ model Payload {
   versions           PayloadVersion[] @relation("PayloadVersions")
   publishedVersion   PayloadVersion?  @relation("PayloadPublished", fields: [publishedVersionId], references: [id], onDelete: Restrict)
   audits             PayloadAudit[]
+  siteProfiles       SiteProfile[]
+}
+
+// Explicit external-site routing only; executable source remains in the
+// existing immutable PayloadVersion ledger. Removed mappings remain tombstones.
+model SiteProfile {
+  id              String   @id
+  name            String
+  origin          String
+  pathPrefix      String   @default("/")
+  purpose         String
+  payloadId       String
+  enabled         Boolean  @default(false)
+  revision        Int      @default(1)
+  removedAt       DateTime?
+  createdByUserId  String
+  updatedByUserId  String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  payload         Payload  @relation(fields: [payloadId], references: [id], onDelete: Restrict)
+
+  @@index([origin, id])
 }
 
 model PayloadVersion {

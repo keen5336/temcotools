@@ -1,0 +1,144 @@
+# Standalone only. Never combine this file with docker-compose.yml.
+# Render/check with scripts/v2-pilot.ts; this file never builds or pulls images.
+name: temcotools-v2-pilot-${PILOT_SLUG:?Set the isolated pilot slug}
+
+x-pilot-environment: &pilot-environment
+  NODE_ENV: production
+  TEMCO_PILOT_MODE: read_only_dmp
+  TEMCO_SESSION_COOKIE_NAME: temco_v2_pilot_${PILOT_SLUG}
+  API_RELAY_AUDIENCE: pilot:${PILOT_SLUG}
+  DATABASE_URL: postgresql://temco_pilot:${PILOT_POSTGRES_PASSWORD:?Set a new private URL-safe pilot password}@db:5432/${PILOT_DATABASE_NAME:?Set the derived pilot database name}
+  SESSION_SECRET: ${PILOT_SESSION_SECRET:?Set a separate private pilot session secret}
+  MFA_ENCRYPTION_KEY: ${PILOT_MFA_ENCRYPTION_KEY:?Set a separate private pilot MFA key}
+  NEXT_PUBLIC_APP_URL: ${PILOT_PUBLIC_ORIGIN:?Set the approved distinct HTTPS pilot origin}
+  MCP_ISSUER_URL: ${PILOT_PUBLIC_ORIGIN}/
+  MCP_RESOURCE_URL: ${PILOT_PUBLIC_ORIGIN}/mcp
+  ADMIN_FILE_MANAGER_ROOT: /data/admin-files
+  API_RELAY_INTERNAL_URL: http://api-relay:3003
+  API_RELAY_PUBLIC_ORIGIN: ${PILOT_PUBLIC_ORIGIN}
+  DMP_ORIGINS: ${PILOT_DMP_ORIGINS:?Set the exact allowed DMP origins}
+  DMP_IDENTITY_PATH: ${PILOT_DMP_IDENTITY_PATH:?Set the evidence-backed identity path}
+  DMP_IDENTITY_SUBJECT_PATH: ${PILOT_DMP_IDENTITY_SUBJECT_PATH:?Set the evidence-backed subject path}
+  DMP_API_OPERATIONS: ${PILOT_DMP_API_OPERATIONS:?Set the reviewed GET-only operation configuration}
+
+services:
+  db:
+    image: postgres@sha256:1d1095b0503145be79c79239372aefadfacf6b7c33c9245bbf99ce4b6b89c737
+    pull_policy: never
+    restart: "no"
+    environment:
+      POSTGRES_USER: temco_pilot
+      POSTGRES_PASSWORD: ${PILOT_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${PILOT_DATABASE_NAME}
+    volumes: [db_data:/var/lib/postgresql/data]
+    networks: [pilot_net]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Explicit one-off maintenance action before first app admission. Named volume
+  # ownership is not inherited from production or fixed with a host bind mount.
+  storage-init:
+    image: ${PILOT_APP_IMAGE:?Set the source-pinned pilot app image}
+    pull_policy: never
+    restart: "no"
+    profiles: [maintenance]
+    user: "0:0"
+    network_mode: none
+    cap_drop: [ALL]
+    cap_add: [CHOWN, FOWNER]
+    security_opt: [no-new-privileges:true]
+    command: [node, -e, "const fs=require('node:fs');fs.chmodSync('/data/admin-files',0o700);fs.chownSync('/data/admin-files',1001,1001)"]
+    volumes: [admin_files:/data/admin-files]
+
+  app:
+    image: ${PILOT_APP_IMAGE}
+    pull_policy: never
+    restart: "no"
+    ports: ["127.0.0.1:43100:3000"]
+    environment:
+      <<: *pilot-environment
+      NEXTAUTH_URL: ${PILOT_PUBLIC_ORIGIN}
+      TRUST_PROXY: "true"
+      PROTOCOL: https
+    volumes: [admin_files:/data/admin-files]
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [pilot_net]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q --spider http://127.0.0.1:3000/signin || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  api-relay:
+    image: ${PILOT_APP_IMAGE}
+    pull_policy: never
+    restart: "no"
+    command: [node, scripts/api-relay/server.mjs]
+    ports: ["127.0.0.1:43103:3003"]
+    environment:
+      NODE_ENV: production
+      TEMCO_PILOT_MODE: read_only_dmp
+      TEMCO_SESSION_COOKIE_NAME: temco_v2_pilot_${PILOT_SLUG}
+      API_RELAY_AUDIENCE: pilot:${PILOT_SLUG}
+      SESSION_SECRET: ${PILOT_SESSION_SECRET}
+      DMP_ORIGINS: ${PILOT_DMP_ORIGINS}
+      API_RELAY_HOST: "0.0.0.0"
+      API_RELAY_PORT: "3003"
+      API_RELAY_APP_URL: http://app:3000
+      API_RELAY_APP_ORIGIN: ${PILOT_PUBLIC_ORIGIN}
+    depends_on:
+      app: {condition: service_healthy}
+    networks: [pilot_net]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  mcp-http:
+    image: ${PILOT_MCP_IMAGE:?Set the source-pinned pilot MCP image}
+    pull_policy: never
+    restart: "no"
+    command: [node, --import, tsx, scripts/mcp-http-server.ts]
+    ports: ["127.0.0.1:43104:3004"]
+    environment:
+      <<: *pilot-environment
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_PORT: "3004"
+    volumes: [admin_files:/data/admin-files]
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [pilot_net]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  migrate:
+    image: ${PILOT_MIGRATE_IMAGE:?Set the source-pinned pilot migration image}
+    pull_policy: never
+    restart: "no"
+    profiles: [maintenance]
+    environment:
+      DATABASE_URL: postgresql://temco_pilot:${PILOT_POSTGRES_PASSWORD}@db:5432/${PILOT_DATABASE_NAME}
+      TEMCO_PILOT_MODE: read_only_dmp
+    networks: [pilot_net]
+
+networks:
+  pilot_net:
+    name: temcotools-v2-pilot-${PILOT_SLUG}-private
+    internal: true
+    driver: bridge
+    labels:
+      com.temcotools.pilot.project: temcotools-v2-pilot-${PILOT_SLUG}
+
+volumes:
+  db_data:
+    name: temcotools-v2-pilot-${PILOT_SLUG}-db
+    labels:
+      com.temcotools.pilot.project: temcotools-v2-pilot-${PILOT_SLUG}
+  admin_files:
+    name: temcotools-v2-pilot-${PILOT_SLUG}-admin-files
+    labels:
+      com.temcotools.pilot.project: temcotools-v2-pilot-${PILOT_SLUG}

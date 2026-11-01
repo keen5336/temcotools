@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Script } from "node:vm";
 import { z } from "zod";
 import { PAYLOAD_PURPOSES, MAX_PAYLOAD_BYTES } from "./types";
+import type { SiteProfileBinding } from "@/lib/relay-sites/types";
 export { PAYLOAD_PURPOSES, DEFAULT_DMP_PAYLOAD_ID, MAX_PAYLOAD_BYTES, sourceChanges } from "./types";
 
 export const payloadIdSchema = z.string().regex(/^[a-z][a-z0-9-]{2,63}$/);
@@ -48,11 +49,12 @@ export interface PublishedPayloadVersion extends Omit<PayloadDraft, "name"> {
   version: number;
   contentHash: string;
 }
-export function renderPayloadVersion(version: PublishedPayloadVersion) {
-  const metadata = { payloadId: version.payloadId, versionId: version.id, version: version.version, contentHash: version.contentHash, purpose: version.purpose, protocolVersion: version.protocolVersion, operationNames: version.operationNames };
+export function renderPayloadVersion(version: PublishedPayloadVersion, profileBinding?: SiteProfileBinding) {
+  const metadata = { payloadId: version.payloadId, versionId: version.id, version: version.version, contentHash: version.contentHash, purpose: version.purpose, protocolVersion: version.protocolVersion, operationNames: version.operationNames, ...(profileBinding ? { profileBinding } : {}) };
   // TEMCO_PAYLOAD is invocation-local metadata, not a credential or mutable
   // global. The trusted payload may read it; the broker must authorize it.
-  return `(()=>{const TEMCO_PAYLOAD=Object.freeze(${JSON.stringify(metadata)});if(!${JSON.stringify(version.targetOrigins)}.includes(location.origin)){alert('Temco '+TEMCO_PAYLOAD.payloadId+' v'+TEMCO_PAYLOAD.version+' is not approved for this page origin.');return;}\n${version.source}\n})();`;
+  const profileGuard = profileBinding ? `const binding=TEMCO_PAYLOAD.profileBinding;if(location.origin!==binding.origin||location.pathname!==binding.pathname||!(binding.pathPrefix==='/'||location.pathname===binding.pathPrefix||location.pathname.startsWith(binding.pathPrefix+'/'))){alert('Connect Temco site/path changed. Run the bookmark again on an approved page.');return;}if(window.__temcoApiRelay?.busy?.()){alert('Temco work is still running. Wait for its original result; no adapter was replaced.');return;}` : "";
+  return `(()=>{const TEMCO_PAYLOAD=Object.freeze(${JSON.stringify(metadata)});${profileGuard}if(!${JSON.stringify(version.targetOrigins)}.includes(location.origin)){alert('Temco '+TEMCO_PAYLOAD.payloadId+' v'+TEMCO_PAYLOAD.version+' is not approved for this page origin.');return;}\n${version.source}\n})();`;
 }
 export function buildPayloadBookmarklet(loaderUrl: string) {
   const url = new URL(loaderUrl);

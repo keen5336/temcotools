@@ -7,6 +7,7 @@ export type Tool = { id: string; name: string; href: string; description: string
 export const TOOLS: readonly Tool[] = [
   { id: "security", name: "Account Security", href: "/account/security", description: "Manage strong sign-in, individual sessions, shared-device lock and recovery." },
   { id: "payloads", capability: "payloads.manage", adminOnly: true, name: "Bookmarklet Payloads", href: "/admin/payloads", description: "Admin source drafts, publication, immutable versions and stable mobile loaders.", roles: ["admin"] },
+  { id: "relay-sites", capability: "payloads.manage", adminOnly: true, name: "Connect Site Mappings", href: "/admin/relay-sites", description: "Approved payloads for exact sites/paths with one Connect TemcoTools bookmark.", roles: ["admin"] },
   { id: "warehouse-scan", capability: "inventory.write", name: "Warehouse Observations", href: "/tools/warehouse-scan", description: "Capture presence, check-in, placement and physical departure with an attributed device queue." },
   { id: "warehouse", capability: "inventory.read", name: "Warehouse Lookup", href: "/tools/warehouse", description: "Scan an LPN or inspect order candidates with source rows and independent observation history." },
   { id: "office", capability: "workflow.read", name: "Office Cases & Returns", href: "/tools/office", description: "Review durable cases, expected returns, exact-unit instructions and exchange history." },
@@ -14,6 +15,7 @@ export const TOOLS: readonly Tool[] = [
   { id: "label-workflows", capability: "labels.manage", name: "Label Workflows", href: "/management/label-workflows", description: "Manage versioned label purposes, rules, previews and effect receipts.", roles: ["admin", "manager"] },
   { id: "access", name: "Your Connected Clients", href: "/account/access", description: "Create or revoke your scoped development MCP client grants." },
   { id: "api-relay", capability: "workflow.read", name: "DMP API Relay", href: "/tools/api-relay", description: "Connect your signed-in DMP tab and run API operations through your own account." },
+  { id: "dmp-samples", capability: "workflow.read", name: "Private Source Samples", href: "/tools/dmp-samples", description: "Upload body-only DMP or Route Planner JSON/XML/CSV and inspect private structure with provenance." },
   { id: "mars", capability: "workflow.read", name: "MARS Tracking", href: "/tools/mars", description: "Import MARS spreadsheets, browse current units, run audits, and reconcile discrepancies." },
   { id: "rtv-label", capability: "labels.read", name: "MARS Label Tool", href: "/tools/rtv-label", description: "Generate and print MARS return shipping labels." },
   { id: "report-engine", capability: "workflow.read", name: "Report Engine (Legacy)", href: "/tools/report-engine", description: "Legacy CSV pipelines pending retirement; shared warehouse views are the v2 replacement." },

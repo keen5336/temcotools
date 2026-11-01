@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { once } from "node:events";
+import { once, EventEmitter } from "node:events";
+import { createRequire } from "node:module";
 import test from "node:test";
 import { prisma } from "../lib/db";
 import { CURRENT_USER_SELECT, resolvePrincipal } from "../lib/auth/principal";
 import { authenticateAccessGrant, createAccessGrant } from "../lib/application/grants";
-import { getDmpReceipt, requestDmpOperation } from "../lib/api-relay/service";
+import { approveDmpShare, disconnectDmp, getDmpStatus, pairDmp, revokeDmpShare, getDmpReceipt, requestDmpOperation } from "../lib/api-relay/service";
+type SyntheticSocket = EventEmitter & { send(data: string): void; terminate(): void };
+const WebSocket = createRequire(import.meta.url)("ws") as new (url: string, options: { origin: string }) => SyntheticSocket;
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createApplicationMcpServer } from "../lib/application/mcp";
+import { authenticateOAuthAccessToken, hashOAuthCredential, principalForOAuthGrant } from "../lib/oauth/grants";
+import { createApiRelayServer, controlKey } from "./api-relay/server.mjs";
+import { POST as authorizeRelay } from "../app/api/internal/api-relay-authorization/route";
+import { builtinDmpGrant } from "../lib/api-relay/payload-policy";
 
 test("named DMP intents survive lost responses without replay or scope escalation", { skip: !process.env.DATABASE_URL }, async () => {
   const target = new URL(process.env.DATABASE_URL!);
@@ -46,5 +56,95 @@ test("named DMP intents survive lost responses without replay or scope escalatio
   } finally {
     await new Promise<void>(resolve => broker.close(() => resolve()));
     await prisma.dmpOperation.deleteMany({ where: { actorUserId: user.id } }); await prisma.user.delete({ where: { id: user.id } }); await prisma.$disconnect();
+  }
+});
+
+test("a current OAuth MCP grant reads an explicitly approved work-browser relay while both identities remain authoritative", { skip: !process.env.DATABASE_URL, timeout: 30_000 }, async () => {
+  const target = new URL(process.env.DATABASE_URL!);
+  assert.ok(target.hostname === "127.0.0.1" && target.port === "55439" && target.pathname === "/temcotools_v2_test");
+  const envKeys = ["API_RELAY_INTERNAL_URL", "SESSION_SECRET", "API_RELAY_AUDIENCE", "DMP_ORIGINS", "DMP_API_OPERATIONS", "MCP_ISSUER_URL", "MCP_RESOURCE_URL", "NEXT_PUBLIC_APP_URL", "TEMCO_PILOT_MODE"] as const;
+  const previous = Object.fromEntries(envKeys.map(key => [key, process.env[key]]));
+  const suffix = randomUUID(), at = new Date(), origin = "https://dmp.synthetic.test", secret = "synthetic-cross-machine-dmp-secret-only";
+  Object.assign(process.env, { SESSION_SECRET: secret, API_RELAY_AUDIENCE: `test-${suffix}`, DMP_ORIGINS: origin, MCP_ISSUER_URL: "http://127.0.0.1:49991", MCP_RESOURCE_URL: "http://127.0.0.1:49991/mcp", NEXT_PUBLIC_APP_URL: "http://127.0.0.1:49992" });
+  delete process.env.DMP_API_OPERATIONS; delete process.env.TEMCO_PILOT_MODE;
+  const user = await prisma.user.create({ data: { username: `share-${suffix}`, displayName: "Synthetic same-user relay", pinHash: "disabled:v2", roleBundles: { create: { bundleId: "legacy-user" } } } });
+  const foreign = await prisma.user.create({ data: { username: `share-foreign-${suffix}`, displayName: "Synthetic other person", pinHash: "disabled:v2", roleBundles: { create: { bundleId: "legacy-user" } } } });
+  const clientId = `share-client-${suffix}`;
+  await prisma.oAuthClient.create({ data: { id: clientId, name: "Synthetic home MCP", metadata: {} } });
+  let relay: ReturnType<typeof createApiRelayServer> | undefined, ws: SyntheticSocket | undefined, sdk: Client | undefined, mcp: ReturnType<typeof createApplicationMcpServer> | undefined;
+  const dispatched: { type: string; requestId: string; request: { path: string } }[] = [];
+  try {
+    const session = async (userId: string, label: string) => prisma.userSession.create({ data: { id: randomUUID(), userId, authVersion: 1, createdAt: at, lastActivityAt: at, lastStrongAuthenticatedAt: at, mfaVerifiedAt: at, deviceLabel: label, expiresAt: new Date(at.getTime() + 3600_000) } });
+    const work = await session(user.id, "Synthetic work browser"), home = await session(user.id, "Synthetic home browser"), foreignSession = await session(foreign.id, "Synthetic other person");
+    const resolved = await resolvePrincipal({ userId: user.id, authVersion: 1, sessionId: work.id, issuedAt: at.getTime(), expiresAt: work.expiresAt.getTime() }, id => prisma.user.findUnique({ where: { id }, select: CURRENT_USER_SELECT })); assert.ok(resolved);
+    const actor = { ...resolved, sessionId: work.id, strongAuthenticatedAt: at.getTime(), mfaVerifiedAt: at.getTime() };
+    const grant = async (userId: string, sessionId: string, scopes: string[]) => prisma.oAuthGrant.create({ data: { requestId: randomUUID(), clientId, userId, sessionId, authVersion: 1, scopes, issuer: "http://127.0.0.1:49991/", resource: "http://127.0.0.1:49991/mcp", expiresAt: new Date(at.getTime() + 3600_000) } });
+    const homeGrant = await grant(user.id, home.id, ["workflow.read"]), noRead = await grant(user.id, home.id, ["inventory.read"]), foreignGrant = await grant(foreign.id, foreignSession.id, ["workflow.read"]);
+    const accessToken = `tc_at_${randomBytes(32).toString("base64url")}`;
+    await prisma.oAuthToken.create({ data: { tokenHash: hashOAuthCredential(accessToken), grantId: homeGrant.id, kind: "access", generation: 0, scopes: ["workflow.read"], expiresAt: new Date(at.getTime() + 600_000) } });
+    const authorize = async (owner: unknown, context: Record<string, unknown>) => {
+      const response = await authorizeRelay(new Request("http://127.0.0.1/api/internal/api-relay-authorization", { method: "POST", headers: { "Content-Type": "application/json", "X-Api-Relay-Key": controlKey(secret) }, body: JSON.stringify({ authorizationProtocol: 3, owner, ...context }) }));
+      const result = await response.json(); return result.authorized === true && result.authorizationProtocol === 3;
+    };
+    relay = createApiRelayServer({ secret, allowedOrigins: [origin], heartbeatMs: 60000, authorize });
+    relay.server.listen(0, "127.0.0.1"); await once(relay.server, "listening");
+    const address = relay.server.address(); assert.ok(address && typeof address !== "string");
+    process.env.API_RELAY_INTERNAL_URL = `http://127.0.0.1:${address.port}`;
+    const pairing = await pairDmp(actor, { origin });
+    ws = new WebSocket(`ws://127.0.0.1:${address.port}/api/api-relay/ws`, { origin });
+    const messages: Record<string, unknown>[] = [], waiters: { type: string; resolve: (value: Record<string, unknown>) => void }[] = [];
+    ws.on("message", (data: Buffer) => { const message = JSON.parse(data.toString()); const index = waiters.findIndex(item => item.type === message.type); if (index >= 0) waiters.splice(index, 1)[0].resolve(message); else messages.push(message); if (message.type === "request") dispatched.push(message); });
+    const next = (type: string): Promise<Record<string, unknown>> => new Promise((resolve, reject) => { const index = messages.findIndex(message => message.type === type); if (index >= 0) { resolve(messages.splice(index, 1)[0]); return; } const timer = setTimeout(() => reject(new Error(`Missing synthetic ${type}`)), 5000); waiters.push({ type, resolve: value => { clearTimeout(timer); resolve(value); } }); });
+    await once(ws, "open"); ws.send(JSON.stringify({ type: "pair", token: pairing.token }));
+    const paired = await next("paired"); ws.send(JSON.stringify({ type: "identity", subject: "synthetic-work-account" })); await next("ready");
+    const connectionId = String(paired.connectionId), input = { connectionId, oauthGrantId: homeGrant.id, operations: ["deliveries"], expiresInMinutes: 30 };
+    const remote = await prisma.$transaction(tx => principalForOAuthGrant(tx, homeGrant.id));
+    assert.deepEqual((await getDmpStatus(remote)).connections, [], "Another browser's connection is initially invisible, even to the same person.");
+    const candidates = (await getDmpStatus(actor)).shareCandidates as { id: string }[];
+    assert.equal(candidates.some(row => row.id === homeGrant.id), true); assert.equal(candidates.some(row => row.id === noRead.id || row.id === foreignGrant.id), false);
+    await assert.rejects(approveDmpShare(remote, input), /original paired browser/);
+    await assert.rejects(approveDmpShare(actor, { ...input, oauthGrantId: foreignGrant.id }), /own account/);
+    await assert.rejects(approveDmpShare(actor, { ...input, oauthGrantId: noRead.id }), /workflow.read/);
+    await prisma.userSession.update({ where: { id: work.id }, data: { mfaVerifiedAt: null } });
+    await assert.rejects(approveDmpShare(actor, input), /authenticator/);
+    await prisma.userSession.update({ where: { id: work.id }, data: { mfaVerifiedAt: at } });
+    const approval = await approveDmpShare(actor, input); assert.equal(approval.shared, true);
+    const audits = await prisma.identityAudit.findMany({ where: { actorUserId: user.id, action: "dmp_read_share_activated" } });
+    assert.ok(audits.some(row => row.sessionId === work.id && row.reason?.includes(`oauth:${homeGrant.id}`) && row.reason?.includes(home.id)));
+    mcp = createApplicationMcpServer(() => authenticateOAuthAccessToken(accessToken)); sdk = new Client({ name: "synthetic-shared-dmp", version: "1" });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair(); await Promise.all([mcp.connect(serverTransport), sdk.connect(clientTransport)]);
+    const execute = (action: string, data: Record<string, unknown>) => sdk!.callTool({ name: "application_action", arguments: { action, input: data } });
+    const body = (result: Awaited<ReturnType<typeof execute>>) => JSON.parse((result.content as { text: string }[])[0].text);
+    const shareInfo = await sdk.callTool({ name: "application_action_info", arguments: { action: "dmp.share.approve" } });
+    assert.notEqual(shareInfo.isError, true); assert.equal(body(shareInfo).requiresUserInteraction, true); assert.deepEqual(body(shareInfo).inputSchema.properties, {});
+    const handoff = await execute("dmp.share.approve", {}); assert.notEqual(handoff.isError, true); assert.equal(body(handoff).status, "requires_user_interaction"); assert.equal(body(handoff).actionUrl, "http://127.0.0.1:49992/tools/api-relay");
+    const status = await execute("dmp.status", {}); assert.notEqual(status.isError, true); assert.equal(body(status).connections[0].access, "shared_read");
+    assert.deepEqual(body(status).connections[0].operations, ["deliveries"]); assert.deepEqual(body(status).shareCandidates, []);
+    await assert.rejects(disconnectDmp(remote, { connectionId }), /unavailable/);
+    const operationId = randomUUID(), request = execute("dmp.request", { operationId, connectionId, operation: "deliveries", input: { deliveryDate: "11/01/2026" } });
+    const job = await next("request");
+    ws.send(JSON.stringify({ type: "result", requestId: job.requestId, ok: true, status: 200, subject: "synthetic-work-account", body: "synthetic shared response" }));
+    const result = await request; assert.notEqual(result.isError, true); assert.equal(body(result).body, "synthetic shared response");
+    const receipt = await prisma.dmpOperation.findUniqueOrThrow({ where: { actorUserId_operationId: { actorUserId: user.id, operationId } } });
+    assert.equal(receipt.actorSessionId, home.id); assert.equal(receipt.actorGrantId, `oauth:${homeGrant.id}`); assert.equal(receipt.connectionId, connectionId); assert.equal(receipt.state, "response_observed");
+    await execute("dmp.request", { operationId, connectionId, operation: "deliveries", input: { deliveryDate: "11/01/2026" } }); assert.equal(dispatched.length, 1, "Same-event SDK retry does not resend a shared read.");
+    await revokeDmpShare(actor, { connectionId, shareId: approval.share.id }); assert.deepEqual((await getDmpStatus(remote)).connections, []);
+    await approveDmpShare(actor, input);
+    await prisma.userSession.update({ where: { id: work.id }, data: { revokedAt: new Date() } });
+    assert.deepEqual((await getDmpStatus(remote)).connections, [], "Revoking the original browser session hides the share without rebinding ownership.");
+    await prisma.userSession.update({ where: { id: work.id }, data: { revokedAt: null } });
+    await prisma.oAuthGrant.update({ where: { id: homeGrant.id }, data: { revokedAt: new Date() } });
+    assert.equal((await execute("dmp.status", {})).isError, true, "The actual SDK principal callback rejects a revoked OAuth grant.");
+    assert.equal(dispatched.length, 1);
+    assert.equal(JSON.stringify(await prisma.dmpOperation.findMany({ where: { actorUserId: user.id } })).includes("synthetic shared response"), false);
+    const invalidKey = await authorizeRelay(new Request("http://127.0.0.1/api/internal/api-relay-authorization", { method: "POST", headers: { "X-Api-Relay-Key": controlKey(secret, "different-audience") }, body: "{}" })); assert.equal(invalidKey.status, 401);
+    assert.equal(builtinDmpGrant().payloadId, "dmp-relay");
+  } finally {
+    await Promise.allSettled([sdk?.close(), mcp?.close()]); ws?.terminate(); await relay?.close();
+    await prisma.dmpOperation.deleteMany({ where: { actorUserId: { in: [user.id, foreign.id] } } });
+    await prisma.identityAudit.deleteMany({ where: { actorUserId: { in: [user.id, foreign.id] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [user.id, foreign.id] } } }); await prisma.oAuthClient.delete({ where: { id: clientId } });
+    for (const key of envKeys) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; }
+    await prisma.$disconnect();
   }
 });

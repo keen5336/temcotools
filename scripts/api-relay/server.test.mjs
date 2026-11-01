@@ -223,3 +223,98 @@ test("broker disconnect fails jobs without replaying to a spare tab", async (t) 
   assert.match((await result).error, /not retried/);
   assert.equal(spare.messages.length, 0);
 });
+
+test("audience-bound control keys preserve the unset legacy key and isolate pilots", async t => {
+  const { createHash } = await import("node:crypto");
+  assert.equal(controlKey(secret, ""), createHash("sha256").update(`temco-api-relay-control-v1:${secret}`).digest("hex"));
+  assert.notEqual(controlKey(secret, "pilot-a"), controlKey(secret, "pilot-b"));
+  assert.throws(() => controlKey(secret, "bad audience"));
+  const f = await fixture(t, { audience: "pilot-a" });
+  assert.equal((await f.control("connections", alice, {}, controlKey(secret, ""))).status, 401);
+  assert.equal((await f.control("connections", alice, {}, controlKey(secret, "pilot-b"))).status, 401);
+  assert.equal((await f.control("connections", alice, {}, controlKey(secret, "pilot-a"))).status, 200);
+});
+
+test("same-user connections remain private to their exact creating session and grant", async t => {
+  const f = await fixture(t), c = await f.paired();
+  for (const requester of [{ ...alice, sessionId: "different-browser" }, { ...alice, grantId: "oauth:own-same-session" }]) {
+    assert.deepEqual((await f.control("connections", requester)).connections, []);
+    assert.equal((await f.request(c, "/private", requester)).status, 404);
+    assert.equal((await f.control("disconnect", requester, { connectionId: c.id })).status, 404);
+  }
+  assert.equal((await f.control("connections", alice)).connections[0].id, c.id);
+});
+
+const remoteAlice = { userId: alice.userId, sessionId: "alice-home-browser", authSessionId: "auth-home", authVersion: 1, grantId: "oauth:home-client" };
+const readApproval = (connectionId, requester = remoteAlice, operations = ["deliveries"]) => ({ connectionId, requester, operations, expiresAt: Date.now() + 60_000, operationConfigHash: "a".repeat(64) });
+
+test("original browser explicitly shares named reads with one exact OAuth grant without transferring ownership", async t => {
+  const seen = [];
+  const f = await fixture(t, { authorize: async (requester, context) => { seen.push({ requester, context }); return true; } });
+  const c = await f.paired();
+  assert.deepEqual((await f.control("connections", remoteAlice)).connections, []);
+  const approved = await f.control("share", alice, readApproval(c.id));
+  assert.equal(approved.shared, true);
+  const status = await f.control("connections", remoteAlice);
+  assert.equal(status.connections[0].access, "shared_read");
+  assert.deepEqual(status.connections[0].operations, ["deliveries"]);
+  assert.equal((await f.control("connections", { ...remoteAlice, grantId: "oauth:other-client" })).connections.length, 0);
+  assert.equal((await f.control("connections", { ...remoteAlice, sessionId: "changed-session" })).connections.length, 0);
+  assert.equal((await f.control("disconnect", remoteAlice, { connectionId: c.id })).status, 404);
+  assert.equal((await f.control("unshare", remoteAlice, { connectionId: c.id, shareId: approved.share.id })).status, 404);
+  assert.equal((await f.control("share", remoteAlice, readApproval(c.id))).status, 404);
+  assert.equal((await f.control("request", remoteAlice, { connectionId: c.id, operation: "session", request: { path: "/not-approved" } })).status, 404);
+  assert.equal((await f.control("request", remoteAlice, { connectionId: c.id, operation: "deliveries", request: { method: "POST", path: "/not-a-read", body: "{}" } })).status, 403);
+  const result = f.control("request", remoteAlice, { connectionId: c.id, operation: "deliveries", request: { path: "/synthetic-deliveries" } });
+  const job = await c.next("request"); f.respond(c, job, "only synthetic response");
+  assert.equal((await result).body, "only synthetic response");
+  const dispatch = seen.find(row => row.context.share?.id === approved.share.id && row.context.requestMethod === "GET");
+  assert.equal(dispatch.requester.grantId, remoteAlice.grantId); assert.deepEqual(dispatch.context.connectionOwner, alice);
+  assert.equal((await f.control("connections", alice)).connections[0].access, "owner");
+});
+
+test("sharing rejects foreign users, non-OAuth grants, invalid scope bounds and excessive expiry", async t => {
+  const f = await fixture(t), c = await f.paired();
+  for (const data of [readApproval(c.id, bob), readApproval(c.id, { ...remoteAlice, grantId: "stdio-grant" }), { ...readApproval(c.id), operations: [] }, { ...readApproval(c.id), expiresAt: Date.now() + 61 * 60_000 }]) assert.equal((await f.control("share", alice, data)).status, 400);
+  const denied = await fixture(t, { authorize: async () => false }), d = await denied.paired();
+  assert.equal((await denied.control("share", alice, readApproval(d.id))).status, 403);
+});
+
+test("revoked or newly unauthorized shares never dispatch queued work or replay an in-flight read", async t => {
+  let current = true;
+  const f = await fixture(t, { maxConcurrent: 1, authorize: async () => current }), c = await f.paired();
+  const approved = await f.control("share", alice, readApproval(c.id));
+  const first = f.control("request", remoteAlice, { connectionId: c.id, operation: "deliveries", request: { path: "/already-sent" } });
+  const sent = await c.next("request");
+  const queued = f.control("request", remoteAlice, { connectionId: c.id, operation: "deliveries", request: { path: "/not-sent" } });
+  await f.control("connections", alice);
+  assert.equal((await f.control("unshare", alice, { connectionId: c.id, shareId: approved.share.id })).revoked, true);
+  assert.equal((await queued).dispatchState, "not_dispatched");
+  f.respond(c, sent); assert.equal((await first).dispatchState, "dispatched");
+  assert.equal(c.messages.some(m => m.type === "request"), false);
+  await f.control("share", alice, readApproval(c.id));
+  const own = f.request(c, "/owner-running"), ownJob = await c.next("request");
+  const later = f.control("request", remoteAlice, { connectionId: c.id, operation: "deliveries", request: { path: "/revoked-grant" } });
+  await f.control("connections", alice); current = false; f.respond(c, ownJob); await own;
+  assert.equal((await later).dispatchState, "not_dispatched");
+  assert.deepEqual((await f.control("connections", remoteAlice)).connections, []);
+});
+
+test("remote access does not keep the original browser lease alive", async t => {
+  const f = await fixture(t, { leaseMs: 60 }), c = await f.paired();
+  await f.control("share", alice, readApproval(c.id));
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.deepEqual((await f.control("connections", remoteAlice)).connections, []);
+  assert.equal((await f.control("request", remoteAlice, { connectionId: c.id, operation: "deliveries", request: { path: "/expired-owner" } })).status, 404);
+});
+
+test("pilot method gate prevents even a fully authorized owner POST before broker dispatch", async t => {
+  const previous = process.env.TEMCO_PILOT_MODE;
+  try {
+    process.env.TEMCO_PILOT_MODE = "read_only_dmp";
+    const f = await fixture(t), c = await f.paired();
+    const denied = await f.control("request", alice, { connectionId: c.id, operation: "read-looking-rpc", request: { method: "POST", path: "/synthetic-only", body: "{}" } });
+    assert.equal(denied.status, 403); assert.match(denied.error, /GET\/HEAD/);
+    assert.equal(c.messages.some(m => m.type === "request"), false);
+  } finally { if (previous === undefined) delete process.env.TEMCO_PILOT_MODE; else process.env.TEMCO_PILOT_MODE = previous; }
+});

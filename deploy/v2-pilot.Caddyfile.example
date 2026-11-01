@@ -1,0 +1,22 @@
+# REVIEW-ONLY fragment. Replace this hostname with the separately approved pilot
+# vhost, matching PILOT_PUBLIC_ORIGIN exactly. Do not replace/include over the
+# existing production vhost, publish DNS, obtain certificates or reload Caddy as
+# part of source preparation. No wildcard or production hostname is appropriate.
+https://REPLACE-WITH-APPROVED-PILOT-HOST.example.invalid {
+    # Maintained SDK authorization/discovery lives on MCP, while its signed-in
+    # human consent page /account/authorize and /api/oauth-consent live on Next.
+    @mcp path /mcp /mcp/* /authorize /token /register /revoke /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/mcp
+    handle @mcp {
+        # Preserve incoming public Host. The MCP server rejects another host.
+        reverse_proxy 127.0.0.1:43104
+    }
+    handle /api/api-relay/ws {
+        reverse_proxy 127.0.0.1:43103
+    }
+    handle /api/label-relay/ws {
+        respond "Pilot printing is disabled" 403
+    }
+    handle {
+        reverse_proxy 127.0.0.1:43100
+    }
+}

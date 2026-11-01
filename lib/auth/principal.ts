@@ -1,5 +1,6 @@
 // This module has no Next.js or database dependency. UI and MCP adapters resolve
 // a principal from their verified credential, then use the same action checks.
+import { pilotCapabilityAllowed } from "../../scripts/pilot-policy.mjs";
 export type UserRole = "admin" | "manager" | "user";
 
 export const CAPABILITIES = [
@@ -94,7 +95,7 @@ export async function resolvePrincipal(
     // An active person can always secure their own account, even if all
     // warehouse bundles are removed. Delegated grants still intersect scopes
     // and receive this capability only when it was explicitly granted.
-    capabilities: [...new Set([...assigned, "account.self" as const])],
+    capabilities: [...new Set([...assigned, "account.self" as const])].filter(pilotCapabilityAllowed),
   };
 }
 
@@ -107,6 +108,7 @@ export class AuthorizationError extends Error {
 }
 
 export function assertCapability(principal: Principal, capability: Capability): void {
+  if (!pilotCapabilityAllowed(capability)) throw new AuthorizationError("This action is disabled in the isolated read-only DMP pilot.");
   if (!principal.capabilities.includes(capability)) throw new AuthorizationError();
 }
 

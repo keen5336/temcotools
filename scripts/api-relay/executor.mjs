@@ -16,7 +16,9 @@ export function startDmpRelay(config) {
   const stopButton = document.createElement("button"); stopButton.textContent = "Disconnect";
   box.append(title, status, connectButton, document.createTextNode(" "), stopButton); panel.append(box); document.body.append(host);
   const active = new Map();
-  const payload = config.payload || (typeof TEMCO_PAYLOAD === "undefined" ? undefined : TEMCO_PAYLOAD);
+  // Universal-loader mappings are an additional rejection-only binding. Legacy
+  // DMP loaders keep their existing config.payload fallback and pairing flow.
+  const payload = typeof TEMCO_PAYLOAD !== "undefined" && TEMCO_PAYLOAD.profileBinding ? TEMCO_PAYLOAD : config.payload || (typeof TEMCO_PAYLOAD === "undefined" ? undefined : TEMCO_PAYLOAD);
   const controllers = new Set();
   let stopped = false, socket, popup, nonce, subject, identity, subjectPath, identityPromise, checkTimer;
   let generation = 0;
@@ -145,7 +147,7 @@ export function startDmpRelay(config) {
     nonce = crypto.randomUUID();
     const url = new URL("/tools/api-relay/pair", config.temcoOrigin);
     url.searchParams.set("origin", location.origin); url.searchParams.set("nonce", nonce);
-    if (payload) url.searchParams.set("payload", JSON.stringify({payloadId:payload.payloadId,versionId:payload.versionId,contentHash:payload.contentHash}));
+    if (payload) url.searchParams.set("payload", JSON.stringify({payloadId:payload.payloadId,versionId:payload.versionId,contentHash:payload.contentHash,...(payload.profileBinding?{profileBinding:payload.profileBinding}:{})}));
     popup = window.open(url.href, "_blank", "popup,width=560,height=650");
     if (!popup) { say("Allow this pairing popup, then press Connect again."); return; }
     connectButton.disabled = true; say("Confirm your account in the Temco pairing window.");

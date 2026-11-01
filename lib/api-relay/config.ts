@@ -1,4 +1,5 @@
 import { validateRequest } from "../../scripts/api-relay/protocol.mjs";
+import { assertPilotReadMethod, pilotPolicy } from "../../scripts/pilot-policy.mjs";
 
 type Operation = { label: string; method?: string; path: string; headers?: Record<string, string>; body?: unknown; timeoutMs?: number; defaults?: Record<string, string | number | boolean> };
 export function dmpConfig() {
@@ -23,6 +24,7 @@ export function dmpConfig() {
       const op = value as Operation;
       if (typeof op.label !== "string" || !op.label || op.label.length > 100) throw new Error("DMP operations need a label.");
       validateRequest({ method: op.method || "GET", path: op.path, headers: op.headers || {}, ...(op.body === undefined ? {} : { body: JSON.stringify(op.body) }), timeoutMs: op.timeoutMs || 30000 });
+      if (pilotPolicy().isolated && !["GET", "HEAD"].includes(op.method || "GET")) continue;
       operations[name] = op;
     }
   }
@@ -36,6 +38,7 @@ export function buildDmpRequest(name: string, input: unknown = {}) {
   if (!config.configured) throw new Error("DMP API relay is not configured.");
   if (!Object.hasOwn(config.operations, name)) throw new Error("Unknown DMP operation.");
   const op = config.operations[name];
+  assertPilotReadMethod(op.method || "GET");
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length > 50) throw new Error("Parameters must be an object.");
   const params = { ...op.defaults, ...input as Record<string, unknown> };
   const parameter = (key: string) => {
