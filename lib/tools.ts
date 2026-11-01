@@ -4,6 +4,8 @@ export type Tool = { id: string; name: string; href: string; description: string
 // One catalog keeps the dashboard and navigation in sync. Visibility here is
 // presentation only; each tool still enforces its own server authorization.
 export const TOOLS: readonly Tool[] = [
+  { id: "warehouse", name: "Warehouse Lookup", href: "/tools/warehouse", description: "Scan an LPN or inspect order candidates with source rows and independent observation history." },
+  { id: "access", name: "Your Connected Clients", href: "/account/access", description: "Create or revoke your scoped development MCP client grants." },
   { id: "api-relay", name: "DMP API Relay", href: "/tools/api-relay", description: "Connect your signed-in DMP tab and run API operations through your own account." },
   { id: "mars", name: "MARS Tracking", href: "/tools/mars", description: "Import MARS spreadsheets, browse current units, run audits, and reconcile discrepancies." },
   { id: "rtv-label", name: "MARS Label Tool", href: "/tools/rtv-label", description: "Generate and print MARS return shipping labels." },

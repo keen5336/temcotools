@@ -5,6 +5,8 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/session";
 import { revokeApiRelaySession } from "@/lib/api-relay/control";
+import { randomUUID } from "node:crypto";
+import { SESSION_MAX_AGE_MS } from "@/lib/auth/principal";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -32,10 +34,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid username or PIN." }, { status: 401 });
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
+  const accepted = await prisma.user.updateMany({
+    where: { id: user.id, isActive: true, authVersion: user.authVersion },
     data: { lastLoginAt: new Date() },
   });
+  if (!accepted.count) return NextResponse.json({ error: "Sign-in state changed. Try again." }, { status: 401 });
 
   const cookieStore = await cookies();
   const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
@@ -46,6 +49,11 @@ export async function POST(req: NextRequest) {
   session.displayName = user.displayName;
   session.role = user.role;
   session.isActive = user.isActive;
+  session.authVersion = user.authVersion;
+  session.sessionId = randomUUID();
+  session.issuedAt = Date.now();
+  session.expiresAt = session.issuedAt + SESSION_MAX_AGE_MS;
+  delete session.capabilities;
   await session.save();
 
   return NextResponse.json({ ok: true });

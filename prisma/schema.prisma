@@ -13,10 +13,12 @@ model User {
   pinHash               String
   role                  Role               @default(user)
   isActive              Boolean            @default(true)
+  authVersion           Int                @default(1)
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
   lastLoginAt           DateTime?
   favoriteToolIds       String[]           @default([])
+  accessGrants          AppAccessGrant[]
   marsImportBatches     MarsImportBatch[]
   marsEvents            MarsEvent[]
   marsAuditSessions     MarsAuditSession[]
@@ -31,6 +33,22 @@ model User {
   labelPrintersUpdated  LabelPrinter[]     @relation("LabelPrinterUpdatedBy")
   labelTemplatesCreated LabelTemplate[]    @relation("LabelTemplateCreatedBy")
   labelTemplatesUpdated LabelTemplate[]    @relation("LabelTemplateUpdatedBy")
+}
+
+model AppAccessGrant {
+  id          String   @id @default(cuid())
+  tokenHash   String   @unique
+  userId      String
+  authVersion Int
+  clientName  String
+  audience    String   @default("temcotools-mcp")
+  scopes      String[]
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
 
 model LabelPrinter {
