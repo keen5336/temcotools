@@ -181,7 +181,8 @@ test("real PostgreSQL site mappings and shared MCP commands preserve current aut
     });
     await t.test("real SDK uses canonical strict input schemas and same current authority", async () => {
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-      const server = createApplicationMcpServer(() => Promise.resolve(principal));
+      let sdkPrincipal = principal;
+      const server = createApplicationMcpServer(() => Promise.resolve(sdkPrincipal));
       const client = new Client({ name: "Synthetic site MCP", version: "1" });
       await server.connect(serverTransport); await client.connect(clientTransport);
       try {
@@ -193,6 +194,25 @@ test("real PostgreSQL site mappings and shared MCP commands preserve current aut
         assert.equal(invalid.isError, true);
         const grant = await prisma.appAccessGrant.create({ data: { tokenHash: randomUUID(), userId: user.id, sessionId: session.id, authVersion: user.authVersion, clientName: "Synthetic narrowed grant", scopes: ["workflow.read"], expiresAt: session.expiresAt } });
         await assert.rejects(sites.listSiteProfiles({ ...principal, grantId: grant.id }), /permission/);
+        // Mapping administrators can copy the universal injector in the UI
+        // without warehouse-read authority; MCP must expose the same action.
+        const payloadOnly = await prisma.appAccessGrant.create({ data: { tokenHash: randomUUID(), userId: user.id, sessionId: session.id, authVersion: user.authVersion, clientName: "Synthetic payload-only administrator", scopes: ["payloads.manage"], expiresAt: session.expiresAt } });
+        const oldAppOrigin = process.env.NEXT_PUBLIC_APP_URL;
+        try {
+          process.env.NEXT_PUBLIC_APP_URL = "https://synthetic-temco.example.invalid";
+          sdkPrincipal = { ...principal, grantId: payloadOnly.id, capabilities: ["payloads.manage"] };
+          assert.ok((await sites.listSiteProfiles(sdkPrincipal)).profiles.length > 0);
+          const catalog = await client.callTool({ name: "application_actions", arguments: { prefix: "relay.connect." } });
+          assert.match(JSON.stringify(catalog), /relay.connect.bookmarklet/);
+          const bookmark = await client.callTool({ name: "application_action", arguments: { action: "relay.connect.bookmarklet", input: {} } });
+          assert.equal(bookmark.isError, undefined); assert.match(JSON.stringify(bookmark), /javascript:/);
+          await prisma.appAccessGrant.update({ where: { id: payloadOnly.id }, data: { revokedAt: new Date() } });
+          const denied = await client.callTool({ name: "application_action", arguments: { action: "relay.connect.bookmarklet", input: {} } });
+          assert.equal(denied.isError, true);
+        } finally {
+          sdkPrincipal = principal;
+          if (oldAppOrigin === undefined) delete process.env.NEXT_PUBLIC_APP_URL; else process.env.NEXT_PUBLIC_APP_URL = oldAppOrigin;
+        }
         await prisma.userRoleBundle.delete({ where: { userId_bundleId: { userId: user.id, bundleId: bundle.id } } });
         const revoked = await client.callTool({ name: "application_action", arguments: { action: "relay.sites.list", input: {} } });
         assert.equal(revoked.isError, true);

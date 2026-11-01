@@ -8,6 +8,7 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium, expect, type Browser, type BrowserContext, type Page, type Locator } from "@playwright/test";
 import { generate } from "otplib";
@@ -31,6 +32,7 @@ test("390px pilot intake, site mapping and scoped remote reads use fixed code ov
   const managedRoot = path.join(artifacts, "managed"); await mkdir(managedRoot, { mode: 0o700 });
   const certPath = path.join(artifacts, "localhost-cert.pem"), keyPath = path.join(artifacts, "localhost-key.pem");
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-keyout", keyPath, "-out", certPath, "-subj", "/CN=pilot.localhost", "-addext", "subjectAltName=DNS:pilot.localhost,DNS:*.pilot.localhost"], { stdio: "ignore" });
+  const runnerPath = fileURLToPath(import.meta.url), runnerHash = createHash("sha256").update(await readFile(runnerPath)).digest("hex");
   const cert = await readFile(certPath), key = await readFile(keyPath), buildId = (await readFile(path.join(appDir, ".next/BUILD_ID"), "utf8")).trim();
   const hashFiles = ["lib/api-relay/service.ts", "scripts/api-relay/server.mjs", "scripts/api-relay/control-key.mjs", "lib/relay-sites/service.ts", "lib/relay-sites/types.ts", "lib/relay-sites/contract.ts", "lib/dmp-samples.ts", "lib/dmp-samples/structure.ts", "components/api-relay/ApiRelayClient.tsx", "components/dmp/DmpSamplesClient.tsx", "scripts/pilot-policy.mjs"];
   const hashes = Object.fromEntries(await Promise.all(hashFiles.map(async file => [file, createHash("sha256").update(await readFile(path.join(appDir, file))).digest("hex")])));
@@ -82,7 +84,12 @@ test("390px pilot intake, site mapping and scoped remote reads use fixed code ov
     async function phone(name: string, page = ui) { const metric = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth, clientWidth: document.documentElement.clientWidth })); phoneMetrics.push({ name, ...metric }); await page.screenshot({ path: path.join(artifacts, `${name}.png`), fullPage: false }); assert.ok(metric.width <= 390 && metric.viewport <= 390 && metric.clientWidth <= 390, `${name} must fit configured390px.`); }
     async function binding(page = ui) { const value = await page.evaluate(() => window.__temcoUiContextV1?.context ?? null); assert.ok(value && /^uc1_[A-Za-z0-9_-]{43}$/.test(value)); return value; }
     async function native(method: string, pathname: string, data?: unknown, page = ui) { return page.context().request.fetch(origin + pathname, { method, headers: { Origin: origin, "X-Temco-UI-Context": await binding(page) }, ...(data === undefined ? {} : { data }) }); }
-    async function action(control: Locator, pathname: string, method = "POST", page = ui) { const pending = page.waitForResponse(response => new URL(response.url()).pathname === pathname && response.request().method() === method); await control.click(); const response = await pending; assert.ok(response.ok(), `${stage}: ${method} ${pathname} returned${response.status()}`); return response.json(); }
+    async function action(control: Locator, pathname: string, method = "POST", page = ui) {
+      const sampleCommands: Record<string, string> = { "Retain private sample": "save", "Read original save receipt": "save", "Reveal up to 10 values": "inspect", "Remove retained sample": "remove", "List route paths": "routeContext", "Inspect selected route": "routeContext" };
+      const sampleAction = pathname === "/api/dmp-samples" ? sampleCommands[(await control.innerText()).trim()] : undefined;
+      if (pathname === "/api/dmp-samples") assert.ok(sampleAction, "Use the exact native sample command response, not a concurrent list/inspection response.");
+      const pending = page.waitForResponse(response => new URL(response.url()).pathname === pathname && response.request().method() === method && (!sampleAction || response.request().postDataJSON().action === sampleAction)); await control.click(); const response = await pending; assert.ok(response.ok(), `${stage}: ${method} ${pathname} returned${response.status()}`); return response.json();
+    }
     async function login(page: Page) { await page.goto(`${origin}/signin`); await page.getByLabel("Username", { exact: true }).fill(username); await page.getByLabel("Password or passphrase", { exact: true }).fill(password); const pending = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/login" && response.request().method() === "POST"); await page.getByRole("button", { name: "Sign in", exact: true }).click(); assert.equal((await pending).status(), 200); await page.waitForURL(origin + "/"); await binding(page); }
     stage = "actual password/MFA"; await login(ui); await ui.goto(`${origin}/account/security`);
     const factor = ui.locator("section").filter({ has: ui.getByRole("heading", { name: "Authenticator and privileged access", exact: true }) }).first();
@@ -224,7 +231,7 @@ test("390px pilot intake, site mapping and scoped remote reads use fixed code ov
   finally {
     for (const family of ["identity", "https_oauth", "sample_intake", "sample_receipt", "universal_dispatch", "defensive_site_states", "browser_owned_read_share", "pilot_denials"]) if (!evidence.some(item => item.family === family)) evidence.push({ family, result: "not_completed", detail: "No passing receipt for this family; consult the corresponding native test failure." });
     const runtimeLogs = logs.map(log => secrets.reduce((text, secret) => text.replaceAll(secret, "[private synthetic proof]"), log));
-    await writeFile(path.join(artifacts, "receipt.json"), JSON.stringify({ source, appDir, buildId, hashes, viewport: { width: 390, height: 844 }, origin, managedRoot, evidence, phoneMetrics, externalRequests, upstreamRequests, dialogs, runtimeLogs, qualification: "Actual cached Chromium390px, private self-signed HTTPS loopback proxy and synthetic upstream pages. Not actual Zebra, external CSP/browser policy, real DMP/RoutePlanner/MARS, live hardware, public reachability or production acceptance." }, null, 2), { mode: 0o600 });
+    await writeFile(path.join(artifacts, "receipt.json"), JSON.stringify({ source, appDir, buildId, runnerPath, runnerHash, hashes, viewport: { width: 390, height: 844 }, origin, managedRoot, evidence, phoneMetrics, externalRequests, upstreamRequests, dialogs, runtimeLogs, qualification: "Actual cached Chromium390px, private self-signed HTTPS loopback proxy and synthetic upstream pages. Not actual Zebra, external CSP/browser policy, real DMP/RoutePlanner/MARS, live hardware, public reachability or production acceptance." }, null, 2), { mode: 0o600 });
     await mcp?.close(); await browser?.close();
     for (const process of children) if (process.exitCode === null && process.signalCode === null) { const stopped = once(process, "exit"); process.kill("SIGTERM"); await Promise.race([stopped, delay(5000)]); if (process.exitCode === null && process.signalCode === null) { process.kill("SIGKILL"); await stopped; } }
     if (proxy) { proxy.closeAllConnections(); await new Promise<void>(resolve => proxy!.close(() => resolve())); }
