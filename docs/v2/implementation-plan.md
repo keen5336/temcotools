@@ -11,6 +11,10 @@ Status: active build sequence under the standing owner mandate, 2026-10-31. See 
 - Keep commits small and coherent; stage named files, never indiscriminate local data/config. Rebase/merge any later published `main` changes only after inspecting drift and preserving local work. Do not force-push or advance `main`/`v1` as part of planning. A published `v2` plan is not production approval.
 - Continuing owner authorization: focused bounded subagents are permitted when useful, superseding the initial single-agent restriction. Inherit GPT-6.1 Sol, `reasoningEffort=xhigh`, without model substitution. The main thread owns synthesis and integration; avoid duplicated work and proof infrastructure. Implementation is now authorized by the standing mandate. Production deployment and external operational effects remain outside it.
 
+## Continuous execution
+
+Advance multiple dependency-ready packages in the same active run; a stage, passing suite, commit or helper handoff is a progress checkpoint, not a stopping point. The hourly supervisor is fallback only. Maintain the single verified adaptive continuation and state/validation/helper references in [build status](build-status.md); inspect before adding anything, never duplicate it, and cancel unused continuation after completion or full owner-dependent blockage. Recheck owner steering/state on every continuation.
+
 ## Sequenced vertical slices
 
 Each new action ships through the same authorized application query/command in UI and MCP. During development, unchanged v1-only tools remain explicitly legacy; partial slices are not advertised as a compliant v2 release. Before any v2 pilot, every retained user action must have parity and current authorization. Do not leave existing privileged routes behind a stale cookie guard while strengthening only new routes.
