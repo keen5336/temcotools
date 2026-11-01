@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import RouteReconWorkspaceClient from "@/components/route-recon/RouteReconWorkspaceClient";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getRouteRecon } from "@/lib/route-recons";
 
 export default async function RouteReconReportPage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const { id } = await params;
   const report = await getRouteRecon(id);
   if (!report) notFound();

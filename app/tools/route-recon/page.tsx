@@ -1,10 +1,10 @@
 import NavBar from "@/components/NavBar";
 import RouteReconsClient from "@/components/route-recon/RouteReconsClient";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { listRouteRecons } from "@/lib/route-recons";
 
 export default async function RouteReconPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const reports = await listRouteRecons();
 
   return (

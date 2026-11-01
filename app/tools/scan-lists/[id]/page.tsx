@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import ScanListSessionClient from "@/components/scan-lists/ScanListSessionClient";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getScanList } from "@/lib/scan-lists";
 
 export default async function ScanListSessionPage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const { id } = await params;
   const scanList = await getScanList(id);
   if (!scanList) notFound();

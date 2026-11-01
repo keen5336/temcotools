@@ -1,10 +1,10 @@
 import NavBar from "@/components/NavBar";
 import ScanListsClient from "@/components/scan-lists/ScanListsClient";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { listScanLists } from "@/lib/scan-lists";
 
 export default async function ScanListsPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const lists = await listScanLists();
 
   return (
@@ -16,6 +16,9 @@ export default async function ScanListsPage() {
           Create a named local session, capture scans, then save the finished list to the database.
         </p>
         <ScanListsClient
+          key={session.userId}
+          currentUserId={session.userId}
+          canExecute={session.capabilities?.includes("workflow.execute") ?? false}
           initialLists={lists.map((list) => ({
             id: list.id,
             name: list.name,

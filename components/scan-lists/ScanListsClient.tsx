@@ -27,32 +27,41 @@ interface LocalDraft {
   createdAt: string;
   closedAt: string | null;
   scans: LocalScan[];
+  ownerUserId?: string;
 }
 
 const STORAGE_KEY = "temcotools_scan_list_draft_v1";
 
-export default function ScanListsClient({ initialLists }: { initialLists: ScanListSummary[] }) {
+export default function ScanListsClient({ initialLists, currentUserId, canExecute }: { initialLists: ScanListSummary[]; currentUserId: string; canExecute: boolean }) {
   const [lists, setLists] = useState(initialLists);
   const [draft, setDraft] = useState<LocalDraft | null>(null);
+  const [unassigned, setUnassigned] = useState<LocalDraft | null>(null);
+  const [loadedOwnerId, setLoadedOwnerId] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [name, setName] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const storageKey = `temcotools_scan_list_draft_v2.${currentUserId}`;
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      setDraft(loadDraft());
+      const saved = loadDraft(storageKey);
+      setDraft(saved?.ownerUserId === currentUserId ? saved : null);
+      setUnassigned(saved && saved.ownerUserId !== currentUserId ? saved : loadDraft(STORAGE_KEY));
+      setLoadedOwnerId(currentUserId);
       setReady(true);
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, []);
+  }, [currentUserId, storageKey]);
 
   useEffect(() => {
-    if (!ready) return;
-    if (draft) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
-    else window.localStorage.removeItem(STORAGE_KEY);
-  }, [draft, ready]);
+    if (!ready || loadedOwnerId !== currentUserId) return;
+    // An unsigned/mismatched local draft is preserved for review/export. It is
+    // never copied into the current person's capture or submitted as theirs.
+    if (draft?.ownerUserId === currentUserId) window.localStorage.setItem(storageKey, JSON.stringify(draft));
+    else if (!draft) { const stored = loadDraft(storageKey); if (!stored || stored.ownerUserId === currentUserId) window.localStorage.removeItem(storageKey); }
+  }, [draft, ready, currentUserId, loadedOwnerId, storageKey]);
 
   const visibleLists = useMemo(
     () => lists.filter((list) => Boolean(list.archivedAt) === showArchived),
@@ -63,20 +72,22 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
   function handleCreate(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalizedName = name.trim();
-    if (!normalizedName || draft) return;
+    if (!normalizedName || draft || !canExecute || loadedOwnerId !== currentUserId) return;
+    const existing = loadDraft(storageKey); if (existing && existing.ownerUserId !== currentUserId) { setError("Export and review the unassigned draft in this storage slot before replacing its local copy."); return; }
     setDraft({
       id: crypto.randomUUID(),
       name: normalizedName,
       createdAt: new Date().toISOString(),
       closedAt: null,
       scans: [],
+      ownerUserId: currentUserId,
     });
     setName("");
     setError(null);
   }
 
   function handleScan(value: string) {
-    if (!value) return;
+    if (!value || !canExecute || draft?.ownerUserId !== currentUserId) return;
     setDraft((current) => current && !current.closedAt ? {
       ...current,
       scans: [{ id: crypto.randomUUID(), value, scannedAt: new Date().toISOString() }, ...current.scans],
@@ -102,7 +113,7 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
   }
 
   function handleSaveDraft() {
-    if (!draft || !draft.scans.length) return;
+    if (!draft || !draft.scans.length || !canExecute || draft.ownerUserId !== currentUserId) return;
     startTransition(async () => {
       setError(null);
       const response = await fetch("/api/scan-lists", {
@@ -173,10 +184,16 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
       setLists((current) => current.filter((entry) => entry.id !== list.id));
     });
   }
+  function exportUnassignedDraft() {
+    if (!unassigned) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ ...unassigned, attribution: "unassigned_legacy_draft" }, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a"); link.href = url; link.download = "unassigned-scan-draft.json"; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   return (
     <div className="space-y-6">
-      {draft ? (
+      {unassigned && <section className="card border border-warning bg-base-100"><div className="card-body"><h2 className="card-title">Unassigned local draft</h2><p>{unassigned.name} · {unassigned.scans.length} scans</p><p className="text-sm">This older device draft does not establish who captured it. It is kept separately and cannot be saved under your identity automatically.</p><button className="btn btn-outline w-fit" onClick={exportUnassignedDraft}>Export unassigned draft</button><details><summary className="cursor-pointer">Review captured values</summary><div className="max-h-72 overflow-auto"><table className="table table-sm"><tbody>{unassigned.scans.slice(0, 200).map((scan, index) => <tr key={scan.id || index}><td className="break-all">{scan.value}</td><td>{formatDate(scan.scannedAt)}</td></tr>)}</tbody></table></div>{unassigned.scans.length > 200 && <p className="text-sm">Showing the first 200 values; the export includes the full draft.</p>}</details></div></section>}
+      {draft && loadedOwnerId === currentUserId ? (
         <section className="card bg-base-100 border border-base-200 shadow-sm">
           <div className="card-body gap-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -197,14 +214,14 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
                 ) : (
                   <button className="btn btn-outline" onClick={handleCloseDraft} disabled={isPending}>Close Session</button>
                 )}
-                <button className="btn btn-primary" onClick={handleSaveDraft} disabled={!draft.scans.length || isPending}>
+                <button className="btn btn-primary" onClick={handleSaveDraft} disabled={!draft.scans.length || isPending || !canExecute}>
                   {isPending ? "Saving…" : "Save to Database"}
                 </button>
                 <button className="btn btn-error btn-outline" onClick={handleDiscardDraft} disabled={isPending}>Discard</button>
               </div>
             </div>
 
-            {!draft.closedAt ? (
+            {!draft.closedAt && canExecute ? (
               <ScannerCapture
                 title={draft.name}
                 description="Scan continuously without focusing a text field. The keyboard stays hidden."
@@ -252,7 +269,7 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
             <p className="text-sm text-base-content/70">Name the session. Its draft will remain on this device if you leave and come back.</p>
             <form className="flex flex-col sm:flex-row gap-3 mt-2" onSubmit={handleCreate}>
               <input className="input input-bordered input-lg flex-1" value={name} onChange={(event) => setName(event.target.value)} placeholder="Example: Receiving - July 11" maxLength={120} autoFocus disabled={!ready} />
-              <button className="btn btn-primary btn-lg" disabled={!name.trim() || !ready}>Start Scanning</button>
+              <button className="btn btn-primary btn-lg" disabled={!name.trim() || !ready || !canExecute || loadedOwnerId !== currentUserId}>Start Scanning</button>
             </form>
           </div>
         </section>
@@ -278,8 +295,8 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
                   <td><div className="flex flex-wrap justify-end gap-2 min-w-max">
                     <Link href={`/tools/scan-lists/${encodeURIComponent(list.id)}`} className="btn btn-xs btn-primary">View</Link>
                     <a href={`/api/scan-lists/${encodeURIComponent(list.id)}/export`} className="btn btn-xs btn-outline">CSV</a>
-                    <button className="btn btn-xs btn-outline" onClick={() => handleArchive(list, !showArchived)} disabled={isPending}>{showArchived ? "Restore" : "Archive"}</button>
-                    <button className="btn btn-xs btn-error btn-outline" onClick={() => handleDelete(list)} disabled={isPending}>Delete</button>
+                    {canExecute && <button className="btn btn-xs btn-outline" onClick={() => handleArchive(list, !showArchived)} disabled={isPending}>{showArchived ? "Restore" : "Archive"}</button>}
+                    {canExecute && <button className="btn btn-xs btn-error btn-outline" onClick={() => handleDelete(list)} disabled={isPending}>Delete</button>}
                   </div></td>
                 </tr>
               )) : <tr><td colSpan={5} className="text-center text-base-content/60 py-10">{showArchived ? "No archived scan lists." : "No saved scan lists yet."}</td></tr>}
@@ -291,12 +308,12 @@ export default function ScanListsClient({ initialLists }: { initialLists: ScanLi
   );
 }
 
-function loadDraft(): LocalDraft | null {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+function loadDraft(key: string): LocalDraft | null {
+  const raw = window.localStorage.getItem(key);
   if (!raw) return null;
   try {
     const value = JSON.parse(raw) as LocalDraft;
-    if (typeof value.id !== "string" || typeof value.name !== "string" || typeof value.createdAt !== "string" || !Array.isArray(value.scans)) return null;
+    if (typeof value.id !== "string" || typeof value.name !== "string" || typeof value.createdAt !== "string" || !Array.isArray(value.scans) || !value.scans.every(scan => scan && typeof scan.value === "string" && typeof scan.scannedAt === "string")) return null;
     return value;
   } catch {
     return null;

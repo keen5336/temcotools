@@ -1,33 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import { setRouteReconArchived } from "@/lib/route-recons";
-
+import { getCurrentPrincipal } from "@/lib/auth";
+import { archiveRouteRecon, deleteRouteRecon, getRouteRecon, getRouteReconPrintableData, restoreRouteRecon } from "@/lib/application/retained-lists";
+import { readRetainedJson, retainedFailure, retainedReply } from "@/lib/application/retained-http";
 export const runtime = "nodejs";
-
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const session = await getSession();
-  if (!session.userId) return NextResponse.json({ ok: false, error: "Authentication is required." }, { status: 401 });
-  if (!session.isActive) return NextResponse.json({ ok: false, error: "User account is inactive." }, { status: 403 });
-
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body.archived !== "boolean") {
-    return NextResponse.json({ ok: false, error: "archived must be a boolean." }, { status: 400 });
-  }
-
-  try {
-    const { id } = await params;
-    const routeRecon = await setRouteReconArchived(id, body.archived);
-    return NextResponse.json({
-      ok: true,
-      routeRecon: {
-        ...routeRecon,
-        archivedAt: routeRecon.archivedAt?.toISOString() ?? null,
-      },
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : "Failed to update Route Recon." },
-      { status: 400 },
-    );
-  }
-}
+type Context = { params: Promise<{ id: string }> };
+export async function GET(request: Request, context: Context) { try { const principal = await getCurrentPrincipal(); if (!principal) return retainedReply({ ok: false, error: "Sign in required." }, 401); const params = new URL(request.url).searchParams, resource = await context.params; const report = params.get("printable") === "true" ? await getRouteReconPrintableData(principal, { ...resource, ...(params.has("routeNumber") ? { routeNumber: params.get("routeNumber") || null } : {}) }) : await getRouteRecon(principal, resource); return retainedReply({ ok: true, routeRecon: report }); } catch (error) { return retainedFailure(error); } }
+export async function PATCH(request: Request, context: Context) { try { const principal = await getCurrentPrincipal(); if (!principal) return retainedReply({ ok: false, error: "Sign in required." }, 401); const data = await readRetainedJson(request, 4096); if (typeof data.archived !== "boolean") return retainedReply({ ok: false, error: "archived must be a boolean." }, 400); return retainedReply({ ok: true, routeRecon: await (data.archived ? archiveRouteRecon(principal, await context.params) : restoreRouteRecon(principal, await context.params)) }); } catch (error) { return retainedFailure(error); } }
+export async function DELETE(_request: Request, context: Context) { try { const principal = await getCurrentPrincipal(); if (!principal) return retainedReply({ ok: false, error: "Sign in required." }, 401); await deleteRouteRecon(principal, await context.params); return retainedReply({ ok: true }); } catch (error) { return retainedFailure(error); } }
