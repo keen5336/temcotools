@@ -3,6 +3,10 @@
 # existing production vhost, publish DNS, obtain certificates or reload Caddy as
 # part of source preparation. No wildcard or production hostname is appropriate.
 https://REPLACE-WITH-APPROVED-PILOT-HOST.example.invalid {
+    @private_control path /control /control/* /api/internal /api/internal/* /api/api-relay/control /api/api-relay/control/*
+    handle @private_control {
+        respond "Not found" 404
+    }
     # Maintained SDK authorization/discovery lives on MCP, while its signed-in
     # human consent page /account/authorize and /api/oauth-consent live on Next.
     @mcp path /mcp /mcp/* /authorize /token /register /revoke /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/mcp
