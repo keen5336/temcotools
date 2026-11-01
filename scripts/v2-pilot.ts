@@ -161,13 +161,13 @@ function sourceState(root: string, expectedHead: string, env: NodeJS.ProcessEnv)
   requireGuard(head === expectedHead && branch === "v2" && !command("git", ["-C", root, "status", "--porcelain=v1", "--untracked-files=all"], env).trim(), "Pilot source must be a clean v2 checkout at the explicitly pinned full revision.");
   return { head, branch, composeSha256: hash(readFileSync(resolve(root, "deploy/v2-pilot.compose.yml"))), guardSha256: hash(readFileSync(resolve(root, "scripts/v2-pilot.ts"))) };
 }
-function inspectLocalMetadata(context: string, env: NodeJS.ProcessEnv, pilot: PilotIdentity, images: ReturnType<typeof pilotImageExpectations>) {
+export function inspectLocalMetadata(context: string, env: NodeJS.ProcessEnv, pilot: PilotIdentity, images: ReturnType<typeof pilotImageExpectations>) {
   requireGuard(/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/.test(context), "Name an explicit local Docker context.");
   const endpoint = command("docker", ["context", "inspect", context, "--format", '{{(index .Endpoints "docker").Host}}'], env).trim();
   requireGuard(endpoint.startsWith("unix:///"), "Only an explicitly named local Unix-socket Docker context is allowed; remote hosts are refused.");
   const docker = (...args: string[]) => command("docker", ["--context", context, ...args], env).trim();
   for (const image of images) {
-    const format = '{{.Id}}\n{{index .Config.Labels "org.opencontainers.image.revision"}}\n{{index .Config.Labels "com.temcotools.deployment-role"}}\n{{index .Config.Labels "com.temcotools.production-eligible"}}';
+    const format = image.role === "postgres" ? "{{.Id}}" : '{{.Id}}\n{{index .Config.Labels "org.opencontainers.image.revision"}}\n{{index .Config.Labels "com.temcotools.deployment-role"}}\n{{index .Config.Labels "com.temcotools.production-eligible"}}';
     assertPilotImageMetadata(image, docker("image", "inspect", "--format", format, image.reference).split("\n"));
   }
   for (const [kind, resourceNames] of [["volume", [`${pilot.project}-db`, `${pilot.project}-admin-files`]], ["network", [`${pilot.project}-private`]]] as const) {

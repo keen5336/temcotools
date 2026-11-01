@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
-import { assertPilotImageMetadata, parsePilotEnvironment, PILOT_POSTGRES_IMAGE, pilotImageExpectations, validatePilotComposition, validatePilotEnvironment } from "./v2-pilot";
+import { assertPilotImageMetadata, inspectLocalMetadata, parsePilotEnvironment, PILOT_POSTGRES_IMAGE, pilotImageExpectations, validatePilotComposition, validatePilotEnvironment } from "./v2-pilot";
 
 const head = "a".repeat(40);
 function environment() {
@@ -102,4 +102,18 @@ test("exact local image metadata needs source revision and pilot labels, not a m
       assert.throws(() => assertPilotImageMetadata(image, changed));
     }
   }
+});
+
+test("actual explicit synthetic pilot image/resource metadata supports the upstream PostgreSQL image without program labels", { skip: !process.env.PILOT_METADATA_FIXTURE_ENV_FILE }, () => {
+  const filename = process.env.PILOT_METADATA_FIXTURE_ENV_FILE!;
+  assert.ok(filename.startsWith("/Volumes/MacDev/ProjectArchive/Development/Qualification/") && filename.endsWith("/pilot.env"), "Native metadata qualification requires an explicitly selected task-private synthetic environment.");
+  const env = parsePilotEnvironment(readFileSync(filename, "utf8"));
+  assert.equal(env.PILOT_SLUG, "synthetic");
+  assert.equal(env.PILOT_PUBLIC_ORIGIN, "https://app.pilot.localhost:43101");
+  const identity = validatePilotEnvironment(env, env.PILOT_SOURCE_HEAD);
+  const result = inspectLocalMetadata("desktop-linux", process.env, identity, pilotImageExpectations(env, env.PILOT_SOURCE_HEAD));
+  assert.equal(result.imageIdsMatched, true);
+  assert.equal(result.programLabelsMatched, true);
+  assert.equal(result.existingResourceOwnershipMatched, true);
+  assert.equal(result.dockerPublishedPortConflicts, false);
 });
