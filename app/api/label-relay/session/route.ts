@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 
 export async function GET() {
   const session = await getSession();
+  if (session.userId && !session.capabilities?.includes("labels.print")) return Response.json({ error: "You do not have permission for this action." }, { status: 403 });
   const user = session.userId && session.isActive
     ? await prisma.user.findUnique({ where: { id: session.userId }, select: { id: true, isActive: true } })
     : null;

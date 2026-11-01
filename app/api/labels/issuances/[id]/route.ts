@@ -1,0 +1,7 @@
+import { getCurrentPrincipal } from "@/lib/auth";
+import { cancelQueuedLabel, getLabelIssuance, reconcileLabelIssuance, reprintLabelIssuance } from "@/lib/labels/issuance";
+import { LabelError } from "@/lib/labels/model";
+import { labelReply, labelFailure, readLabelBody } from "@/lib/labels/http";
+export const runtime = "nodejs";
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) { try { const principal = await getCurrentPrincipal(); return principal ? labelReply(await getLabelIssuance(principal, (await params).id)) : labelReply({ error: "Sign in required." }, 401); } catch (error) { return labelFailure(error); } }
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) { try { const principal = await getCurrentPrincipal(); if (!principal) return labelReply({ error: "Sign in required." }, 401); const input: Record<string, unknown> = { ...await readLabelBody(request), issuanceId: (await params).id }; if (input.action === "cancel") return labelReply(await cancelQueuedLabel(principal, input)); if (input.action === "reconcile") return labelReply(await reconcileLabelIssuance(principal, input)); if (input.action === "reprint") return labelReply(await reprintLabelIssuance(principal, input)); throw new LabelError("Choose cancel, reconcile or explicit reprint."); } catch (error) { return labelFailure(error); } }

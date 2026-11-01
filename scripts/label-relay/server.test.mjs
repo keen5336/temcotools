@@ -40,9 +40,9 @@ async function fixture(t, options = {}) {
     await next("hello");
     return { ws, send, next, messages };
   }
-  async function laptop(name = "Warehouse laptop", printerIds = ["p1"]) {
+  async function laptop(name = "Warehouse laptop", printerIds = ["p1"], registration = {}) {
     const client = await connect(name);
-    client.send({ type: "register", name, printerIds });
+    client.send({ type: "register", name, printerIds, ...registration });
     await client.next("registered");
     return client;
   }
@@ -62,6 +62,77 @@ test("rejects unsigned and cross-origin WebSocket upgrades", async (t) => {
     });
     assert.equal(status, expected);
   }
+});
+
+test("managed relay dispatches only ledger-approved content and records the connected device result", async t => {
+  const reports = [], cancellations = [], claims = [];
+  const managed = await fixture(t, {
+    authorizeDispatch: async input => {
+      claims.push(input);
+      return { dispatch: true, issuanceId: input.issuanceId, deviceId: input.deviceId, reportToken: "synthetic-report-token", printer, zpl: "^XA^FDApproved ledger label^FS^XZ\x04" };
+    },
+    recordDelivery: async input => { reports.push(input); },
+    cancelQueued: async input => { cancellations.push(input); },
+  });
+  const receiver = await managed.laptop("Managed laptop", ["p1"], { deviceId: "synthetic-device", deviceToken: "synthetic-device-token" });
+  const sender = await managed.connect("requester");
+  print(sender, "managed-r1", { issuanceId: "issuance-one", deviceId: "synthetic-device", zpl: "^XA^FDClient-forged content^FS^XZ" });
+  const job = await receiver.next("job");
+  assert.equal(job.zpl, "^XA^FDApproved ledger label^FS^XZ\x04");
+  assert.equal(job.dispatch.issuanceId, "issuance-one");
+  assert.equal(claims[0].cookie, "session=Managed laptop");
+  receiver.send({ type: "result", jobId: job.jobId, ok: true });
+  assert.equal((await sender.next("result")).ok, true);
+  assert.equal(reports.length, 1); assert.equal(reports[0].status, "sent_unconfirmed");
+  assert.equal(reports[0].cookie, "session=Managed laptop");
+  assert.equal(cancellations.length, 0);
+});
+
+test("managed queue reauthorizes at actual dispatch and never sends a revoked queued intent", async t => {
+  let secondAllowed = true;
+  const claims = [], cancellations = [];
+  const managed = await fixture(t, {
+    authorizeDispatch: async input => {
+      claims.push(input.issuanceId);
+      if (input.issuanceId === "issuance-two" && !secondAllowed) throw new Error("Requester grant revoked");
+      return { dispatch: true, issuanceId: input.issuanceId, deviceId: input.deviceId, reportToken: "synthetic-report-token", printer, zpl: "^XA^FDApproved^FS^XZ" };
+    },
+    recordDelivery: async () => undefined,
+    cancelQueued: async input => { cancellations.push(input.issuanceId); },
+  });
+  const receiver = await managed.laptop("Managed laptop", ["p1"], { deviceId: "synthetic-device", deviceToken: "synthetic-device-token" });
+  const first = await managed.connect("first-requester"), second = await managed.connect("second-requester");
+  print(first, "managed-one", { issuanceId: "issuance-one", deviceId: "synthetic-device" });
+  const firstJob = await receiver.next("job");
+  print(second, "managed-two", { issuanceId: "issuance-two", deviceId: "synthetic-device" });
+  secondAllowed = false;
+  receiver.send({ type: "result", jobId: firstJob.jobId, ok: true });
+  assert.equal((await first.next("result")).ok, true);
+  const rejected = await second.next("result");
+  assert.equal(rejected.ok, false); assert.match(rejected.error, /authorization/);
+  assert.deepEqual(claims, ["issuance-one", "issuance-two"]);
+  assert.ok(cancellations.includes("issuance-two"));
+  assert.equal(receiver.messages.some(message => message.type === "job"), false);
+});
+
+test("managed disconnect preserves an unknown receipt and does not move the job to another device", async t => {
+  const reports = [], claims = [];
+  const managed = await fixture(t, {
+    authorizeDispatch: async input => { claims.push(input.issuanceId); return { dispatch: true, issuanceId: input.issuanceId, deviceId: input.deviceId, reportToken: "synthetic-report-token", printer, zpl: "^XA^FDApproved^FS^XZ" }; },
+    recordDelivery: async input => { reports.push(input); },
+    cancelQueued: async () => undefined,
+  });
+  const receiver = await managed.laptop("Managed laptop", ["p1"], { deviceId: "synthetic-device", deviceToken: "synthetic-device-token" });
+  const spare = await managed.laptop("Spare laptop", ["p1"], { deviceId: "spare-device", deviceToken: "spare-token" });
+  const sender = await managed.connect("requester");
+  print(sender, "managed-r1", { issuanceId: "issuance-one", deviceId: "synthetic-device" });
+  await receiver.next("job"); receiver.ws.close();
+  const result = await sender.next("result");
+  assert.equal(result.ok, false); assert.match(result.error, /may have been sent/);
+  assert.equal(reports.length, 1); assert.equal(reports[0].status, "unknown");
+  assert.equal(reports[0].cookie, "session=Managed laptop");
+  assert.deepEqual(claims, ["issuance-one"]);
+  assert.equal(spare.messages.some(message => message.type === "job"), false);
 });
 
 test("routes across users to exactly one laptop and waits for its acknowledgement", async (t) => {

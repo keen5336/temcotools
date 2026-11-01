@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { OperatorPrinter } from "./useLabelConfiguration";
-import { labelRelayUrl, sendLabelDirect } from "@/lib/label-printing";
+import { labelRelayUrl, registerBrowserPrintingDevice, sendLabelDirect, type BrowserPrintingDevice } from "@/lib/label-printing";
 
 const storageKey = "label-relay.laptop";
 interface Settings { enabled: boolean; name: string; printerIds: string[] }
@@ -95,6 +95,8 @@ export default function LabelRelayProvider({ userId, children }: { userId: strin
     let stopped = false;
     let socket: WebSocket;
     let timer: ReturnType<typeof setTimeout>;
+    let printingDevice: BrowserPrintingDevice | undefined;
+    let lastDeviceRenewal = 0;
     let wakeLock: WakeLockSentinel | undefined;
     const keepAwake = async () => {
       if (document.visibilityState !== "visible" || !navigator.wakeLock || wakeLock) return;
@@ -115,25 +117,40 @@ export default function LabelRelayProvider({ userId, children }: { userId: strin
         if (stopped) return;
         const message = JSON.parse(event.data);
         const reply = (body: object) => { if (current.readyState === WebSocket.OPEN) current.send(JSON.stringify(body)); };
-        if (message.type === "heartbeat") reply({ type: "heartbeat" });
-        if (message.type === "hello") reply({ type: "register", name: settings.name, printerIds: settings.printerIds });
+        if (message.type === "heartbeat") {
+          reply({ type: "heartbeat" });
+          if (Date.now() - lastDeviceRenewal > 20_000) {
+            try { printingDevice = await registerBrowserPrintingDevice(settings.printerIds, "relay", settings.name); lastDeviceRenewal = Date.now(); }
+            catch { setStatus("Printing-device lease could not be renewed. Sign in again before more labels."); current.close(1008, "Printing device unavailable"); }
+          }
+        }
+        if (message.type === "hello") {
+          try {
+            printingDevice = await registerBrowserPrintingDevice(settings.printerIds, "relay", settings.name); lastDeviceRenewal = Date.now();
+            if (!stopped && current.readyState === WebSocket.OPEN) reply({ type: "register", name: settings.name, printerIds: settings.printerIds, deviceId: printingDevice.device.id, deviceToken: printingDevice.deviceToken });
+          } catch (error) { setStatus(error instanceof Error ? error.message : "Printing device unavailable."); current.close(1008, "Printing device unavailable"); }
+        }
         if (message.type === "registered") { setConnected(true); setStatus("Ready — waiting for labels"); }
         if (message.type === "error") { setConnected(false); setStatus(message.error); }
         if (message.type !== "job") return;
+        if (!printingDevice || !message.dispatch?.dispatch || message.dispatch.deviceId !== printingDevice.device.id) {
+          reply({ type: "result", jobId: message.jobId, ok: false, deliveryStatus: "not_sent", error: "A current authorized managed dispatch is required. No printer request was made." });
+          return;
+        }
         // No job is replayed after a connection loss, including across reconnects.
         if (seen.current.has(message.jobId)) return;
         seen.current.add(message.jobId);
         if (seen.current.size > 1000) seen.current.delete(seen.current.values().next().value!);
         if (inFlight.current) {
-          reply({ type: "result", jobId: message.jobId, ok: false, error: "This laptop is still sending a previous label. Try again after it finishes." });
+          reply({ type: "result", jobId: message.jobId, ok: false, deliveryStatus: "not_sent", error: "This laptop is still sending a previous label. No new printer request was made." });
           return;
         }
         inFlight.current = true;
         setStatus(`Sending to ${message.printer.name}…`);
         let ok = false;
-        let result = "Sent to printer";
+        let result = "Sent to printer; physical output unconfirmed";
         try {
-          await sendLabelDirect(message.printer, message.zpl);
+          await sendLabelDirect(message.printer, message.zpl, message.dispatch);
           ok = true;
         } catch (error) { result = error instanceof Error ? error.message : "Printer delivery could not be confirmed."; }
         finally { inFlight.current = false; }
