@@ -25,11 +25,11 @@ async function main() {
     const registration = await fetch(new URL("/register", issuer), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_name: "Synthetic running verification", redirect_uris: [callback], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }) }); assert.equal(registration.status, 201);
     clientId = (await registration.json()).client_id; assert.ok(clientId);
     const verifier = randomBytes(32).toString("base64url");
-    const params = new URLSearchParams({ client_id: clientId!, redirect_uri: callback, response_type: "code", scope: "inventory.read", resource: resource.href, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256", state: suffix });
+    const params = new URLSearchParams({ client_id: clientId!, redirect_uri: callback, response_type: "code", scope: "inventory.read account.self", resource: resource.href, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256", state: suffix });
     const start = await fetch(new URL(`/authorize?${params}`, issuer), { redirect: "manual" }); assert.equal(start.status, 302);
     const requestId = new URL(start.headers.get("location")!).searchParams.get("request"); assert.ok(requestId);
     const bound = await fetch(new URL(`/api/oauth-consent?request=${encodeURIComponent(requestId!)}`, app), { headers }); assert.equal(bound.status, 200);
-    const approved = await fetch(new URL("/api/oauth-consent", app), { method: "POST", headers, body: JSON.stringify({ requestId, decision: "approve", scopes: ["inventory.read"] }) }); assert.equal(approved.status, 200);
+    const approved = await fetch(new URL("/api/oauth-consent", app), { method: "POST", headers, body: JSON.stringify({ requestId, decision: "approve", scopes: ["inventory.read", "account.self"] }) }); assert.equal(approved.status, 200);
     const code = new URL((await approved.json()).redirectTo).searchParams.get("code"); assert.ok(code);
     const exchange = await fetch(new URL("/token", issuer), { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: clientId!, grant_type: "authorization_code", code: code!, code_verifier: verifier, redirect_uri: callback, resource: resource.href }) }); assert.equal(exchange.status, 200);
     const tokens = await exchange.json(); assert.ok(tokens.access_token);
@@ -43,6 +43,14 @@ async function main() {
     const physical = await sdk.callTool({ name: "application_action", arguments: { action: "warehouse.physical-stock", input: { search: `SYNTHETIC-NOT-STOCK-${suffix}`, limit: 1 } } }); assert.equal(physical.isError, undefined);
     const physicalText = CallToolResultSchema.parse(physical).content.find(item => item.type === "text"); assert.ok(physicalText && physicalText.type === "text");
     const physicalPage = JSON.parse(physicalText.text); assert.deepEqual(physicalPage.items, []); assert.equal(physicalPage.hasMore, false); assert.equal(physicalPage.view, "present");
+    const catalog = await sdk.callTool({ name: "application_action", arguments: { action: "tools.favorites", input: {} } }); assert.equal(catalog.isError, undefined);
+    const catalogText = CallToolResultSchema.parse(catalog).content.find(item => item.type === "text"); assert.ok(catalogText && catalogText.type === "text");
+    const catalogPage = JSON.parse(catalogText.text) as { tools: { id: string; name: string; href: string }[]; capabilities: string[] };
+    assert.deepEqual([...catalogPage.capabilities].sort(), ["account.self", "inventory.read"]);
+    assert.ok(catalogPage.tools.some(tool => tool.id === "inventory-audit" && tool.name && tool.href === "/tools/inventory-audit"));
+    assert.equal(catalogPage.tools.some(tool => ["office", "users", "payloads", "labels"].includes(tool.id)), false, "The catalog must preserve the client's actual scope even when the person has broader warehouse rights.");
+    const uiCatalog = await fetch(new URL("/api/tool-favorites", app), { headers }); assert.equal(uiCatalog.status, 200);
+    assert.ok((await uiCatalog.json()).tools.some((tool: { id: string }) => tool.id === "inventory-audit"), "The UI API uses the same catalog query.");
     const refreshDenied = await sdk.callTool({ name: "application_action", arguments: { action: "office.refresh.advance", input: { operationId: randomUUID() } } }); assert.equal(refreshDenied.isError, true, "An inventory-read OAuth grant cannot advance Office evaluation.");
     const query = await sdk.callTool({ name: "warehouse_lookup", arguments: { kind: "lpn", value: `SYNTHETIC-NOT-STOCK-${suffix}` } }); assert.equal(query.isError, undefined);
     const denied = await sdk.callTool({ name: "application_action", arguments: { action: "identity.users", input: {} } }); assert.equal(denied.isError, true);

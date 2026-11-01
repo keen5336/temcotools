@@ -18,7 +18,7 @@ export const TOOLS: readonly Tool[] = [
   { id: "rtv-label", capability: "labels.read", name: "MARS Label Tool", href: "/tools/rtv-label", description: "Generate and print MARS return shipping labels." },
   { id: "report-engine", capability: "workflow.read", name: "Report Engine (Legacy)", href: "/tools/report-engine", description: "Legacy CSV pipelines pending retirement; shared warehouse views are the v2 replacement." },
   { id: "lpn-put-away", capability: "inventory.read", name: "LPN Put Away", href: "/tools/lpn-put-away", description: "Use the shared WMS import to list Placing LPNs by received date." },
-  { id: "inventory-audit", capability: "inventory.read", name: "Inventory Audit", href: "/tools/inventory-audit", description: "Track every reported LPN, compare Pick Wave scans, and archive completed inventory." },
+  { id: "inventory-audit", capability: "inventory.read", name: "Inventory Audit", href: "/tools/inventory-audit", description: "Review shared physical observations separately from reported WMS rows and retained Pick Wave audits." },
   { id: "barcode-generator", capability: "labels.read", name: "Barcode Generator", href: "/tools/barcode-generator", description: "Paste a list of values to generate and print a batch of barcodes." },
   { id: "scan-lists", capability: "workflow.read", name: "Scan Lists", href: "/tools/scan-lists", description: "Create named local scan sessions, save finished lists, and export them to CSV." },
   { id: "pick-waves", capability: "workflow.read", name: "Pick Waves", href: "/tools/pick-waves", description: "Upload pick lists, map route staging locations, scan items, and print staging labels." },

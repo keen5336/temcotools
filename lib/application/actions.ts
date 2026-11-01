@@ -107,7 +107,7 @@ export const applicationActions = {
   "access.grant.revoke": { capability: "account.self", description: "Revoke your client grant", inputSchema: z.object({ id: z.string().min(1).max(200) }), run: (p: Principal, input: unknown) => revokeAccessGrant(p, text(input, "id")) },
   "access.oauth.grants": { capability: "account.self", description: "List your remote MCP client grants", inputSchema: z.object({}), run: listOAuthGrants },
   "access.oauth.revoke": { capability: "account.self", description: "Revoke your remote MCP client grant", inputSchema: z.object({ id: z.string().min(1).max(200) }), run: (p: Principal, input: unknown) => revokeOAuthGrant(p, text(input, "id")) },
-  "tools.favorites": { capability: "account.self", description: "Read your authorized favorite tools", inputSchema: z.object({}), run: getToolFavorites },
+  "tools.favorites": { capability: "account.self", description: "Read your currently authorized tool catalog, names, URLs and favorite IDs within your client scope", inputSchema: z.object({}), run: getToolFavorites },
   "tools.favorites.save": { capability: "account.self", description: "Save or reorder your authorized favorite tools", inputSchema: favoriteChangeInput, run: (p: Principal, input: unknown) => saveToolFavorites(p, parseFavoriteChange(input)) },
   "office.cases": { capability: "workflow.read", description: "Review durable office cases without recreating resolved issues", inputSchema: office.listOfficeCasesInputSchema, run: office.listOfficeCases },
   "office.case": { capability: "workflow.read", description: "Read a case and its attributed history", inputSchema: office.getOfficeCaseInputSchema, run: office.getOfficeCase },
