@@ -1,9 +1,9 @@
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
-import LpnPutAwayClient from "./LpnPutAwayClient";
+import SharedPutAwayClient from "@/components/warehouse/SharedPutAwayClient";
 
 export default async function LpnPutAwayPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("inventory.read");
 
   return (
     <div className="min-h-screen bg-base-200">
@@ -13,10 +13,10 @@ export default async function LpnPutAwayPage() {
           LPN Put Away
         </h1>
         <p className="text-base-content/70 mb-6">
-          Upload the LPN report, choose a received date, and pull the Placing
-          list for put away.
+          Choose a received date to view Placing rows from the shared WMS report.
+          The original local-file workflow remains available as a fallback.
         </p>
-        <LpnPutAwayClient />
+        <SharedPutAwayClient />
       </main>
     </div>
   );

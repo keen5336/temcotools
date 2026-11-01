@@ -24,6 +24,7 @@ export interface WarehouseInventoryRow {
   verifiedAt: Date | null;
   lastScannedAt: Date | null;
   archivedAt: Date | null;
+  unitId?: string | null;
 }
 
 export interface WarehouseScanRow {
@@ -45,6 +46,9 @@ export interface WarehouseImportRow {
   filename: string;
   createdAt: Date;
   rowCount: number;
+  scope?: string;
+  coverage?: string;
+  sourceAsOf?: Date | null;
 }
 
 export interface WarehouseLookupSnapshot {
@@ -52,6 +56,10 @@ export interface WarehouseLookupSnapshot {
   scans: WarehouseScanRow[];
   scanCount: number;
   latestImport: WarehouseImportRow | null;
+  membership?: "included" | "not_in_complete_report" | "unknown";
+  rowSourceReport?: WarehouseImportRow | null;
+  identifierResolution?: "resolved" | "ambiguous" | "unresolved";
+  resolvedUnitId?: string | null;
 }
 
 export interface WarehouseLookupRepository {
@@ -59,7 +67,7 @@ export interface WarehouseLookupRepository {
 }
 
 const OBSERVATION_LIMIT = 20;
-const SOURCE_LIMITATION = "The latest warehouse import time is not the WMS report's source-as-of time. Older retained rows may not be in the latest report; current membership is not recorded yet.";
+const SOURCE_LIMITATION = "Import time and source-as-of time are separate. Membership describes the selected source scope/report; absence from a partial report is unknown and is never proof of physical departure.";
 const PHYSICAL_LIMITATION = "A WMS row, archive flag or prior scan does not establish current physical presence. Review the original observation and any later movement evidence.";
 
 export interface WarehouseObservation {
@@ -80,6 +88,7 @@ export interface WarehouseObservation {
 function candidate(row: WarehouseInventoryRow) {
   return {
     inventoryRecordId: row.id,
+    unitId: row.unitId ?? null,
     lpn: row.lpn,
     reportedStatus: row.status,
     orderNumber: row.orderNumber,
@@ -134,9 +143,24 @@ async function databaseRepository(): Promise<WarehouseLookupRepository> {
       const [scans, scanCount, latestImport] = await Promise.all([
         input.kind === "lpn" ? tx.inventoryAuditScan.findMany({ where: { lpn: input.value }, orderBy: [{ scannedAt: "desc" }, { id: "desc" }], take: OBSERVATION_LIMIT }) : [],
         input.kind === "lpn" ? tx.inventoryAuditScan.count({ where: { lpn: input.value } }) : 0,
-        tx.inventoryAuditImport.findFirst({ orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, filename: true, createdAt: true, rowCount: true } }),
+        tx.inventoryAuditImport.findFirst({ where: { scope: "warehouse" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, filename: true, createdAt: true, rowCount: true, scope: true, coverage: true, sourceAsOf: true } }),
       ]);
-      return { rows, scans, scanCount, latestImport };
+      let membership: WarehouseLookupSnapshot["membership"] = "unknown";
+      let rowSourceReport: WarehouseImportRow | null = null;
+      let identifierResolution: WarehouseLookupSnapshot["identifierResolution"];
+      let resolvedUnitId: string | null = null;
+      if (input.kind === "lpn") {
+        const aliases = await tx.warehouseIdentifier.findMany({ where: { kind: "lpn", namespace: "wms", value: input.value, revokedAt: null }, select: { unitId: true }, take: 101 });
+        const unitIds = [...new Set(aliases.map((alias) => alias.unitId))];
+        identifierResolution = unitIds.length === 0 ? "unresolved" : unitIds.length > 1 || aliases.length > 100 ? "ambiguous" : "resolved";
+        resolvedUnitId = identifierResolution === "resolved" ? unitIds[0] : null;
+        const latestMember = latestImport ? await tx.inventoryImportMembership.findUnique({ where: { importId_lpn: { importId: latestImport.id, lpn: input.value } } }) : null;
+        const rowMember = await tx.inventoryImportMembership.findFirst({ where: { lpn: input.value }, include: { importBatch: true }, orderBy: [{ importBatch: { createdAt: "desc" } }, { id: "desc" }] });
+        rowSourceReport = rowMember?.importBatch ?? null;
+        if (latestMember) membership = "included";
+        else if (latestImport?.coverage === "complete" && await tx.inventoryImportMembership.count({ where: { importId: latestImport.id } }) > 0) membership = "not_in_complete_report";
+      }
+      return { rows, scans, scanCount, latestImport, membership, rowSourceReport, identifierResolution, resolvedUnitId };
     }, { isolationLevel: "RepeatableRead" }),
   };
 }
@@ -149,9 +173,9 @@ export async function lookupWarehouseInventory(principal: Principal, input: unkn
   const common = {
     normalizedValue: query.value,
     source: "WMS Inventory Audit" as const,
-    sourceAsOf: null,
-    latestImport: snapshot.latestImport ? { importId: snapshot.latestImport.id, filename: snapshot.latestImport.filename, importedAt: snapshot.latestImport.createdAt.toISOString(), rowCount: snapshot.latestImport.rowCount } : null,
-    latestReportMembership: "unknown" as const,
+    sourceAsOf: snapshot.rowSourceReport?.sourceAsOf?.toISOString() ?? null,
+    latestImport: snapshot.latestImport ? { importId: snapshot.latestImport.id, filename: snapshot.latestImport.filename, importedAt: snapshot.latestImport.createdAt.toISOString(), rowCount: snapshot.latestImport.rowCount, scope: snapshot.latestImport.scope ?? "warehouse", coverage: snapshot.latestImport.coverage ?? "unknown", sourceAsOf: snapshot.latestImport.sourceAsOf?.toISOString() ?? null } : null,
+    latestReportMembership: snapshot.membership ?? "unknown" as const,
     physicalPresence: "not_determined" as const,
     limitations: [SOURCE_LIMITATION, PHYSICAL_LIMITATION],
   };
@@ -163,7 +187,8 @@ export async function lookupWarehouseInventory(principal: Principal, input: unkn
   return {
     ...common,
     kind: "lpn" as const,
-    record: row ? { ...candidate(row), sourceData: row.sourceData, firstImportedAt: row.firstSeenAt.toISOString(), legacyVerifiedAt: row.verifiedAt?.toISOString() ?? null, rowSummaryLastScannedAt: row.lastScannedAt?.toISOString() ?? null } : null,
+    identifierResolution: snapshot.identifierResolution ?? "unresolved",
+    record: row ? { ...candidate(row), reportedUnitId: row.unitId ?? null, unitId: snapshot.identifierResolution ? snapshot.resolvedUnitId ?? null : row.unitId ?? null, sourceData: row.sourceData, firstImportedAt: row.firstSeenAt.toISOString(), legacyVerifiedAt: row.verifiedAt?.toISOString() ?? null, rowSummaryLastScannedAt: row.lastScannedAt?.toISOString() ?? null } : null,
     observations,
     observationCount: snapshot.scanCount,
     observationsTruncated: snapshot.scanCount > observations.length,

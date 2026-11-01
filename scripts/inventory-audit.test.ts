@@ -31,9 +31,17 @@ test("Inventory Audit keeps historical inventory and reconciles complete, repeat
   const { prisma } = await import("../lib/db");
   const { archiveAuditItems, exportPickWaveToAudit, getInventoryAudit, importInventoryReport, parseAuditFilters } = await import("../lib/inventory-audit");
   const importRows = (rows: LpnSourceRow[]) => importInventoryReport({ rows, filename: "lpn-report.xlsx", uploadedByName: "Audit tester" });
+  // Only the exact local disposable database accepted above is reset. The v2
+  // evidence relationships must be cleared before this legacy fixture's rows.
+  await prisma.warehouseObservationCorrection.deleteMany();
+  await prisma.warehousePhysicalObservation.deleteMany();
+  await prisma.inventoryImportMembership.deleteMany();
+  await prisma.inventorySourceRevision.deleteMany();
   await prisma.inventoryAuditScan.deleteMany();
   await prisma.inventoryAuditItem.deleteMany();
   await prisma.inventoryAuditImport.deleteMany();
+  await prisma.warehouseIdentifier.deleteMany();
+  await prisma.warehouseUnit.deleteMany();
   await prisma.pickWave.deleteMany();
   await prisma.user.deleteMany();
   try {

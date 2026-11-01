@@ -2,6 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { InventoryAuditValidationError, normalizeLpn, prepareLpnReport, type LpnSourceRow } from "@/lib/lpn-report";
+import { retainCurrentSourceRevisions, retainImportedInventory } from "@/lib/warehouse/source-history";
+import type { Principal } from "@/lib/auth/principal";
+import { assertCurrentPrincipal } from "@/lib/auth/identity";
 
 export { InventoryAuditValidationError };
 const WRITE_LOCK = 8100801;
@@ -29,15 +32,27 @@ export function auditItemWhere(filters: AuditFilters): Prisma.InventoryAuditItem
   };
 }
 
-export async function importInventoryReport(options: { rows: LpnSourceRow[]; filename: string; uploadedByName: string }) {
+export async function importInventoryReport(options: { rows: LpnSourceRow[]; filename: string; uploadedByName: string; uploadedByUserId?: string; scope?: string; coverage?: "partial" | "complete"; sourceAsOf?: string | null; actorPrincipal?: Principal }) {
+  const scope = options.scope?.trim() || "warehouse";
+  if (scope.length > 100) throw new InventoryAuditValidationError("Import scope must be 100 characters or fewer.");
+  const coverage = options.coverage ?? "partial";
+  if (coverage !== "partial" && coverage !== "complete") throw new InventoryAuditValidationError("Choose partial or complete report coverage.");
+  const sourceAsOf = options.sourceAsOf ? new Date(options.sourceAsOf) : null;
+  if (sourceAsOf && (Number.isNaN(sourceAsOf.getTime()) || !/T.*(Z|[+-]\d{2}:\d{2})$/.test(options.sourceAsOf!))) throw new InventoryAuditValidationError("Source-as-of must include a valid date, time and timezone, or be left unknown.");
   const parsed = prepareLpnReport(options.rows);
   const records = parsed.items.map((item) => ({ ...item, id: randomUUID(), contentHash: createHash("sha256").update(JSON.stringify(item.sourceData)).digest("hex") }));
   return prisma.$transaction(async (tx) => {
+    if (options.actorPrincipal) await assertCurrentPrincipal(tx, options.actorPrincipal, "inventory.write");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WRITE_LOCK})`;
+    if (sourceAsOf) {
+      const newer = await tx.inventoryAuditImport.findFirst({ where: { scope, sourceAsOf: { gt: sourceAsOf } }, select: { id: true } });
+      if (newer) throw new InventoryAuditValidationError("A newer source-as-of report is already accepted for this scope. Refresh from that source instead of replacing it with older data.");
+    }
     let insertedCount = 0, changedCount = 0, unchangedCount = 0;
     const changedAt = new Date();
     for (let offset = 0; offset < records.length; offset += CHUNK_SIZE) {
       const chunk = records.slice(offset, offset + CHUNK_SIZE);
+      await retainCurrentSourceRevisions(tx, chunk.map((item) => item.lpn));
       const existing = await tx.inventoryAuditItem.findMany({ where: { lpn: { in: chunk.map((item) => item.lpn) } }, select: { lpn: true, contentHash: true } });
       const hashes = new Map(existing.map((item) => [item.lpn, item.contentHash]));
       for (const item of chunk) {
@@ -67,11 +82,16 @@ export async function importInventoryReport(options: { rows: LpnSourceRow[]; fil
         WHERE "InventoryAuditItem"."contentHash" <> EXCLUDED."contentHash"
       `;
     }
-    return tx.inventoryAuditImport.create({ data: {
+    const batch = await tx.inventoryAuditImport.create({ data: {
       filename: options.filename.slice(0, 255), uploadedByName: options.uploadedByName,
       rowCount: records.length, insertedCount, changedCount, unchangedCount,
       duplicateCount: parsed.duplicateCount, blankCount: parsed.blankCount,
+      scope, coverage, sourceAsOf, uploadedByUserId: options.uploadedByUserId ?? null,
     } });
+    for (let offset = 0; offset < records.length; offset += CHUNK_SIZE) {
+      await retainImportedInventory(tx, records.slice(offset, offset + CHUNK_SIZE).map((item) => item.lpn), batch.id, options.uploadedByUserId);
+    }
+    return batch;
   }, { timeout: 120_000, maxWait: 120_000 });
 }
 
