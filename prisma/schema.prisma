@@ -51,6 +51,27 @@ model DashboardPreference {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+model DmpOperation {
+  id             String   @id @default(cuid())
+  actorUserId    String
+  actorSessionId String
+  actorGrantId   String?
+  operationId    String
+  operation      String
+  method         String
+  connectionId   String
+  inputHash      String
+  state          String
+  requestId      String?
+  upstreamStatus Int?
+  responseHash   String?
+  note           String?
+  createdAt      DateTime @default(now())
+  completedAt    DateTime?
+  @@unique([actorUserId, operationId])
+  @@index([actorUserId, createdAt])
+}
+
 model UserSession {
   id                      String    @id
   userId                  String
@@ -279,14 +300,6 @@ model LabelTemplate {
   @@index([kind, isActive, name])
 }
 
-model Pipeline {
-  id        String   @id @default(cuid())
-  name      String
-  steps     Json     @default("[]")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 model MarsImportBatch {
   id               String            @id @default(cuid())
   filename         String
@@ -424,6 +437,7 @@ model PickWave {
   items           PickWaveItem[]
   routeMappings   PickWaveRouteMapping[]
   scans           PickWaveScan[]
+  dispatchBindings DispatchWaveItem[]
 
   @@index([archivedAt, createdAt])
 }
@@ -444,6 +458,7 @@ model PickWaveItem {
   createdAt      DateTime       @default(now())
   pickWave       PickWave       @relation(fields: [pickWaveId], references: [id], onDelete: Cascade)
   scans          PickWaveScan[]
+  dispatchBinding DispatchWaveItem?
 
   @@unique([pickWaveId, rowNumber])
   @@index([pickWaveId, scannedAt])
@@ -795,6 +810,7 @@ model WarehouseUnit {
   originalExchanges OfficeExchange[] @relation("ExchangeOriginal")
   replacementExchanges OfficeExchange[] @relation("ExchangeReplacement")
   returnExpectations OfficeReturnExpectation[]
+  dispatchAllocations DispatchAllocation[]
 }
 
 model WarehouseIdentifier {
@@ -1048,6 +1064,208 @@ model OfficeReturnExpectation {
 }
 
 model OfficeCommandReceipt {
+  id          String @id @default(cuid())
+  userId      String
+  operationId String
+  fingerprint String
+  result      Json
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, operationId])
+}
+
+model DispatchBoard {
+  id             String @id @default(cuid())
+  day            String
+  scope          String
+  headSnapshotId String? @unique
+  headSnapshot   DispatchSnapshot? @relation("DispatchHead", fields: [headSnapshotId], references: [id], onDelete: Restrict)
+  nextVersion    Int @default(1)
+  revision       Int @default(1)
+  createdAt      DateTime @default(now())
+  snapshots      DispatchSnapshot[] @relation("DispatchSnapshots")
+  sessions       DispatchFinalsSession[]
+
+  @@unique([day, scope])
+}
+
+model DispatchSnapshot {
+  id             String @id @default(cuid())
+  boardId        String
+  board          DispatchBoard @relation("DispatchSnapshots", fields: [boardId], references: [id], onDelete: Restrict)
+  headFor        DispatchBoard? @relation("DispatchHead")
+  version        Int
+  baseHeadId     String?
+  sourceKind     String
+  sourceAsOf     DateTime
+  sourceRef      String
+  coverage       String
+  note           String
+  slots          Json
+  status         String @default("draft")
+  createdByUserId String
+  createdAt      DateTime @default(now())
+  approvedByUserId String?
+  approvedAt     DateTime?
+  allocations    DispatchAllocation[]
+  finalsSession  DispatchFinalsSession?
+
+  @@unique([boardId, version])
+}
+
+model DispatchAllocation {
+  id             String @id @default(cuid())
+  snapshotId     String
+  snapshot       DispatchSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  slotKey        String
+  unitId         String
+  unit           WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  matchEvidence  Json
+  createdByUserId String
+  createdAt      DateTime @default(now())
+  releasedAt     DateTime?
+  releaseReason  String?
+  reservation    DispatchReservation?
+  waveItem       DispatchWaveItem?
+
+  @@index([snapshotId, slotKey])
+}
+
+model DispatchReservation {
+  unitId       String @id
+  allocationId String @unique
+  allocation   DispatchAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  boardId      String
+  snapshotId   String
+  createdAt    DateTime @default(now())
+
+  @@index([boardId])
+}
+
+model DispatchWaveItem {
+  id             String @id @default(cuid())
+  allocationId   String @unique
+  allocation     DispatchAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
+  pickWaveId     String
+  pickWave       PickWave @relation(fields: [pickWaveId], references: [id], onDelete: Restrict)
+  pickWaveItemId String @unique
+  pickWaveItem   PickWaveItem @relation(fields: [pickWaveItemId], references: [id], onDelete: Restrict)
+  unitId         String
+  snapshotId     String
+
+  @@index([pickWaveId, unitId])
+}
+
+model DispatchFinalsSession {
+  id             String @id @default(cuid())
+  boardId        String
+  board          DispatchBoard @relation(fields: [boardId], references: [id], onDelete: Restrict)
+  snapshotId     String @unique
+  snapshot       DispatchSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  revision       Int @default(1)
+  createdByUserId String
+  createdAt      DateTime @default(now())
+  carriedSignoffs Json @default("{}")
+  laneClearances Json @default("{}")
+  scans          DispatchFinalsScan[]
+  credits        DispatchFinalsCredit[]
+  signoffs       DispatchLaneSignoff[]
+  amendments     DispatchAmendment[]
+}
+
+model DispatchFinalsScan {
+  id             String @id @default(cuid())
+  sessionId      String
+  session        DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  userId         String
+  eventId        String
+  fingerprint    String
+  rawIdentifier  String
+  actualLane     String
+  expectedLane   String?
+  unitId         String?
+  physicalObservationId String
+  resolution     String
+  candidateUnitIds Json
+  outcome        String
+  capturedAt     DateTime
+  receivedAt     DateTime @default(now())
+  reviewStatus   String @default("open")
+  reviewedByUserId String?
+  reviewReason   String?
+  reviewedAt     DateTime?
+  resolvedByScanId String?
+
+  @@unique([sessionId, userId, eventId])
+  @@index([sessionId, actualLane, receivedAt])
+}
+
+model DispatchFinalsCredit {
+  id             String @id @default(cuid())
+  sessionId      String
+  session        DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  slotKey        String
+  allocationId   String
+  unitId         String
+  lane           String
+  confirmedAt    DateTime
+  scanId         String
+  physicalObservationId String
+  carriedFromCreditId String?
+  status         String @default("confirmed")
+  invalidatedByScanId String?
+  invalidatedAt  DateTime?
+
+  @@index([sessionId, lane, status])
+}
+
+model DispatchLaneSignoff {
+  id             String @id @default(cuid())
+  sessionId      String
+  session        DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  lane           String
+  version        Int
+  snapshotId     String
+  sourceAsOf     DateTime
+  payload        Json
+  payloadHash    String
+  signedByUserId String
+  signedAt       DateTime @default(now())
+
+  @@unique([sessionId, lane, version])
+}
+
+model DispatchAmendment {
+  id              String @id @default(cuid())
+  sessionId       String
+  session         DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  lane            String
+  reason          String
+  affectedSlotKeys Json
+  priorSignoffId  String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  resolvedBySignoffId String?
+  resolvedAt      DateTime?
+
+  @@index([sessionId, lane, resolvedAt])
+}
+
+model DispatchEvent {
+  id          String @id @default(cuid())
+  boardId     String
+  snapshotId  String?
+  sessionId   String?
+  action      String
+  userId      String
+  note        String
+  payload     Json
+  createdAt   DateTime @default(now())
+
+  @@index([boardId, createdAt])
+}
+
+model DispatchCommandReceipt {
   id          String @id @default(cuid())
   userId      String
   operationId String
