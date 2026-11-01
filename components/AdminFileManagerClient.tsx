@@ -309,7 +309,7 @@ export default function AdminFileManagerClient() {
           </div>
 
           <div className="min-w-0 max-w-full overflow-x-auto">
-            <table className="table table-sm">
+            <table className="table table-sm min-w-[42rem]">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -329,27 +329,27 @@ export default function AdminFileManagerClient() {
                 ) : filteredEntries.length ? (
                   filteredEntries.map((entry) => (
                     <tr key={entry.path}>
-                      <td className="font-medium">{entry.name}</td>
+                      <td className="font-medium min-w-40 max-w-64 break-all">{entry.name}</td>
                       <td title={entry.blockedReason}>{entry.kind}</td>
                       <td>{entry.kind === "file" ? formatBytes(entry.size) : "—"}</td>
                       <td>{new Date(entry.modifiedAt).toLocaleString()}</td>
                       <td>
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-col items-stretch gap-2">
                           {entry.kind === "directory" ? (
-                            <button className="btn btn-xs" onClick={() => load(entry.path)}>
+                            <button className="btn btn-sm min-h-11" onClick={() => load(entry.path)}>
                               Open
                             </button>
                           ) : entry.kind === "file" ? (
                             <BoundApiLink
-                              className="btn btn-xs"
+                              className="btn btn-sm min-h-11"
                               href={`/api/admin/files/download?path=${encodeURIComponent(entry.path)}`}
                             >
                               Download
                             </BoundApiLink>
                           ) : <span className="text-xs text-warning">{entry.blockedReason}</span>}
-                          {entry.kind !== "blocked" && <button className="btn btn-xs" disabled={busy || !directoryReady} onClick={() => { setMoving(entry); setDestination(entry.path); }}>Move / Rename</button>}
+                          {entry.kind !== "blocked" && <button className="btn btn-sm min-h-11" disabled={busy || !directoryReady} onClick={() => { setMoving(entry); setDestination(entry.path); }}>Move / Rename</button>}
                           <button
-                            className="btn btn-xs btn-error btn-outline"
+                            className="btn btn-sm min-h-11 btn-error btn-outline"
                             disabled={busy || !directoryReady || entry.kind === "blocked"}
                             onClick={() => removeEntry(entry)}
                           >
