@@ -16,9 +16,9 @@ export function startDmpRelay(config) {
   const stopButton = document.createElement("button"); stopButton.textContent = "Disconnect";
   box.append(title, status, connectButton, document.createTextNode(" "), stopButton); panel.append(box); document.body.append(host);
   const active = new Map();
-  // Universal-loader mappings are an additional rejection-only binding. Legacy
-  // DMP loaders keep their existing config.payload fallback and pairing flow.
-  const payload = typeof TEMCO_PAYLOAD !== "undefined" && TEMCO_PAYLOAD.profileBinding ? TEMCO_PAYLOAD : config.payload || (typeof TEMCO_PAYLOAD === "undefined" ? undefined : TEMCO_PAYLOAD);
+  // Invocation metadata pins every managed immutable version, including its
+  // operation contract. Legacy loaders without metadata keep config.payload.
+  const payload = typeof TEMCO_PAYLOAD !== "undefined" ? TEMCO_PAYLOAD : config.payload;
   const controllers = new Set();
   let stopped = false, socket, popup, nonce, subject, identity, subjectPath, identityPromise, checkTimer;
   let generation = 0;

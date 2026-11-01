@@ -79,19 +79,21 @@ test("published wrapper checks actual origin/path before source and keeps pinned
   }
 });
 
-test("current DMP executor forwards universal binding but keeps legacy payload fallback", () => {
+test("current DMP executor pins managed metadata with or without site binding and preserves metadata-free legacy fallback", () => {
   const source = readFileSync("scripts/api-relay/executor.mjs", "utf8").replace(/^export /gm, "");
-  for (const bound of [false, true]) {
+  for (const mode of ["legacy", "managed", "bound"]) {
     const buttons: { textContent?: string; onclick?: () => void }[] = [], opened: string[] = [];
     const element = () => ({ textContent: "", onclick: undefined as (() => void) | undefined, style: {}, append: () => {}, attachShadow: () => ({ append: () => {} }), setAttribute: () => {}, remove: () => {} });
     const document = { createElement: (tag: string) => { const node = element(); if (tag === "button") buttons.push(node); return node; }, createTextNode: () => ({}), body: { append: () => {} } };
     const legacy = { payloadId: "dmp-relay", versionId: "builtin", contentHash: "b".repeat(64) };
-    const context = createContext({ document, location: { origin, pathname: binding.pathname }, window: { addEventListener: () => {}, open: (url: string) => { opened.push(url); return {}; } }, URL, crypto: { randomUUID: () => "00000000-0000-4000-8000-000000000000" }, alert: () => {}, setInterval: () => 1, clearInterval: () => {}, WebSocket: { CLOSING: 2 }, ...(bound ? { TEMCO_PAYLOAD: { payloadId: binding.payloadId, versionId: binding.versionId, contentHash: binding.contentHash, profileBinding: binding } } : {}) });
+    const context = createContext({ document, location: { origin, pathname: binding.pathname }, window: { addEventListener: () => {}, open: (url: string) => { opened.push(url); return {}; } }, URL, crypto: { randomUUID: () => "00000000-0000-4000-8000-000000000000" }, alert: () => {}, setInterval: () => 1, clearInterval: () => {}, WebSocket: { CLOSING: 2 }, ...(mode !== "legacy" ? { TEMCO_PAYLOAD: { payloadId: binding.payloadId, versionId: binding.versionId, contentHash: binding.contentHash, ...(mode === "bound" ? { profileBinding: binding } : {}) } } : {}) });
     new Script(`${source}\nstartDmpRelay(${JSON.stringify({ temcoOrigin: "https://temco.example.invalid", allowedOrigins: [origin], payload: legacy })});`).runInContext(context);
     buttons.find(button => button.textContent === "Connect")!.onclick!();
     const captured = JSON.parse(new URL(opened[0]).searchParams.get("payload")!);
-    assert.equal(captured.payloadId, bound ? binding.payloadId : legacy.payloadId);
-    assert.deepEqual(captured.profileBinding, bound ? binding : undefined);
+    assert.equal(captured.payloadId, mode !== "legacy" ? binding.payloadId : legacy.payloadId);
+    assert.equal(captured.versionId, mode !== "legacy" ? binding.versionId : legacy.versionId);
+    assert.equal(captured.contentHash, mode !== "legacy" ? binding.contentHash : legacy.contentHash);
+    assert.deepEqual(captured.profileBinding, mode === "bound" ? binding : undefined);
   }
 });
 
