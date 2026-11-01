@@ -10,6 +10,7 @@ COPY lib ./lib
 COPY scripts ./scripts
 # The retained label defaults/parser are shared by UI and application commands.
 COPY app/tools/rtv-label/marsLabelShared.ts ./app/tools/rtv-label/marsLabelShared.ts
+COPY components/pick-waves/pickWaveLabel.ts ./components/pick-waves/pickWaveLabel.ts
 COPY prisma.config.ts tsconfig.json ./
 
 RUN npx prisma generate
