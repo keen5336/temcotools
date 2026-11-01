@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { apiRelayControl } from "@/lib/api-relay/control";
 import { buildDmpRequest, dmpConfig } from "@/lib/api-relay/config";
+import { authorizeDmpPayload } from "@/lib/api-relay/payload-policy";
 
 export const runtime = "nodejs";
 export const maxDuration = 150;
@@ -16,13 +17,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ act
   if (req.headers.get("origin") !== new URL(appOrigin).origin) return reply({ error: "Same-origin request required." }, 403);
   try {
     const session = await getSession();
+  if (session.userId && !session.capabilities?.includes("workflow.read")) return Response.json({ error: "You do not have permission for this action." }, { status: 403 });
     const user = session.userId && session.isActive ? await prisma.user.findUnique({ where: { id: session.userId }, select: { id: true, isActive: true } }) : null;
     if (!user?.isActive) return reply({ error: "Sign in to use API relay." }, 401);
     const { action } = await params;
     if (!["status", "pair", "lease", "request", "disconnect"].includes(action)) return reply({ error: "Unknown action." }, 404);
     const config = dmpConfig();
     if (action === "status") {
-      const data = session.apiRelaySessionId ? await apiRelayControl("connections", { userId: user.id, sessionId: session.apiRelaySessionId }) : { connections: [] };
+      const data = session.apiRelaySessionId ? await apiRelayControl("connections", { userId: user.id, sessionId: session.apiRelaySessionId, authSessionId: session.sessionId, authVersion: session.authVersion }) : { connections: [] };
       return reply({ ...data, configured: config.configured, origins: config.origins, operations: Object.entries(config.operations).map(([id, op]) => ({ id, label: op.label })) });
     }
     if (action === "lease" && !session.apiRelaySessionId) return reply({ ok: true });
@@ -34,16 +36,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ act
     if (action === "pair") {
       if (!config.origins.includes(body.origin)) return reply({ error: "This DMP site is not configured." }, 400);
       if (!session.apiRelaySessionId) { session.apiRelaySessionId = randomUUID(); await session.save(); }
-      return reply(await apiRelayControl("pair", { userId: user.id, sessionId: session.apiRelaySessionId }, { origin: body.origin, identity: config.identity, subjectPath: config.subjectPath }));
+      const payloadGrant = await authorizeDmpPayload(body.payload, body.origin);
+      return reply(await apiRelayControl("pair", { userId: user.id, sessionId: session.apiRelaySessionId, authSessionId: session.sessionId, authVersion: session.authVersion }, { origin: body.origin, identity: config.identity, subjectPath: config.subjectPath, payloadGrant }));
     }
     if (!session.apiRelaySessionId) return reply({ error: "Pair a DMP tab first." }, 409);
-    const owner = { userId: user.id, sessionId: session.apiRelaySessionId };
+    const owner = { userId: user.id, sessionId: session.apiRelaySessionId, authSessionId: session.sessionId, authVersion: session.authVersion };
     if (action === "lease") return reply(await apiRelayControl("lease", owner));
     if (typeof body.connectionId !== "string" || body.connectionId.length > 100) return reply({ error: "Select a DMP connection." }, 400);
     if (action === "disconnect") return reply(await apiRelayControl("disconnect", owner, { connectionId: body.connectionId }));
     if (typeof body.operation !== "string") return reply({ error: "Select a DMP operation." }, 400);
     const request = buildDmpRequest(body.operation, body.input);
-    return reply(await apiRelayControl("request", owner, { connectionId: body.connectionId, request }));
+    return reply(await apiRelayControl("request", owner, { connectionId: body.connectionId, request, operation: body.operation }));
   } catch (error) {
     const status = error && typeof error === "object" && "status" in error ? Number(error.status) : error instanceof TypeError ? 503 : 400;
     return reply({ error: status === 503 ? "API relay service is unavailable." : error instanceof Error ? error.message : "API relay failed." }, status);

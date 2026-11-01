@@ -29,7 +29,8 @@ function fixture(t) {
     if (responses.has(new URL(url).pathname)) return responses.get(new URL(url).pathname)(options);
     return new Response("data", { status: 200 });
   } });
-  vm.runInContext(`(()=>{${protocol}\n${executor}\nstartDmpRelay({temcoOrigin:'https://temco.test',wsUrl:'wss://temco.test/api/api-relay/ws',allowedOrigins:['https://dmp.test'],maxConcurrent:4,maxResponseBytes:64});})();`, context);
+  const boot = () => vm.runInContext(`(()=>{${protocol}\n${executor}\nstartDmpRelay({temcoOrigin:'https://temco.test',wsUrl:'wss://temco.test/api/api-relay/ws',allowedOrigins:['https://dmp.test'],maxConcurrent:4,maxResponseBytes:64});})();`, context);
+  boot();
   t.after(() => window.__temcoApiRelay?.stop());
   const connect = elements.find((e) => e.tag === "button" && e.textContent === "Connect");
   connect.onclick();
@@ -39,8 +40,22 @@ function fixture(t) {
     await ws.message({ type: "paired", identity: { path: "/identity/me", timeoutMs: 1000 }, subjectPath: "subject" });
     await ws.message({ type: "ready" }); return ws;
   };
-  return { sockets, requests, responses, pair, ready, popup, identity: (value) => { identity = value; }, events, window };
+  return { sockets, requests, responses, pair, ready, popup, identity: (value) => { identity = value; }, events, window, boot };
 }
+
+test("loading another payload cannot replace or replay an in-flight operation", async t => {
+  const f = fixture(t), ws = await f.ready();
+  let finish;
+  f.responses.set("/mutation", () => new Promise(resolve => { finish = resolve; }));
+  await ws.message({ type: "request", requestId: "original-intent", request: { path: "/mutation", method: "POST", body: "synthetic" } });
+  await tick();
+  assert.equal(f.window.__temcoApiRelay.busy(), true);
+  assert.throws(f.boot, /work is still running/);
+  assert.equal(ws.readyState, 1);
+  finish(new Response("accepted")); await tick(); await tick();
+  assert.equal(f.requests.filter(request => request.url.endsWith("/mutation")).length, 1);
+  assert.equal(ws.sent.find(message => message.requestId === "original-intent").body, "accepted");
+});
 
 test("executor accepts pairing only from the expected Temco popup and nonce", async (t) => {
   const f = fixture(t);

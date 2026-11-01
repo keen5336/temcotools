@@ -12,7 +12,7 @@ const digest = (token) => createHash("sha256").update(token).digest("hex");
 const send = (ws, message) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); };
 const fault = (message, status = 400) => Object.assign(new Error(message), { status });
 
-export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs = 10000, leaseMs = LEASE_MS, pairMs = 90000, maxConcurrent = MAX_CONCURRENT, maxQueue = MAX_QUEUE }) {
+export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs = 10000, leaseMs = LEASE_MS, pairMs = 90000, maxConcurrent = MAX_CONCURRENT, maxQueue = MAX_QUEUE, authorize = async () => false }) {
   const key = controlKey(secret);
   const tokens = new Map();
   const connections = new Map();
@@ -53,12 +53,18 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
     for (const job of jobs) { clearTimeout(job.timer); job.resolve({ ok: false, error: message }); }
     c.ws.close(1000, "Relay ended");
   };
-  const dispatch = (c) => {
+  const dispatch = async (c) => {
+    if (c.dispatching) return;
     if (!connections.has(c.id) || !c.ready || !live(c.owner) || c.ws.readyState !== WebSocket.OPEN) return;
-    let running = [...c.pending.values()].filter((j) => j.started).length;
+    c.dispatching = true;
+    try {
     for (const [requestId, job] of c.pending) {
-      if (job.started || running >= maxConcurrent) continue;
-      running++;
+      if (job.started) continue;
+      if ([...c.pending.values()].filter(j => j.started).length >= maxConcurrent) break;
+      let allowed = false;
+      try { allowed = await authorize(job.owner || c.owner, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation: job.operation }); } catch { /* unavailable authorization fails closed */ }
+      if (!connections.has(c.id) || c.pending.get(requestId) !== job || !live(c.owner) || c.ws.readyState !== WebSocket.OPEN) continue;
+      if (!allowed) { complete(c, requestId, { ok: false, error: "Current user, client grant or payload authorization is unavailable. This queued request was not dispatched." }); continue; }
       job.started = true;
       clearTimeout(job.timer);
       job.timer = setTimeout(() => {
@@ -68,6 +74,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
       }, job.request.timeoutMs + 1000);
       send(c.ws, { type: "request", requestId, request: job.request });
     }
+    } finally { c.dispatching = false; }
   };
   const read = async (req) => {
     let bytes = 0;
@@ -103,7 +110,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
         if (identity.method !== "GET" || typeof data.subjectPath !== "string" || !/^[a-zA-Z0-9_.-]{1,200}$/.test(data.subjectPath)) throw fault("Configure the DMP identity endpoint.");
         if ([...tokens.values()].filter((t) => t.owner.userId === owner.userId).length >= 8 || [...connections.values()].filter((c) => c.owner.userId === owner.userId).length >= 8 || tokens.size >= 1024) throw fault("Too many DMP pairings. Disconnect an existing tab first.", 429);
         const token = randomBytes(32).toString("base64url");
-        tokens.set(digest(token), { owner, origin: data.origin, identity, subjectPath: data.subjectPath, expires: Date.now() + pairMs });
+        tokens.set(digest(token), { owner, origin: data.origin, identity, subjectPath: data.subjectPath, payloadGrant: data.payloadGrant, expires: Date.now() + pairMs });
         json(res, 200, { token, expiresIn: pairMs / 1000 }); return;
       }
       if (action === "connections") {
@@ -117,7 +124,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
       const request = validateRequest(data.request);
       const requestId = randomUUID();
       const result = await new Promise((resolve) => {
-        c.pending.set(requestId, { request, resolve, started: false, timer: setTimeout(() => complete(c, requestId, { ok: false, error: "DMP request expired in the queue without being sent." }), 60000) });
+        c.pending.set(requestId, { request, operation: data.operation, owner, resolve, started: false, timer: setTimeout(() => complete(c, requestId, { ok: false, error: "DMP request expired in the queue without being sent." }), 60000) });
         dispatch(c);
         res.on("close", () => {
           if (res.writableEnded || !c.pending.has(requestId)) return;
@@ -151,7 +158,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
             if (!t || t.expires <= Date.now() || !live(t.owner) || t.origin !== req.headers.origin) throw fault("Pairing expired.");
             tokens.delete(hash);
             clearTimeout(timer);
-            c = { id: randomUUID(), ws, owner: t.owner, origin: t.origin, identity: t.identity, subjectPath: t.subjectPath, ready: false, pending: new Map(), lastSeen: Date.now(), connectedAt: new Date().toISOString(), expires: Date.now() + 8 * 60 * 60 * 1000 };
+            c = { id: randomUUID(), ws, owner: t.owner, origin: t.origin, identity: t.identity, subjectPath: t.subjectPath, payloadGrant: t.payloadGrant, ready: false, pending: new Map(), lastSeen: Date.now(), connectedAt: new Date().toISOString(), expires: Date.now() + 8 * 60 * 60 * 1000 };
             connections.set(c.id, c);
             send(ws, { type: "paired", connectionId: c.id, identity: c.identity, subjectPath: c.subjectPath, maxConcurrent, maxResponseBytes: MAX_RESPONSE_BYTES });
             c.identityTimer = setTimeout(() => disconnect(c, "DMP identity check timed out."), c.identity.timeoutMs + 1000);
@@ -199,7 +206,17 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const relay = createApiRelayServer({ secret: process.env.SESSION_SECRET, allowedOrigins: (process.env.DMP_ORIGINS ?? "https://dmp.extapps.homedepot.com").split(",").map((s) => s.trim()).filter(Boolean) });
+  const appUrl = new URL("/api/internal/api-relay-authorization", process.env.API_RELAY_APP_URL || "http://127.0.0.1:3000");
+  const key = controlKey(process.env.SESSION_SECRET);
+  const authorize = async (owner, context) => {
+    if (!owner.authSessionId || !Number.isSafeInteger(owner.authVersion) || !context.operation) return false;
+    const check = async (currentOwner) => {
+      const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({owner:currentOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation}),redirect:"error",signal:AbortSignal.timeout(5000)});
+      return response.ok && (await response.json()).authorized === true;
+    };
+    return (await check(context.connectionOwner)) && (await check(owner));
+  };
+  const relay = createApiRelayServer({ secret: process.env.SESSION_SECRET, allowedOrigins: (process.env.DMP_ORIGINS ?? "https://dmp.extapps.homedepot.com").split(",").map((s) => s.trim()).filter(Boolean), authorize });
   relay.server.listen(Number(process.env.API_RELAY_PORT || 3003), process.env.API_RELAY_HOST || "127.0.0.1", () => console.log("API relay listening"));
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => { void relay.close().then(() => process.exit(0)); });
 }

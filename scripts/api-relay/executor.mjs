@@ -2,6 +2,7 @@
 // explicit in that route: no build-time bundle or DMP-specific operation here.
 export function startDmpRelay(config) {
   if (!config.allowedOrigins.includes(location.origin)) { alert("This page is not a configured DMP site."); return; }
+  if (window.__temcoApiRelay?.busy?.()) { alert("DMP work is still running. Wait for its result before loading another payload version."); return; }
   window.__temcoApiRelay?.stop();
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647";
@@ -15,6 +16,7 @@ export function startDmpRelay(config) {
   const stopButton = document.createElement("button"); stopButton.textContent = "Disconnect";
   box.append(title, status, connectButton, document.createTextNode(" "), stopButton); panel.append(box); document.body.append(host);
   const active = new Map();
+  const payload = config.payload || (typeof TEMCO_PAYLOAD === "undefined" ? undefined : TEMCO_PAYLOAD);
   const controllers = new Set();
   let stopped = false, socket, popup, nonce, subject, identity, subjectPath, identityPromise, checkTimer;
   let generation = 0;
@@ -143,6 +145,7 @@ export function startDmpRelay(config) {
     nonce = crypto.randomUUID();
     const url = new URL("/tools/api-relay/pair", config.temcoOrigin);
     url.searchParams.set("origin", location.origin); url.searchParams.set("nonce", nonce);
+    if (payload) url.searchParams.set("payload", JSON.stringify({payloadId:payload.payloadId,versionId:payload.versionId,contentHash:payload.contentHash}));
     popup = window.open(url.href, "_blank", "popup,width=560,height=650");
     if (!popup) { say("Allow this pairing popup, then press Connect again."); return; }
     connectButton.disabled = true; say("Confirm your account in the Temco pairing window.");
@@ -151,5 +154,5 @@ export function startDmpRelay(config) {
   stopButton.onclick = stop;
   window.addEventListener("message", onPair);
   window.addEventListener("pagehide", stop);
-  window.__temcoApiRelay = { stop };
+  window.__temcoApiRelay = { stop, busy: () => active.size > 0 };
 }

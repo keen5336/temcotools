@@ -8,5 +8,5 @@ export default async function ApiRelayPairPage({ searchParams }: { searchParams:
   const nonce = typeof query.nonce === "string" ? query.nonce : "";
   const config = dmpConfig();
   const session = await getSession();
-  return <ApiRelayPairClient origin={origin} nonce={nonce} allowed={config.configured && config.origins.includes(origin) && /^[a-f0-9-]{36}$/i.test(nonce)} displayName={session.userId && session.isActive ? session.displayName : null} />;
+  return <ApiRelayPairClient payload={typeof query.payload === "string" && query.payload.length < 1024 ? query.payload : undefined} origin={origin} nonce={nonce} allowed={config.configured && config.origins.includes(origin) && /^[a-f0-9-]{36}$/i.test(nonce)} displayName={session.userId && session.isActive ? session.displayName : null} />;
 }

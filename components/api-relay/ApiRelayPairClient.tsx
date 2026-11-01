@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export default function ApiRelayPairClient({ origin, nonce, displayName, allowed }: { origin: string; nonce: string; displayName: string | null; allowed: boolean }) {
+export default function ApiRelayPairClient({ origin, nonce, displayName, allowed, payload }: { origin: string; nonce: string; displayName: string | null; allowed: boolean; payload?: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -11,7 +11,7 @@ export default function ApiRelayPairClient({ origin, nonce, displayName, allowed
     setBusy(true); setMessage("");
     try {
       if (!window.opener) throw new Error("Open this pairing window using Connect on the DMP tab.");
-      const response = await fetch("/api/api-relay/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ origin }) });
+      const response = await fetch("/api/api-relay/pair", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ origin, ...(payload ? { payload: JSON.parse(payload) } : {}) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Pairing failed.");
       window.opener.postMessage({ type: "temco-api-relay-pair", nonce, token: result.token }, origin);

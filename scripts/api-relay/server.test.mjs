@@ -11,7 +11,7 @@ const bob = { userId: "bob", sessionId: "bob-session" };
 const identity = { path: "/api/me", timeoutMs: 1000 };
 
 async function fixture(t, options = {}) {
-  const relay = createApiRelayServer({ secret, allowedOrigins: [origin], heartbeatMs: 60000, ...options });
+  const relay = createApiRelayServer({ secret, allowedOrigins: [origin], heartbeatMs: 60000, authorize: async () => true, ...options });
   relay.server.listen(0, "127.0.0.1"); await once(relay.server, "listening");
   t.after(() => relay.close());
   const url = `http://127.0.0.1:${relay.server.address().port}`;
@@ -129,6 +129,25 @@ test("queue bounds and per-tab concurrency do not serialize other users", async 
   assert.equal(a.messages.filter((m) => m.type === "request").length, 0);
   f.respond(a, job1); await one;
   const job2 = await a.next("request"); assert.equal(job2.request.path, "/two"); f.respond(a, job2); await two;
+});
+
+test("queued authorization is rechecked before send without replaying or ending unrelated work", async (t) => {
+  let authorized = true;
+  const f = await fixture(t, { maxConcurrent: 1, authorize: async () => authorized });
+  const c = await f.paired();
+  const first = f.request(c, "/already-running"), running = await c.next("request");
+  const queued = f.request(c, "/must-not-send");
+  await f.control("connections");
+  authorized = false;
+  f.respond(c, running, "original result");
+  assert.equal((await first).body, "original result");
+  const denied = await queued;
+  assert.equal(denied.ok, false); assert.match(denied.error, /not dispatched/);
+  assert.equal(c.messages.some(message => message.type === "request" && message.request.path === "/must-not-send"), false);
+  authorized = true;
+  const next = f.request(c, "/new-authorized-intent"), job = await c.next("request");
+  assert.equal(job.request.path, "/new-authorized-intent");
+  f.respond(c, job, "new result"); assert.equal((await next).body, "new result");
 });
 
 test("timeout cancels a job, ignores late results, and does not retry", async (t) => {
