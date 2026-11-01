@@ -7,6 +7,7 @@ import { createApplicationMcpServer } from "@/lib/application/mcp";
 import { authenticateOAuthAccessToken } from "./grants";
 import { oauthConfig, type OAuthConfig } from "./config";
 import { TemcoOAuthProvider } from "./service";
+import { MAX_APPLICATION_BODY_BYTES } from "@/lib/application/http-limits";
 
 export function createMcpHttpApp(config: OAuthConfig = oauthConfig()) {
   const app = express();
@@ -32,7 +33,7 @@ export function createMcpHttpApp(config: OAuthConfig = oauthConfig()) {
     next();
   });
   // Authenticate before parsing the application's supported import size.
-  app.post("/mcp", bearer, express.json({ limit: 50 * 1024 * 1024 }), async (request, response) => {
+  app.post("/mcp", bearer, express.json({ limit: MAX_APPLICATION_BODY_BYTES }), async (request, response) => {
     const token = request.auth!.token;
     const server = createApplicationMcpServer(() => authenticateOAuthAccessToken(token, config));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -46,7 +47,7 @@ export function createMcpHttpApp(config: OAuthConfig = oauthConfig()) {
   // Protocol handlers, S256 PKCE validation, client validation and endpoint
   // rate limits are the maintained SDK's implementation.
   app.use(mcpAuthRouter({ provider, issuerUrl: config.issuerUrl, resourceServerUrl: config.resourceUrl, scopesSupported: [...CAPABILITIES], resourceName: "TemcoTools warehouse operations" }));
-  const errors: ErrorRequestHandler = (_error, _request, response, next) => { void next; if (!response.headersSent) response.status(400).json({ error: "Request could not be processed." }); };
+  const errors: ErrorRequestHandler = (error, _request, response, next) => { void next; if (!response.headersSent) response.status(error?.status === 413 ? 413 : 400).json({ error: error?.status === 413 ? "Application input exceeds the supported upload boundary." : "Request could not be processed." }); };
   app.use(errors);
   return { app, provider };
 }

@@ -67,7 +67,7 @@ Active people intrinsically receive `account.self` to secure their own sessions 
 
 OAuth principals carry `grantId: "oauth:<id>"`, `sessionId`, current capabilities and server-derived password/MFA timestamps. The shared `assertCurrentPrincipal` handles this namespace and ordinary AppAccessGrant IDs inside writer transactions. Printer/DMP dispatch must use that same current guard before actual send. Do not treat an OAuth grant ID as an AppAccessGrant row or drop it while copying a principal.
 
-The MCP resource authenticates before parsing up to the application's 50 MiB JSON/import boundary, and each tool uses `createApplicationMcpServer(authenticate)` to recheck current authority. The process does not gain camera, scanner or LAN-printer access; device-bound commands still require an authorized connected device and honest evidence.
+The MCP resource authenticates before parsing up to the application's 192 MiB JSON/import boundary (including base64 expansion of the bounded 128 MiB file batch), and each tool uses `createApplicationMcpServer(authenticate)` to recheck current authority. The process does not gain camera, scanner or LAN-printer access; device-bound commands still require an authorized connected device and honest evidence.
 
 ## Verification and release limits
 

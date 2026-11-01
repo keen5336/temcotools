@@ -71,7 +71,7 @@ export function emptyLabelFields(): LabelFields {
 export function sanitizeText(value: string): string {
   return String(value ?? "")
     .replace(/[\^~]/g, " ")
-    .replace(/[\r\n]+/g, " ")
+    .replace(/[\x00-\x1f\x7f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
