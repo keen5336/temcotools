@@ -2,6 +2,13 @@
 
 Internal warehouse operations web app for Temco, built with Next.js, TypeScript, Tailwind CSS, Prisma ORM, and a PIN-based authentication system.
 
+The proposed v2 direction and source-grounded current-state map are in
+[`docs/v2/strategy.md`](docs/v2/strategy.md), with the
+[`implementation plan`](docs/v2/implementation-plan.md) and
+[`bounded open questions`](docs/v2/open-questions.md). These are planning
+documents, not implemented runtime behavior. `REPO_MAP.json` is older orientation
+material and omits current features; prefer the v2 source map when planning work.
+
 ## Tech Stack
 
 - **Framework**: Next.js (App Router)
@@ -163,6 +170,10 @@ Run `npm run test:favorites` for catalog, permission, and ordering checks.
 paired Temco user. A small bookmarklet loads the current executor from Temco;
 the server supplies named API operations and the tab returns correlated results
 over a separate WebSocket service. Multiple requests can run concurrently.
+
+Owner update, 2026-10-31: this integration works well in actual use and should be
+preserved and extended. That report supersedes earlier live-verification caveats;
+it does not establish contracts for additional DMP or MARS operations.
 
 Configuration and deployment routing are documented in
 [`scripts/api-relay/README.md`](scripts/api-relay/README.md). Defaults use Home

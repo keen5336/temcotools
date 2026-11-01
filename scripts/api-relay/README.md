@@ -24,8 +24,11 @@ broker. An identity response must be successful JSON with a stable string or
 numeric subject at the configured dot-separated property path. DMP returns
 `subject` (user ID) and `email`; the relay binds only the stable `subject` and
 does not need the email. Explicitly empty origin/identity configuration disables
-pairing. These endpoints were provided by the user; live DMP access has not yet
-been verified.
+pairing. Owner update, 2026-10-31: the existing integration works well in actual
+use and must be preserved. This supersedes the original unverified-live-access
+note. The v2 planning inspection made no live calls and does not verify any
+additional upstream operations or response mappings. See the
+[v2 strategy](../../docs/v2/strategy.md).
 
 The server owns a registry of named operations. `session` checks the configured
 identity endpoint. `deliveries` sends:
