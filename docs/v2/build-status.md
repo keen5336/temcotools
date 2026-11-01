@@ -4,6 +4,19 @@ Standing mandate: implement, test, review, correct, commit and push continuously
 
 Work only on `v2` in `/Volumes/MacDev/ProjectArchive/Development/worktrees/t3code/temcotools/v2` (T3 alias `/Users/openclaw/.t3/worktrees/temcotools/v2`). Preserve main/v1 at `fea1f22af1b2fae788388f2aefed3e3998e98d09`, original local work and production. Original checkout/remote refs were rechecked and preserved. No production deployment/data change, live MARS/DMP action, real printing/mail, DNS change or paid provisioning occurred. Helpers inherit GPT-6.1 Sol / Extra High; the main thread owns integration and continuation.
 
+## Active integration after the completion audit
+
+A subsequent A14/A18 audit found that phone administration was implemented/native-tested but absent from the browser receipts. The earlier conclusion that no independent package remained was premature. Work continues against the fixed running3e4cae7 release; later working changes are not yet advertised as an integrated PASS.
+
+The real390px admin run exercised password/MFA, payload lifecycle/loader, user/bundle/recovery and label configuration/publication. It exposed727px payload overflow. Source review additionally found a generic identified-unit label path accepting synthetic preview fields, stale full user edits restoring removed access, and several admin read/preview response races. These are being corrected at shared server and UI seams with focused native/browser acceptance; no production or physical effect occurred.
+
+- Main owns payload-editor scope/preview/save guards, phone wrapping and final integration.
+- `/root/payload_manager` solely owns `scripts/admin-mobile.integration.test.ts`, using fresh synthetic `temcotools_v2_admin_mobile_test`, actual password/TOTP/HTTP and one ephemeral Next server; no live printing/upstream work.
+- `/root/access_foundation` owns required target `expectedAuthVersion` CAS and user/session/MFA UI races/layout, with native identity acceptance. No migration is required.
+- `/root/inventory_lookup` owns authoritative generic operational-label derivation/claim binding, label UI/config races and the canonical evaluation API/page guard, with native A/B/unknown/reprint acceptance.
+
+The runtime checkpoint below remains available and unchanged while these fixes are integrated. The external qualification gates still apply; they do not justify stopping this newly identified independent work.
+
 ## Tested and running checkpoint
 
 **Runtime source: `3e4cae7d8bf6f1a0a6d615cf3f519ee72b9838ef`.** Fixed archive: `/Volumes/MacDev/ProjectArchive/Development/Qualification/temcotools-v2-runtime-3e4cae7`, with its own locked dependencies, generated30-migration client and optimized95-route build (`Z4rFwGhVvbWd1l84HQ3pm`). Build/TypeScript PASS `20261101-013809-build-30541.json`; final working-tree TypeScript PASS `20261101-014208-build-31955.json`, host Node25.8.2. Later documentation/test-selector changes do not change this runtime.
@@ -47,7 +60,7 @@ Next16.4.3/security updates removed high/critical dependency advisories. Product
 
 ## Active work and next action
 
-- Main integrated/published3e4cae7 and upgraded the isolated preview after qualification. The final route/action review closed the catalog omission; no known independent implementation package is currently open. Remaining automation requires the specific upstream/device/identity access below. The agreed full build is **not complete** while those adapters/acceptance gates remain unqualified.
+- Main integrated/published3e4cae7 and upgraded the isolated preview after qualification. The current independent administration package and exact helper ownership are recorded at the top of this file. The agreed full build is **not complete** while that package or the dependent adapters/acceptance gates remain unqualified.
 - `/root/inventory_lookup`: completed/frozen Office coverage, the owner's explicit-ID paging correction and executed-authority expiry acceptance; no active runner.
 - `/root/access_foundation`: completed/frozen shared physical-stock package and actual phone acceptance; tested selector fixes are retained with this checkpoint; no active runner.
 - `/root/payload_manager`: completed/frozen read-only review. All3 physical/Office stale-response/location findings were corrected and qualified; no active runner.
@@ -62,10 +75,10 @@ Owner steering late2026-10-31: Adam is home without DMP access. Keep private DMP
 4. **Actual devices/operator pilot:** native T3 inventory returned no configured devices and Android Emulator unavailable on the local host. Chromium viewport checks do not establish Zebra/DataWedge/OCR/bookmark/CSP/printer/media behavior. Actual warehouse devices, staff bundle assignments and acceptance are required for those claims; no emulator/SDK installation was undertaken.
 5. **Cutover:** real protected backup/key/volume custody, post-backup security reconciliation and an approved maintenance/promotion/deployment window. Prepared scripts/runbooks do not grant that authority. Email remains optional/unconfigured; admin-assisted recovery avoids making mail a source-development prerequisite. Report Engine retirement awaits accepted replacement workflows.
 
-The next meaningful package starts from those specific inputs; repeat builds, idle polling and invented upstream schemas cannot resolve them. No request to say “continue” is needed.
+Finish the active administration package independently of those gates, then reassess the remaining scope. The upstream/device packages need those specific inputs; invented schemas and idle retries cannot resolve them. No request to say “continue” is needed.
 
 ## Continuation policy
 
 The hourly Work supervisor is a recovery/review fallback, not an assignment gate. Integrate/review/correct/commit completed stages and advance in the same active run. Helpers finish their bounded assignment; the main thread owns continuation. Do not create no-op loops or expand scope to fill time.
 
-The one owner-added adaptive continuation, ordinal3 (`run:thread:mcp%3Alaunch%3Aa32fe0cbc29f1c50ea0a11854668f16084313b25564b2fee4a6e5934401e09e7:ordinal:3`), was cancelled after the source-independent packages and catalog correction were qualified and only the concrete external gates above remained. Queue readback verified no pending continuation; no replacement/idle retry was created. The hourly owner supervisor was not changed. All scoped native helpers are finished, and no active implementation handoff is outstanding. The standing build mandate and Sol/Extra High preference remain in force when meaningful work becomes available; this is not full-build completion or production approval.
+The one owner-added adaptive continuation, ordinal3 (`run:thread:mcp%3Alaunch%3Aa32fe0cbc29f1c50ea0a11854668f16084313b25564b2fee4a6e5934401e09e7:ordinal:3`), was cancelled after the source-independent packages and catalog correction were qualified and only the concrete external gates above remained. Queue readback verified no pending continuation; no replacement/idle retry was created. The hourly owner supervisor was not changed. The subsequent completion audit resumed the independent administration package in the active goal continuation; current helper ownership is recorded above. No replacement continuation has been queued while this work remains active. The standing build mandate and Sol/Extra High preference remain in force when meaningful work becomes available; this is not full-build completion or production approval.
