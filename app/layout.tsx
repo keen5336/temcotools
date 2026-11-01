@@ -7,6 +7,9 @@ import LabelRelayProvider from "@/components/labels/LabelRelayProvider";
 import ApiRelayLease from "@/components/api-relay/ApiRelayLease";
 import SessionActivity from "@/app/account/security/SessionActivity";
 import FavoritesProvider from "@/components/tools/FavoritesProvider";
+import UiContextBoundary from "@/components/UiContextBoundary";
+import { createUiContext } from "@/lib/auth/ui-context";
+import { uiContextBootstrap } from "@/lib/ui-context/bootstrap";
 
 export const metadata: Metadata = {
   title: "TemcoTools",
@@ -25,14 +28,15 @@ export default async function RootLayout({
 }) {
   const session = await getSession();
   const userId = session.isActive && session.userId ? session.userId : null;
+  const uiContext = userId ? createUiContext(session) : null;
   return (
     <html lang="en" data-theme="light" suppressHydrationWarning>
       <head>
-        {/* eslint-disable-next-line @next/next/no-before-interactive-script-outside-document */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script id="temco-ui-context-bootstrap" dangerouslySetInnerHTML={{ __html: uiContextBootstrap(uiContext) }} />
       </head>
       <body className="antialiased">
-        <ThemeProvider><FavoritesProvider key={userId || "anonymous"} userId={userId} role={userId ? session.role : "user"} capabilities={session.capabilities ?? []}><SessionActivity userId={userId} /><ApiRelayLease userId={userId} /><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></FavoritesProvider></ThemeProvider>
+        <ThemeProvider><UiContextBoundary context={uiContext}><FavoritesProvider key={uiContext || "anonymous"} userId={userId} role={userId ? session.role : "user"} capabilities={session.capabilities ?? []}><SessionActivity userId={userId} /><ApiRelayLease userId={userId} /><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></FavoritesProvider></UiContextBoundary></ThemeProvider>
       </body>
     </html>
   );

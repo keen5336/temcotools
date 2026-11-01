@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import MfaClient from "./MfaClient";
 
 type SessionRow = { id: string; deviceLabel: string; createdAt: string; lastActivityAt: string; expiresAt: string; revokedAt: string | null; lockedAt: string | null };
@@ -26,7 +25,6 @@ export function PasswordConfirmation() {
 }
 
 export default function SecurityClient() {
-  const router = useRouter();
   const [rows, setRows] = useState<SessionRow[]>([]);
   const [currentId, setCurrentId] = useState("");
   const [error, setError] = useState("");
@@ -55,7 +53,8 @@ export default function SecurityClient() {
     try {
       const result = await command(action, input);
       if (!alive.current || generation !== writes.current) return;
-      if (action === "lock" || result.signInRequired || result.current) { router.push("/signin"); router.refresh(); }
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Lock/revocation starts a fresh document rather than rebinding old per-tab intent.
+      if (action === "lock" || result.signInRequired || result.current) { window.location.assign("/signin"); }
       else await reload();
     } catch (error) { if (alive.current && generation === writes.current) setError(error instanceof Error ? error.message : "Action failed."); }
     finally { inFlight.current = false; if (alive.current && generation === writes.current) setBusy(false); }

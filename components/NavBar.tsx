@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type { SessionData } from "@/lib/session";
 import { useTheme, THEMES } from "@/components/ThemeProvider";
 import LabelRelayMenu from "@/components/labels/LabelRelayMenu";
@@ -13,15 +12,15 @@ interface NavBarProps {
 }
 
 export default function NavBar({ session }: NavBarProps) {
-  const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { suspend } = useLabelRelay();
 
   async function handleSignOut() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    const response = await fetch("/api/auth/logout", { method: "POST" });
+    if (response.headers.has("X-Temco-UI-Context-Error")) return;
     suspend();
-    router.push("/signin");
-    router.refresh();
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- Auth transitions require a new document so old callbacks cannot inherit the next person.
+    window.location.assign("/signin");
   }
 
   function handleSetTheme(t: typeof THEMES[number]) {

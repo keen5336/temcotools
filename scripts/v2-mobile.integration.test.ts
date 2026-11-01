@@ -32,7 +32,7 @@ test("phone viewport retains queued observations across reload and user switchin
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.waitForURL(origin + "/");
   }
-  async function signOut() { assert.equal((await context.request.post(`${origin}/api/auth/logout`, { headers: { Origin: origin } })).status(), 200); }
+  async function signOut() { assert.equal((await context.request.post(`${origin}/api/auth/logout`, { headers: { Origin: origin, "X-Temco-UI-Context": (await page!.evaluate(() => window.__temcoUiContextV1?.context))! } })).status(), 200); }
   try {
     let ready = false;
     for (let i = 0; i < 100; i++) {

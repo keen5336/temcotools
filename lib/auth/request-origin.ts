@@ -1,10 +1,9 @@
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
-// Only the dedicated MCP endpoint can use bearer authentication without a
-// browser Origin. Its adapter must validate the bearer and must not fall back
-// to cookie authentication. A Bearer header never exempts ordinary UI APIs.
+// The actual bearer MCP resource is /mcp on its separate SDK server. No Next
+// /api route (including a made-up /api/mcp) gains an Origin exemption.
 export function requiresSameOrigin(method: string, pathname: string): boolean {
-  return !SAFE_METHODS.has(method.toUpperCase()) && pathname !== "/api/mcp";
+  return pathname.startsWith("/api/") && !SAFE_METHODS.has(method.toUpperCase());
 }
 
 export function isSameOriginMutation(origin: string | null, expectedOrigin: string): boolean {

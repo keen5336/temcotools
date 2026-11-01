@@ -1,3 +1,4 @@
+import BoundApiLink from "@/components/BoundApiLink";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import NavBar from "@/components/NavBar";
@@ -71,7 +72,7 @@ export default async function MarsInventoryDetailPage({
         </div>
 
         <MarsNav />
-        <Link className="btn btn-outline mb-4" href={`/api/mars/source-rows?requestNumber=${encodeURIComponent(unit.requestNumber)}`}>Retained source-row history (paged JSON)</Link>
+        <BoundApiLink className="btn btn-outline mb-4" href={`/api/mars/source-rows?requestNumber=${encodeURIComponent(unit.requestNumber)}`}>Retained source-row history (paged JSON)</BoundApiLink>
 
         <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] gap-6">
           <div className="card bg-base-100 border border-base-200 shadow-sm">

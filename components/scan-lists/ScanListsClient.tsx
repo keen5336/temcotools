@@ -1,5 +1,7 @@
 "use client";
 
+import BoundApiLink from "@/components/BoundApiLink";
+
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import ScannerCapture from "@/components/scanner/ScannerCapture";
@@ -294,7 +296,7 @@ export default function ScanListsClient({ initialLists, currentUserId, canExecut
                   <td className="font-semibold max-w-xs whitespace-normal">{list.name}</td><td>{list.itemCount}</td><td>{formatDate(list.createdAt)}</td><td>{list.createdBy ?? "—"}</td>
                   <td><div className="flex flex-wrap justify-end gap-2 min-w-max">
                     <Link href={`/tools/scan-lists/${encodeURIComponent(list.id)}`} className="btn btn-xs btn-primary">View</Link>
-                    <a href={`/api/scan-lists/${encodeURIComponent(list.id)}/export`} className="btn btn-xs btn-outline">CSV</a>
+                    <BoundApiLink href={`/api/scan-lists/${encodeURIComponent(list.id)}/export`} className="btn btn-xs btn-outline">CSV</BoundApiLink>
                     {canExecute && <button className="btn btn-xs btn-outline" onClick={() => handleArchive(list, !showArchived)} disabled={isPending}>{showArchived ? "Restore" : "Archive"}</button>}
                     {canExecute && <button className="btn btn-xs btn-error btn-outline" onClick={() => handleDelete(list)} disabled={isPending}>Delete</button>}
                   </div></td>

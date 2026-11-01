@@ -2,11 +2,9 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 // Keep the old import name while replacing public PIN authentication.
 export default function PinLoginForm({ returnTo = "/" }: { returnTo?: string }) {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [deviceLabel, setDeviceLabel] = useState("");
@@ -18,7 +16,7 @@ export default function PinLoginForm({ returnTo = "/" }: { returnTo?: string }) 
       const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username.trim(), password, deviceLabel: deviceLabel.trim() || "Browser" }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Sign-in failed.");
-      setPassword(""); router.push(returnTo); router.refresh();
+      setPassword(""); window.location.assign(returnTo);
     } catch (error) { setPassword(""); setError(error instanceof Error ? error.message : "Sign-in failed."); }
     finally { setBusy(false); }
   }}>

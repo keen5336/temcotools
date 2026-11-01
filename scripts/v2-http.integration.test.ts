@@ -42,11 +42,14 @@ test("HTTP APIs enforce current sessions, exact origin and private user grants",
     const login = await fetch(`${origin}/api/auth/login`, { method: "POST", body, headers: { Origin: origin, "Content-Type": "application/json" } });
     assert.equal(login.status, 200);
     const cookie = login.headers.getSetCookie()[0]?.split(";")[0]; assert.ok(cookie);
-    const authorized = { Cookie: cookie, Origin: origin, "Content-Type": "application/json" };
+    const { uiContext } = await login.json(); assert.match(uiContext, /^uc1_[A-Za-z0-9_-]{43}$/);
+    const authorized = { Cookie: cookie, Origin: origin, "Content-Type": "application/json", "X-Temco-UI-Context": uiContext };
     // The identity suite tests real TOTP enrollment/replay. This fixture supplies
     // an already verified factor to exercise current HTTP authorization plumbing.
     await prisma.userSession.updateMany({ where: { userId:user.id }, data:{mfaVerifiedAt:new Date()} });
     assert.equal((await fetch(`${origin}/api/warehouse/lookup?value=synthetic`, { headers: authorized })).status, 200);
+    assert.equal((await fetch(`${origin}/api/warehouse/lookup?value=synthetic`, { headers: { Cookie: cookie } })).status, 409);
+    assert.equal((await fetch(`${origin}/api/warehouse/lookup?value=synthetic`, { headers: { ...authorized, "X-Temco-UI-Context": "uc1_" + "A".repeat(43) } })).status, 409);
     assert.equal((await fetch(`${origin}/api/access-grants`, { method: "POST", body: JSON.stringify({ clientName: "Synthetic HTTP client", scopes: ["inventory.read"] }), headers: { ...authorized, Origin: "https://wrong.example" } })).status, 403);
     const created = await fetch(`${origin}/api/access-grants`, { method: "POST", body: JSON.stringify({ clientName: "Synthetic HTTP client", scopes: ["inventory.read"] }), headers: authorized });
     assert.equal(created.status, 201);

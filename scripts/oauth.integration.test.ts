@@ -51,7 +51,8 @@ test("remote MCP OAuth uses actual HTTP PKCE, phone consent, scoped commands and
   const lpn = `${namespace}-LPN`.toUpperCase();
   await prisma.inventoryAuditItem.create({ data: { lpn, status: "Delivered", orderNumber: `${namespace}-order`, vendor: "Synthetic vendor", receivedDate: "2026-10-31", description: "Synthetic appliance", customerName: "Synthetic destination", sourceData: { LPN: lpn }, contentHash: namespace } });
   let cookieA = "", cookieB = "";
-  const uiHeaders = (cookie = cookieA) => ({ Cookie: cookie, Origin: appOrigin, "Content-Type": "application/json" });
+  const contexts = new Map<string, string>();
+  const uiHeaders = (cookie = cookieA) => ({ Cookie: cookie, Origin: appOrigin, "Content-Type": "application/json", "X-Temco-UI-Context": contexts.get(cookie) ?? "" });
   const form = (path: string, body: Record<string, string>) => fetch(`${origin}${path}`, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
   async function register(name: string): Promise<Client> {
     const response = await fetch(`${origin}/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_name: `${namespace}-${name}`, redirect_uris: ["https://client.example/callback"], token_endpoint_auth_method: "none" }) });
@@ -61,7 +62,8 @@ test("remote MCP OAuth uses actual HTTP PKCE, phone consent, scoped commands and
   async function login(index: number) {
     const response = await fetch(`${appOrigin}/api/auth/login`, { method: "POST", headers: uiHeaders(""), body: JSON.stringify({ username: people[index].username, password, deviceLabel: "Synthetic OAuth phone" }) });
     assert.equal(response.status, 200);
-    const cookie = response.headers.getSetCookie()[0]?.split(";")[0]; assert.ok(cookie); return cookie;
+    const cookie = response.headers.getSetCookie()[0]?.split(";")[0]; assert.ok(cookie);
+    const { uiContext } = await response.json(); assert.match(uiContext, /^uc1_[A-Za-z0-9_-]{43}$/); contexts.set(cookie, uiContext); return cookie;
   }
   async function begin(client: Client, scopes = ["inventory.read", "workflow.read"]) {
     const verifier = randomBytes(32).toString("base64url"), challenge = createHash("sha256").update(verifier).digest("base64url");

@@ -76,8 +76,9 @@ test("every unsafe ordinary API mutation requires exact origin, including login 
   assert.equal(isSameOriginMutation("https://temco.example", "invalid"), false);
 });
 
-test("only dedicated MCP endpoint is exempt; read and preflight requests stay unaffected", () => {
-  assert.equal(requiresSameOrigin("POST", "/api/mcp"), false);
+test("dedicated MCP lives outside app API Origin guard; ordinary API paths have no bearer exemption", () => {
+  assert.equal(requiresSameOrigin("POST", "/mcp"), false);
+  assert.equal(requiresSameOrigin("POST", "/api/mcp"), true);
   assert.equal(requiresSameOrigin("POST", "/api/mcp/other"), true);
   assert.equal(requiresSameOrigin("POST", "/api/mcp-lookalike"), true);
   for (const method of ["GET", "HEAD", "OPTIONS"]) assert.equal(requiresSameOrigin(method, "/api/admin/users"), false);

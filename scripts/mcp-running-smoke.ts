@@ -23,7 +23,8 @@ async function main() {
     const metadata = await fetch(new URL("/.well-known/oauth-authorization-server", issuer)); assert.equal(metadata.status, 200);
     const login = await fetch(new URL("/api/auth/login", app), { method: "POST", headers: { "Content-Type": "application/json", Origin: app.origin }, body: JSON.stringify({ username: user.username, password, deviceLabel: "Synthetic runtime verification" }) }); assert.equal(login.status, 200);
     const cookie = login.headers.getSetCookie().map(value => value.split(";")[0]).join("; "); assert.ok(cookie);
-    const headers = { "Content-Type": "application/json", Origin: app.origin, Cookie: cookie };
+    const loginData = await login.json(); assert.match(loginData.uiContext, /^uc1_[A-Za-z0-9_-]{43}$/);
+    const headers = { "Content-Type": "application/json", Origin: app.origin, Cookie: cookie, "X-Temco-UI-Context": loginData.uiContext };
     phase = "client registration and PKCE request";
     const callback = "http://127.0.0.1:55379/synthetic-callback";
     const registration = await fetch(new URL("/register", issuer), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_name: "Synthetic running verification", redirect_uris: [callback], token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }) }); assert.equal(registration.status, 201);

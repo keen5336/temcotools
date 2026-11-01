@@ -1,5 +1,7 @@
 "use client";
 
+import BoundApiLink from "@/components/BoundApiLink";
+
 import Link from "next/link";
 
 interface ScanListDetail {
@@ -28,7 +30,7 @@ export default function ScanListSessionClient({ initialList }: { initialList: Sc
         </div>
         <div className="flex flex-wrap gap-2">
           <Link href="/tools/scan-lists" className="btn btn-outline">Back to Lists</Link>
-          <a href={`/api/scan-lists/${encodeURIComponent(initialList.id)}/export`} className="btn btn-primary">Export CSV</a>
+          <BoundApiLink href={`/api/scan-lists/${encodeURIComponent(initialList.id)}/export`} className="btn btn-primary">Export CSV</BoundApiLink>
         </div>
       </div>
 

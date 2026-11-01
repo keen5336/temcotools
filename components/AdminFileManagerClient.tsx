@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import BoundApiLink from "@/components/BoundApiLink";
 
 type Entry = {
   name: string;
@@ -49,37 +50,54 @@ export default function AdminFileManagerClient() {
   const [moving, setMoving] = useState<Entry | null>(null);
   const [destination, setDestination] = useState("");
   const [loadedAt, setLoadedAt] = useState(0);
+  const [directoryReady, setDirectoryReady] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const showDirectory = useCallback((data: { currentPath: string; parentPath: string; entries: Entry[] }) => {
-    setCurrentPath(data.currentPath);
-    setParentPath(data.parentPath);
-    setEntries(data.entries);
-    setLoadedAt(Date.now());
-    setLoading(false);
+  const guard = useRef({ alive: false, read: 0, write: 0, mutating: false, ready: false, path: "" });
+  const load = useCallback(async (path: string, afterMutation = false) => {
+    const state = guard.current;
+    if (state.mutating && !afterMutation) return false;
+    const sequence = ++state.read;
+    if (state.path !== path) {
+      setStatus(""); setMoving(null); setDestination(""); setFolderName(""); setDragActive(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+    state.path = path; state.ready = false; setDirectoryReady(false); setLoading(true); setError("");
+    try {
+      const data = await fetchDirectory(path);
+      if (!state.alive || sequence !== state.read || state.path !== path) return false;
+      setCurrentPath(data.currentPath); setParentPath(data.parentPath); setEntries(data.entries); setLoadedAt(Date.now());
+      state.ready = true; setDirectoryReady(true); return true;
+    } catch (error) {
+      if (state.alive && sequence === state.read && state.path === path) setError(error instanceof Error ? error.message : "Failed to load files.");
+      return false;
+    } finally { if (state.alive && sequence === state.read && state.path === path) setLoading(false); }
   }, []);
-  async function load(path: string) {
-    setLoading(true); setError("");
-    try { showDirectory(await fetchDirectory(path)); }
-    catch (error) { setError(error instanceof Error ? error.message : "Failed to load files."); setLoading(false); }
-  }
   useEffect(() => {
-    let active = true;
-    void fetchDirectory("").then(data => { if (active) showDirectory(data); }).catch(error => { if (active) { setError(error instanceof Error ? error.message : "Failed to load files."); setLoading(false); } });
-    return () => { active = false; };
-  }, [showDirectory]);
+    const state = guard.current; state.alive = true;
+    const timer = window.setTimeout(() => { void load(""); }, 0);
+    return () => { clearTimeout(timer); state.alive = false; state.read++; state.write++; };
+  }, [load]);
 
   async function changeFiles(url: string, init: RequestInit, operationId: string, success: string) {
+    const state = guard.current;
+    if (!state.alive || state.mutating || !state.ready) return false;
+    const path = state.path, sequence = ++state.write;
+    state.mutating = true; state.read++; state.ready = false; setDirectoryReady(false);
     setBusy(true);
     setError("");
     setStatus("");
     try {
       const res = await fetch(url, init);
       const data = await res.json();
+      if (!state.alive || sequence !== state.write) return false;
       if (!res.ok || !data.ok) { setError(`${data.error || "File action failed."} Operation: ${data.operationId || operationId}`); return false; }
-      setStatus(`${success} Operation: ${operationId}`); await load(currentPath); return true;
+      setStatus(`${success} Operation: ${operationId}`);
+      const refreshed = await load(path, true);
+      if (state.alive && sequence === state.write && !refreshed) setStatus(`${success} The folder refresh failed; refresh before another file action. Operation: ${operationId}`);
+      return state.alive && sequence === state.write;
     } catch {
-      setError(`The result is uncertain. Refresh and inspect the folder before a new operation. No automatic retry occurred. Operation: ${operationId}`); return false;
-    } finally { setBusy(false); }
+      if (state.alive && sequence === state.write) setError(`The result is uncertain. Refresh and inspect the folder before a new operation. No automatic retry occurred. Operation: ${operationId}`); return false;
+    } finally { state.mutating = false; if (state.alive && sequence === state.write) setBusy(false); }
   }
   async function createFolder(e: React.FormEvent) {
     e.preventDefault();
@@ -146,9 +164,9 @@ export default function AdminFileManagerClient() {
   });
 
   return (
-    <div className="space-y-5">
-      <div className="card bg-base-100 border border-base-200 shadow-sm">
-        <div className="card-body gap-4">
+    <div className="min-w-0 space-y-5 [overflow-wrap:anywhere]"><fieldset disabled={busy} className="contents">
+      <div className="card min-w-0 bg-base-100 border border-base-200 shadow-sm">
+        <div className="card-body min-w-0 gap-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
               <h2 className="card-title text-base">Swap Space</h2>
@@ -168,7 +186,7 @@ export default function AdminFileManagerClient() {
             {breadcrumbs.map((segment, index) => {
               const path = breadcrumbs.slice(0, index + 1).join("/");
               return (
-                <button key={path} className="btn btn-sm btn-ghost" onClick={() => load(path)}>
+                <button key={path} className="btn btn-sm btn-ghost max-w-full h-auto min-h-8 whitespace-normal break-all" onClick={() => load(path)}>
                   {segment}
                 </button>
               );
@@ -180,7 +198,7 @@ export default function AdminFileManagerClient() {
             )}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <fieldset disabled={busy || loading || !directoryReady} className="grid min-w-0 gap-4 lg:grid-cols-2">
             <form onSubmit={uploadFiles} className="rounded-xl border border-base-300 p-4 space-y-3">
               <div className="font-semibold">Upload files</div>
               <div
@@ -210,11 +228,12 @@ export default function AdminFileManagerClient() {
               </div>
               <input
                 ref={fileInputRef}
+                aria-label="Files to upload"
                 type="file"
                 multiple
                 className="file-input file-input-bordered w-full"
               />
-              <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+              <button type="submit" className="btn btn-primary btn-sm max-w-full h-auto min-h-8 whitespace-normal break-all" disabled={busy}>
                 Upload to {currentPath || "/"}
               </button>
             </form>
@@ -225,23 +244,24 @@ export default function AdminFileManagerClient() {
                 type="text"
                 className="input input-bordered w-full"
                 placeholder="Folder name"
+                aria-label="Folder name"
                 value={folderName}
                 onChange={(e) => setFolderName(e.target.value)}
               />
-              <button type="submit" className="btn btn-sm" disabled={busy}>
+              <button type="submit" className="btn btn-sm max-w-full h-auto min-h-8 whitespace-normal break-all" disabled={busy}>
                 Create in {currentPath || "/"}
               </button>
             </form>
-          </div>
+          </fieldset>
 
           {error && <div role="alert" className="alert alert-error text-sm">{error}</div>}
           {status && <div role="status" className="alert alert-success text-sm">{status}</div>}
-          {moving && <form onSubmit={moveEntry} className="rounded-lg border border-base-300 p-4 space-y-3"><p className="font-semibold break-all">Move or rename: {moving.path}</p><label className="form-control"><span className="label-text">Destination path from managed root, including the new name</span><input className="input input-bordered w-full" value={destination} onChange={event => setDestination(event.target.value)} placeholder="folder/new-name.csv" required /></label><p className="text-sm text-base-content/60">Choose an existing parent folder and an unused destination name. Existing files are kept.</p><div className="flex gap-2"><button className="btn btn-primary btn-sm" disabled={busy}>Move entry</button><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setMoving(null)}>Cancel</button></div></form>}
+          {moving && <form onSubmit={moveEntry} className="rounded-lg border border-base-300 p-4 space-y-3"><p className="font-semibold break-all">Move or rename: {moving.path}</p><label className="form-control"><span className="label-text">Destination path from managed root, including the new name</span><input className="input input-bordered w-full" value={destination} onChange={event => setDestination(event.target.value)} placeholder="folder/new-name.csv" required /></label><p className="text-sm text-base-content/60">Choose an existing parent folder and an unused destination name. Existing files are kept.</p><div className="flex gap-2"><button className="btn btn-primary btn-sm" disabled={busy || !directoryReady}>Move entry</button><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setMoving(null)}>Cancel</button></div></form>}
         </div>
       </div>
 
-      <div className="card bg-base-100 border border-base-200 shadow-sm">
-        <div className="card-body gap-4">
+      <div className="card min-w-0 bg-base-100 border border-base-200 shadow-sm">
+        <div className="card-body min-w-0 gap-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <h2 className="card-title text-base">Contents</h2>
             <div className="flex flex-wrap gap-3 items-end">
@@ -288,7 +308,7 @@ export default function AdminFileManagerClient() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="min-w-0 max-w-full overflow-x-auto">
             <table className="table table-sm">
               <thead>
                 <tr>
@@ -320,17 +340,17 @@ export default function AdminFileManagerClient() {
                               Open
                             </button>
                           ) : entry.kind === "file" ? (
-                            <a
+                            <BoundApiLink
                               className="btn btn-xs"
                               href={`/api/admin/files/download?path=${encodeURIComponent(entry.path)}`}
                             >
                               Download
-                            </a>
+                            </BoundApiLink>
                           ) : <span className="text-xs text-warning">{entry.blockedReason}</span>}
-                          {entry.kind !== "blocked" && <button className="btn btn-xs" disabled={busy} onClick={() => { setMoving(entry); setDestination(entry.path); }}>Move / Rename</button>}
+                          {entry.kind !== "blocked" && <button className="btn btn-xs" disabled={busy || !directoryReady} onClick={() => { setMoving(entry); setDestination(entry.path); }}>Move / Rename</button>}
                           <button
                             className="btn btn-xs btn-error btn-outline"
-                            disabled={busy || entry.kind === "blocked"}
+                            disabled={busy || !directoryReady || entry.kind === "blocked"}
                             onClick={() => removeEntry(entry)}
                           >
                             Delete
@@ -351,6 +371,6 @@ export default function AdminFileManagerClient() {
           </div>
         </div>
       </div>
-    </div>
+    </fieldset></div>
   );
 }

@@ -4,6 +4,7 @@ import { sessionOptions, type SessionData } from "@/lib/session";
 import { revokeApiRelaySession } from "@/lib/api-relay/control";
 import { endSession, signInWithPassword } from "@/lib/auth/identity";
 import { identityContext, identityFailure, identityReply, readIdentityJson } from "@/lib/auth/http";
+import { createUiContext } from "@/lib/auth/ui-context";
 
 export async function POST(request: Request) {
   try {
@@ -19,6 +20,6 @@ export async function POST(request: Request) {
     delete session.strongAuthenticatedAt;
     delete session.mfaVerifiedAt;
     await session.save();
-    return identityReply({ ok: true });
+    return identityReply({ ok: true, uiContext: createUiContext(result.claim) });
   } catch (error) { return identityFailure(error); }
 }

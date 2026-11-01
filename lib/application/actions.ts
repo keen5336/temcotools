@@ -27,6 +27,7 @@ import * as dmp from "@/lib/api-relay/service";
 import { validatePayloadDraft, buildPayloadBookmarklet, payloadDraftInput } from "@/lib/payloads/model";
 import { lookupWarehouseInventory, warehouseLookupInput } from "@/lib/warehouse-lookup";
 import { ingestWarehouseScan, scanIngestionSchema } from "./scan-ingestion";
+import { getConnectedClientSetup, connectedClientSetupInput } from "./client-setup";
 import { createAccessGrant, listAccessGrants, revokeAccessGrant } from "./grants";
 
 type Action = { capability?: Capability; capabilitiesAll?: readonly Capability[]; capabilitiesAny?: readonly Capability[]; adminOnly?: boolean; humanInteraction?: boolean; description: string; inputSchema?: z.ZodType; run: (principal: Principal, input: unknown) => unknown | Promise<unknown> };
@@ -102,6 +103,7 @@ export const applicationActions = {
   "identity.bundles": { capability: "users.manage", description: "List capability-backed role bundles", inputSchema: z.object({}), run: identity.listRoleBundles },
   "identity.bundle.save": { capability: "users.manage", description: "Create/change a bundle without silently granting legacy users new rights", inputSchema: identity.identitySaveBundleInput, run: identity.saveRoleBundle },
   "identity.audit": { capability: "users.manage", description: "Review access and recovery attribution without credentials", inputSchema: z.object({}), run: identity.listIdentityAudit },
+  "access.setup": { capability: "account.self", description: "Read validated configured MCP setup, reachability limits and your recorded private/OAuth permissions without exposing credentials", inputSchema: connectedClientSetupInput, run: getConnectedClientSetup },
   "access.grants": { capability: "account.self", description: "List your scoped client grants", inputSchema: z.object({}), run: listAccessGrants },
   "access.grant.create": { capability: "account.self", humanInteraction: true, description: "Initiate a user/session-bound client grant through your own account; delegated clients cannot mint replacements", run: (p: Principal, input: unknown) => userCeremony(p, () => createAccessGrant(p, input), "/account/access") },
   "access.grant.revoke": { capability: "account.self", description: "Revoke your client grant", inputSchema: z.object({ id: z.string().min(1).max(200) }), run: (p: Principal, input: unknown) => revokeAccessGrant(p, text(input, "id")) },
