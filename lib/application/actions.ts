@@ -14,6 +14,8 @@ import { labelActions } from "./label-actions";
 import { adminActions } from "./admin-actions";
 import { pickActions } from "./pick-actions";
 import { inventoryActions } from "./inventory-actions";
+import { physicalStockActions } from "./physical-stock-actions";
+import { officeRefreshActions } from "./office-refresh-actions";
 import { dispatchActions } from "./dispatch-actions";
 import { listActions } from "./list-actions";
 import { noteActions } from "./note-actions";
@@ -43,7 +45,9 @@ export const applicationActions = {
   ...adminActions,
   ...pickActions,
   ...inventoryActions,
+  ...physicalStockActions,
   ...dispatchActions,
+  ...officeRefreshActions,
   ...listActions,
   ...noteActions,
   ...marsActions,

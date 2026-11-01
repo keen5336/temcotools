@@ -143,6 +143,9 @@ test("shared warehouse keeps source, identity and physical evidence separate in 
       assert.equal(await prisma.warehousePhysicalObservation.count({ where: { eventId: `${prefix}-REVOKED`, userId: user.id } }), 0);
     });
   } finally {
+    await prisma.officeCaseEvent.deleteMany({ where: { case: { unitId: { in: [...unitIds] } } } });
+    await prisma.officeCase.deleteMany({ where: { unitId: { in: [...unitIds] } } });
+    await prisma.officeCommandReceipt.deleteMany({ where: { userId: user.id } });
     await prisma.warehouseObservationCorrection.deleteMany({ where: { userId: user.id } });
     await prisma.warehousePhysicalObservation.deleteMany({ where: { userId: user.id } });
     await prisma.inventoryImportMembership.deleteMany({ where: { importBatch: { scope: prefix } } });

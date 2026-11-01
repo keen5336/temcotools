@@ -35,7 +35,9 @@ Each new action ships through the same authorized application query/command in U
 
 These are dependency boundaries, not promises that nine large changes should be merged at once. Split an individual slice into reviewable commits while keeping its operator result coherent. No new service is justified merely to host these concepts: start with PostgreSQL transactions, shared `lib/` services and bounded jobs in the existing composition.
 
-## Recommended first implementation assignment
+## Original first implementation slice (completed)
+
+The following bounded starting slice is retained as the original sequence, not a request to pause or return to PIN login. Strong identity, authenticated MCP and the later independent workflows are now implemented; the exact tested state and remaining upstream/device limits are in [build status](build-status.md).
 
 **Scope: current server-side access plus global LPN lookup.** It establishes a useful seam without committing to unknown DMP/MSN mappings or changing warehouse execution.
 

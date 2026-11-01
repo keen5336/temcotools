@@ -26,13 +26,13 @@ Late-night owner steering: Adam is home without DMP access. Q1/Q2 reference requ
 
 ## Q3. Handling authority and supported MARS creation
 
-**Verified:** source supports MARS imports/audits/label extraction; no confirmed external submission-creation contract is present. Current roles do not encode separate decide/authorize/execute permissions.
+**Verified:** source supports MARS imports/audits/label extraction; no confirmed external submission-creation contract is present. V2 now separates decide/authorize/execute capabilities and exact-unit human-assisted MARS intents, with current-authority checks and unknown-result retention. Actual staff assignments and upstream creation are still unqualified.
 
 **Owner requirement:** a scanned unit can initiate the appropriate MARS submission and label within operator rights or prior office authorization, with duplicate protection and unknown-outcome handling. Missed delivery does not always mean RTV.
 
 **Needed decisions/evidence:** approved capability assignments and who can authorize/execute RTV or conditional instructions; required return reasons/vendor prerequisites; supported creation workflow/API and any CSRF requirements; duplicate/existing-submission lookup; observable result/submission ID and reconciliation path after a lost response. Confirm whether a void/resubmission changes the link to the physical unit. Obtain explicit authority for any live mutation trial.
 
-**Proposal until resolved:** identify the unit, show eligibility and prior authorization, open the supported MARS human workflow, then associate its resulting submission and print through the existing tool. Do not fabricate automated creation. **Gate:** automated slice 9 action only; cases, expected-return worklists and existing labels can proceed.
+**Implemented boundary pending upstream qualification:** identify the unit, show eligibility and prior authorization, retain an exact-unit human handoff/uncertain result, then associate its evidenced resulting submission and prepare the label through managed issuance. No automatic MARS creation adapter is claimed. **Gate:** automated slice 9 action and actual-device acceptance; cases, expected-return worklists and existing labels proceed independently.
 
 ## Q4. Zebra, browser and printer capabilities
 

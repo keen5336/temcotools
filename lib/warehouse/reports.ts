@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { advanceOfficeRefresh } from "@/lib/office/refresh";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
@@ -19,7 +21,15 @@ export async function importSharedWarehouseReport(principal: Principal, raw: unk
   const parsed = warehouseReportInput.safeParse(raw);
   if (!parsed.success) throw new WarehouseCommandError("Provide a filename, valid WMS rows, scope and partial/complete coverage.");
   // The import implementation rechecks this version inside its own writer transaction.
-  return importInventoryReport({ ...parsed.data, uploadedByName: principal.displayName, uploadedByUserId: principal.userId, actorPrincipal: principal });
+  const batch = await importInventoryReport({ ...parsed.data, uploadedByName: principal.displayName, uploadedByUserId: principal.userId, actorPrincipal: principal });
+  // A separately committed import remains accepted if the bounded follow-up is
+  // interrupted. Its retained checkpoint can be resumed from Home, Office or MCP.
+  try {
+    const refresh = await advanceOfficeRefresh(principal, { operationId: randomUUID(), cause: "wms_import", limit: 50, expectedActorUserId: principal.userId });
+    return { ...batch, officeRefresh: refresh.status, officeRefreshError: null };
+  } catch {
+    return { ...batch, officeRefresh: null, officeRefreshError: "The WMS report was accepted. Office issue evaluation is pending; open Home or Office to inspect and resume coverage." };
+  }
 }
 
 function putAwayInput(raw: { date: string; scope?: string; importId?: string; limit?: number; afterLpn?: string }) {

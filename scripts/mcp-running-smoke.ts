@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { prisma } from "../lib/db";
 import { hashPassword } from "../lib/auth/passwords";
 
@@ -36,6 +37,13 @@ async function main() {
     const tools = await sdk.listTools(); assert.ok(tools.tools.some(tool => tool.name === "application_action_info"));
     const actions = await sdk.callTool({ name: "application_actions", arguments: { prefix: "warehouse." } }); assert.equal(actions.isError, undefined);
     const info = await sdk.callTool({ name: "application_action_info", arguments: { action: "warehouse.notes" } }); assert.equal(info.isError, undefined);
+    const physicalInfo = await sdk.callTool({ name: "application_action_info", arguments: { action: "warehouse.physical-stock" } }); assert.equal(physicalInfo.isError, undefined);
+    const physicalInfoText = CallToolResultSchema.parse(physicalInfo).content.find(item => item.type === "text"); assert.ok(physicalInfoText && physicalInfoText.type === "text");
+    assert.equal(JSON.parse(physicalInfoText.text).inputSchema.properties.view.default, "present");
+    const physical = await sdk.callTool({ name: "application_action", arguments: { action: "warehouse.physical-stock", input: { search: `SYNTHETIC-NOT-STOCK-${suffix}`, limit: 1 } } }); assert.equal(physical.isError, undefined);
+    const physicalText = CallToolResultSchema.parse(physical).content.find(item => item.type === "text"); assert.ok(physicalText && physicalText.type === "text");
+    const physicalPage = JSON.parse(physicalText.text); assert.deepEqual(physicalPage.items, []); assert.equal(physicalPage.hasMore, false); assert.equal(physicalPage.view, "present");
+    const refreshDenied = await sdk.callTool({ name: "application_action", arguments: { action: "office.refresh.advance", input: { operationId: randomUUID() } } }); assert.equal(refreshDenied.isError, true, "An inventory-read OAuth grant cannot advance Office evaluation.");
     const query = await sdk.callTool({ name: "warehouse_lookup", arguments: { kind: "lpn", value: `SYNTHETIC-NOT-STOCK-${suffix}` } }); assert.equal(query.isError, undefined);
     const denied = await sdk.callTool({ name: "application_action", arguments: { action: "identity.users", input: {} } }); assert.equal(denied.isError, true);
     await prisma.userSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } });
@@ -44,7 +52,7 @@ async function main() {
     let revoked = false;
     try { revoked = (await sdk.callTool({ name: "warehouse_lookup", arguments: { kind: "lpn", value: "SYNTHETIC" } })).isError === true; } catch { revoked = true; }
     assert.equal(revoked, true);
-    console.log("PASS: running MCP discovery, actual password/PKCE/consent, SDK connection, action/schema discovery, shared lookup, scope denial and session revocation. Synthetic fixtures only; owner enrollment untouched.");
+    console.log("PASS: running MCP discovery, actual password/PKCE/consent, SDK connection, action/schema discovery, shared lookup/physical-stock defaults, Office writer scope denial and session revocation. Synthetic fixtures only; owner enrollment untouched.");
   } finally {
     await sdk.close().catch(() => undefined);
     await prisma.user.delete({ where: { id: user.id } });

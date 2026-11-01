@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadLpnSpreadsheetParser, parseLpnWorkbook } from "@/lib/lpn-workbook";
 import { prepareLpnReport } from "@/lib/lpn-report";
+import PhysicalStockClient from "./PhysicalStockClient";
+import OfficeRefreshClient from "@/components/office/OfficeRefreshClient";
+import type { OfficeRefreshStatus } from "@/lib/office/refresh";
 
 type InventoryRow = {
   id: string; lpn: string; status: string; vendor: string; orderNumber: string; receivedDate: string;
@@ -21,6 +24,13 @@ type Board = {
 const PAGE_SIZE = 100;
 
 export default function InventoryAuditClient() {
+  const [workspace,setWorkspace]=useState<"report"|"physical"|null>(null);
+  useEffect(()=>{const timer=window.setTimeout(()=>setWorkspace(new URL(window.location.href).searchParams.get("workspace")==="physical"?"physical":"report"),0);return()=>window.clearTimeout(timer);},[]);
+  function select(value:"report"|"physical") {setWorkspace(value);const url=new URL(window.location.href);url.searchParams.set("workspace",value);window.history.replaceState(null,"",url);}
+  return <div className="space-y-5"><h1 className="text-2xl font-bold">Inventory Audit</h1><div role="group" aria-label="Inventory evidence workspaces" className="flex flex-wrap gap-2"><button className={`btn ${workspace==="physical"?"btn-primary":"btn-outline"}`} onClick={()=>select("physical")}>Physical stock · shared observations</button><button className={`btn ${workspace==="report"?"btn-primary":"btn-outline"}`} onClick={()=>select("report")}>Reported rows · Pick Wave audit</button></div>{workspace==="physical"?<PhysicalStockClient/>:workspace==="report"?<ReportedInventoryAuditClient/>:<p>Opening inventory evidence…</p>}</div>;
+}
+
+function ReportedInventoryAuditClient() {
   const [board, setBoard] = useState<Board | null>(null);
   const [archive, setArchive] = useState("active");
   const [verification, setVerification] = useState("all");
@@ -34,6 +44,8 @@ export default function InventoryAuditClient() {
   const [selected, setSelected] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [officeImportKey,setOfficeImportKey]=useState(0);
+  const [officeInitial,setOfficeInitial]=useState<OfficeRefreshStatus|null>(null);
   const input = useRef<HTMLInputElement>(null);
   const mutation = useRef(false);
   const queryParams = useCallback(() => new URLSearchParams({ archive, verification, search: query, page: String(page), view }), [archive, verification, query, page, view]);
@@ -44,14 +56,16 @@ export default function InventoryAuditClient() {
   }, [search]);
   useEffect(() => {
     const abort = new AbortController();
-    setLoading(true); setSelected([]);
-    void fetch(`/api/inventory-audit?${queryParams()}`, { signal: abort.signal, cache: "no-store" }).then(async (response) => {
-      const data = await response.json() as { ok: boolean; board: Board; error?: string };
-      if (!response.ok || !data.ok) throw new Error(data.error ?? "Unable to load the inventory.");
-      if (!abort.signal.aborted) { setBoard(data.board); setError(""); }
-    }).catch((error: unknown) => { if (!abort.signal.aborted) { setBoard(null); setError(error instanceof Error ? error.message : "Unable to load the inventory."); } })
-      .finally(() => { if (!abort.signal.aborted) setLoading(false); });
-    return () => abort.abort();
+    const timer = window.setTimeout(() => {
+      setLoading(true); setSelected([]);
+      void fetch(`/api/inventory-audit?${queryParams()}`, { signal: abort.signal, cache: "no-store" }).then(async (response) => {
+        const data = await response.json() as { ok: boolean; board: Board; error?: string };
+        if (!response.ok || !data.ok) throw new Error(data.error ?? "Unable to load the inventory.");
+        if (!abort.signal.aborted) { setBoard(data.board); setError(""); }
+      }).catch((error: unknown) => { if (!abort.signal.aborted) { setBoard(null); setError(error instanceof Error ? error.message : "Unable to load the inventory."); } })
+        .finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    }, 0);
+    return () => { window.clearTimeout(timer); abort.abort(); };
   }, [queryParams, refresh]);
 
   async function upload(file: File) {
@@ -64,9 +78,10 @@ export default function InventoryAuditClient() {
       const rows = parseLpnWorkbook(await file.arrayBuffer());
       prepareLpnReport(rows); // Check columns/conflicting LPNs before sending the report.
       const response = await fetch("/api/inventory-audit/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, rows }) });
-      const data = await response.json() as { ok: boolean; batch: ImportBatch; error?: string };
+      const data = await response.json() as { ok: boolean; batch: ImportBatch & { officeRefresh?: OfficeRefreshStatus | null }; error?: string };
       if (!response.ok || !data.ok) throw new Error(data.error ?? "Unable to import the report.");
       const batch = data.batch;
+      setOfficeInitial(batch.officeRefresh ?? null);setOfficeImportKey(value=>value+1);
       setMessage(`Imported ${file.name}: ${batch.insertedCount.toLocaleString()} new, ${batch.changedCount.toLocaleString()} changed, ${batch.unchangedCount.toLocaleString()} unchanged. ${batch.duplicateCount} repeated rows and ${batch.blankCount} blank LPN rows skipped.`);
       setPage(1); setRefresh((value) => value + 1);
     } catch (error) { setError(error instanceof Error ? error.message : "Unable to import the report."); }
@@ -90,7 +105,7 @@ export default function InventoryAuditClient() {
   const allSelected = Boolean(board?.items.length && board.items.every((row) => selected.includes(row.id)));
   return <div className="space-y-5">
     <div className="flex flex-wrap justify-between items-start gap-4">
-      <div><Link href="/" className="link link-primary text-sm">← Operations Tools</Link><h1 className="text-2xl font-semibold mt-2">Inventory Audit</h1><p className="text-sm text-base-content/70 mt-1">A running warehouse inventory keyed by LPN, compared with exported Pick Wave scans.</p></div>
+      <div><Link href="/" className="link link-primary text-sm">← Operations Tools</Link><h2 className="text-xl font-semibold mt-2">Reported inventory and retained Pick Wave audit</h2><p className="text-sm text-base-content/70 mt-1">Reported LPN rows compared only with exported Pick Wave scans. WMS status and this legacy verification do not establish current physical stock; use the shared observations tab for that view.</p></div>
       <Link href="/tools/pick-waves" className="btn btn-outline">Pick Waves</Link>
     </div>
     <section className="card bg-base-100 border border-base-200"><div className="card-body gap-3">
@@ -98,14 +113,15 @@ export default function InventoryAuditClient() {
       <p className="text-sm text-base-content/60">Unchanged rows keep their scan and archive state. Any report change restores the row to Active and Needs scan. Missing LPNs stay in the tracker. Archived rows remain searchable.</p>
       {board?.latestImport ? <p className="text-xs text-base-content/60">Latest report: {board.latestImport.filename} · {date(board.latestImport.createdAt)} · {board.latestImport.uploadedByName}</p> : null}
     </div></section>
+    {officeImportKey>0&&<OfficeRefreshClient key={officeImportKey} cause="wms_import" initial={officeInitial}/>}
     {error ? <div role="alert" className="alert alert-error"><span>{error}</span></div> : null}
     {message ? <div role="status" className="alert alert-success"><span>{message}</span></div> : null}
-    {board ? <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[["Active LPNs", board.summary.active], ["Needs scan", board.summary.pending], ["Scanned", board.summary.scanned], ["Archived", board.summary.archived]].map(([label, count]) => <div key={label} className="stat bg-base-100 border border-base-200 rounded-lg py-3"><div className="stat-title">{label}</div><div className="stat-value text-2xl">{Number(count).toLocaleString()}</div></div>)}</div> : null}
+    {board ? <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[["Active reported LPNs", board.summary.active], ["Needs scan", board.summary.pending], ["Pick Wave verified", board.summary.scanned], ["Archived", board.summary.archived]].map(([label, count]) => <div key={label} className="stat bg-base-100 border border-base-200 rounded-lg py-3"><div className="stat-title">{label}</div><div className="stat-value text-2xl">{Number(count).toLocaleString()}</div></div>)}</div> : null}
     <section className="card bg-base-100 border border-base-200"><div className="card-body gap-4">
       <div role="group" aria-label="Audit views" className="flex flex-wrap gap-2"><button className={`btn btn-sm ${view === "inventory" ? "btn-primary" : "btn-outline"}`} onClick={() => { setView("inventory"); setPage(1); }}>Inventory</button><button className={`btn btn-sm ${view === "unmatched" ? "btn-primary" : "btn-outline"}`} onClick={() => { setView("unmatched"); setPage(1); }}>Unmatched scans</button></div>
       <div className="flex flex-wrap gap-3 items-end">
         <label className="form-control flex-1 min-w-48"><span className="label text-sm">Search {view === "inventory" ? "inventory" : "scans"}</span><input className="input input-bordered w-full" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={view === "inventory" ? "LPN, order, vendor, customer, description…" : "Scan value, LPN, pick wave…"} /></label>
-        {view === "inventory" ? <><label className="form-control"><span className="label text-sm">Archive</span><select aria-label="Archive" className="select select-bordered" value={archive} onChange={(event) => { setArchive(event.target.value); setPage(1); }}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All LPNs</option></select></label><label className="form-control"><span className="label text-sm">Audit status</span><select aria-label="Audit status" className="select select-bordered" value={verification} onChange={(event) => { setVerification(event.target.value); setPage(1); }}><option value="all">All</option><option value="pending">Needs scan</option><option value="scanned">Scanned</option></select></label><a className="btn btn-outline" href={`/api/inventory-audit/export?${queryParams()}`}>Export CSV</a></> : null}
+        {view === "inventory" ? <><label className="form-control"><span className="label text-sm">Archive</span><select aria-label="Archive" className="select select-bordered" value={archive} onChange={(event) => { setArchive(event.target.value); setPage(1); }}><option value="active">Active</option><option value="archived">Archived</option><option value="all">All LPNs</option></select></label><label className="form-control"><span className="label text-sm">Legacy Pick Wave audit</span><select aria-label="Audit status" className="select select-bordered" value={verification} onChange={(event) => { setVerification(event.target.value); setPage(1); }}><option value="all">All</option><option value="pending">Needs scan</option><option value="scanned">Scanned</option></select></label><a className="btn btn-outline" href={`/api/inventory-audit/export?${queryParams()}`}>Export CSV</a></> : null}
         <button type="button" className="btn btn-outline" disabled={disabled} onClick={() => setRefresh((value) => value + 1)}>Refresh</button>
       </div>
       {view === "inventory" ? <div className="flex flex-wrap items-center gap-2"><span className="text-sm text-base-content/60">{selected.length} selected</span><button type="button" className="btn btn-sm btn-outline" disabled={disabled || !selected.length} onClick={() => void changeArchive(selected, true)}>Archive selected</button><button type="button" className="btn btn-sm btn-outline" disabled={disabled || !selected.length} onClick={() => void changeArchive(selected, false)}>Restore selected</button></div> : <p className="text-sm text-base-content/60">Every unmatched scan is kept, including duplicates. Exact LPNs match automatically when that LPN first appears in a later report. Picked items without an LPN need review.</p>}

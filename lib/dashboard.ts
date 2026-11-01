@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import type { Capability, Principal } from "@/lib/auth/principal";
+import { getOfficeRefreshStatusInTransaction } from "@/lib/office/refresh";
 import { businessDay } from "@/lib/office/domain";
 import { getDispatchDashboardInTransaction } from "@/lib/dispatch/service";
 
@@ -45,14 +46,15 @@ export async function getOperationalDashboard(principal: Principal) {
     const preference = await tx.dashboardPreference.findUnique({ where: { userId: current.userId } });
     const selected = preference ? preference.widgetIds.filter(id => available.some(widget => widget.id === id)) : defaultWidgets(current.capabilities);
     const now = new Date(), zone = process.env.WAREHOUSE_TIME_ZONE || "America/Chicago", day = businessDay(now, zone);
+    const officeRefresh = current.capabilities.some(cap => ["workflow.read", "inventory.write", "office.decide"].includes(cap)) ? await getOfficeRefreshStatusInTransaction(tx, current, now) : null;
     const widgets: { id: WidgetId; title: string; href: string; summary: string; lines: string[]; items?: { id: string; text: string; href: string }[] }[] = [];
     for (const id of selected) {
       const definition = available.find(widget => widget.id === id)!;
       if (id === "priorities") {
         const open = await tx.officeCase.count({ where: { status: { not: "resolved" } } });
-        const due = await tx.officeCase.count({ where: { status: { not: "resolved" }, OR: [{ status: "open" }, { reviewAt: { lte: now } }] } });
+        const due = await tx.officeCase.count({ where: { status: { not: "resolved" }, OR: [{ status: "open" }, { reviewTrigger: "date_or_conflict", reviewAt: { lte: now } }] } });
         const cases = await tx.officeCase.findMany({ where: { status: { not: "resolved" } }, orderBy: [{ reviewAt: "asc" }, { updatedAt: "asc" }], take: 5, select: { id: true, reason: true, status: true, nextAction: true } });
-        widgets.push({ id, title: definition.name, href: definition.href, summary: `${due} need review · ${open} active cases`, lines: ["Valid watch instructions stay durable. Refreshing this view does not reevaluate every unit."], items: cases.map(item => ({ id: item.id, text: `${item.status}: ${item.nextAction || item.reason.replaceAll("_", " ")}`, href: `/tools/office?caseId=${encodeURIComponent(item.id)}` })) });
+        widgets.push({ id, title: definition.name, href: definition.href, summary: `${due} need review · ${open} active cases`, lines: ["Valid watch instructions stay durable.", officeRefresh?.coverage === "fresh" ? "Stored facts evaluated for this warehouse day; upstream source freshness is separate." : "Case counts may omit new issues: warehouse-wide evaluation is incomplete or stale. Review its progress above."], items: cases.map(item => ({ id: item.id, text: `${item.status}: ${item.nextAction || item.reason.replaceAll("_", " ")}`, href: `/tools/office?caseId=${encodeURIComponent(item.id)}` })) });
       } else if (id === "picks") {
         const waves = await tx.pickWave.findMany({ where: { archivedAt: null }, orderBy: { updatedAt: "desc" }, take: 5, select: { id: true, name: true, _count: { select: { items: true } } } });
         const total = await tx.pickWaveItem.count({ where: { pickWave: { archivedAt: null } } });
@@ -82,7 +84,7 @@ export async function getOperationalDashboard(principal: Principal) {
         widgets.push({ id, title: definition.name, href: definition.href, summary: `${unenrolled} active accounts need strong enrollment`, lines: [`${noMfa} enrolled accounts have no active authenticator. Sensitive administration requires current password and authenticator proof.`] });
       }
     }
-    return { asOf: now.toISOString(), day, timeZone: zone, revision: preference?.revision ?? 0, selectedWidgetIds: selected, availableWidgets: available, widgets };
+    return { officeRefresh, asOf: now.toISOString(), day, timeZone: zone, revision: preference?.revision ?? 0, selectedWidgetIds: selected, availableWidgets: available, widgets };
   }, { isolationLevel: "RepeatableRead", timeout: 15_000 });
 }
 export type OperationalDashboard = Awaited<ReturnType<typeof getOperationalDashboard>>;

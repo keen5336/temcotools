@@ -146,16 +146,28 @@ async function clearCases(tx: Prisma.TransactionClient, principal: Principal, un
 }
 
 async function evaluateUnit(tx: Prisma.TransactionClient, principal: Principal, unitId: string, now: Date) {
-  const expired = await tx.officeDisposition.findMany({ where: { unitId, status: { in: ["active", "triggered"] }, expiresAt: { lte: now } } });
-  for (const disposition of expired) {
-    await tx.officeDisposition.update({ where: { id: disposition.id }, data: { status: "expired", revision: { increment: 1 } } });
-    const ready = await tx.officeCase.findUnique({ where: { caseKey: fingerprint([unitId, "authorized_rtv_ready", disposition.id]) } });
-    if (ready) {
-      await tx.officeCase.update({ where: { id: ready.id }, data: { status: "open", nextAction: "RTV authorization expired. Office must review before further execution.", resolution: null, resolvedAt: null, conditionSignature: fingerprint([disposition.id, "expired"]), revision: { increment: 1 } } });
-      await caseEvent(tx, ready.id, principal.userId, "authorization_expired", "No further RTV execution is authorized by this expired instruction.", { dispositionId: disposition.id });
-    }
-  }
   const data = await facts(tx, unitId, now);
+  const expired = await tx.officeDisposition.findMany({ where: { unitId, revokedAt: null, status: { in: ["active", "triggered", "executed"] }, expiresAt: { lte: now } } });
+  for (const disposition of expired) {
+    const changed = await tx.officeDisposition.updateMany({ where: { id: disposition.id, revision: disposition.revision, status: disposition.status, revokedAt: null }, data: { status: "expired", revision: { increment: 1 } } });
+    if (!changed.count) continue;
+    const departedEpisode = disposition.authorizedAt && data.custody.departure && data.custody.departure.capturedAt >= disposition.authorizedAt;
+    const pendingRtv = disposition.kind === "rtv" || (disposition.kind === "conditional_rtv" && ["triggered", "executed"].includes(disposition.status));
+    // Expiry removes authority; it does not establish presence, qualify a scan,
+    // reopen an earlier departed stay, or undo an already-linked submission.
+    if (!pendingRtv || !data.custody.warehouseEvidence || departedEpisode) continue;
+    const aliases = await tx.warehouseIdentifier.findMany({ where: { unitId, kind: "submission", revokedAt: null }, select: { value: true } });
+    let linkedSubmission = false;
+    for (const alias of aliases) {
+      const units = await tx.warehouseIdentifier.findMany({ where: { kind: "submission", value: alias.value, revokedAt: null }, distinct: ["unitId"], select: { unitId: true } });
+      if (units.length === 1 && units[0].unitId === unitId) { linkedSubmission = true; break; }
+    }
+    if (linkedSubmission) continue;
+    const caseId = await ensureCase(tx, principal, { unitId, reason: "authorized_rtv_ready", episodeKey: disposition.id, signature: { disposition: disposition.id, authority: "expired" }, evidence: { why: "Prior RTV authority expired while this exact unit has unfinished warehouse work and no unambiguous submission link.", dispositionId: disposition.id, expiresAt: disposition.expiresAt, priorStatus: disposition.status, physicalEvidence: data.custody.last, checkIn: data.custody.currentCheckIn, physicalPresenceClaim: "as_observed_only" }, nextAction: "RTV authorization expired. Office must review unfinished handling and any existing MARS intent before further execution. Do not automatically submit or replay anything." }, now);
+    // The earlier placement's next action is historical after authority expiry.
+    await tx.officeCase.update({ where: { id: caseId }, data: { nextAction: "RTV authorization expired. Office must review unfinished handling and any existing MARS intent before further execution. Do not automatically submit or replay anything." } });
+    await caseEvent(tx, caseId, principal.userId, "authorization_expired", "No further RTV execution is authorized by this expired instruction; placement and submission/departure remain separate.", { dispositionId: disposition.id, physicalEvidence: data.custody.last });
+  }
   const opened: string[] = [];
   const firstSeenThisStay = data.observations.find((item) => item.type !== "departure" && (!data.custody.departure || item.capturedAt > data.custody.departure.capturedAt));
   const currentStay = data.custody.currentCheckIn?.id ?? firstSeenThisStay?.id ?? "unknown-stay";
@@ -184,7 +196,9 @@ async function evaluateUnit(tx: Prisma.TransactionClient, principal: Principal, 
   if (data.custody.warehouseEvidence && !data.custody.currentCheckIn) {
     const oldReceipt = data.rows.find((row) => row.receivedDate && Number.isFinite(Date.parse(row.receivedDate)) && calendarDays(new Date(`${row.receivedDate}T12:00:00Z`), now) > 20);
     if (oldReceipt) opened.push(await ensureCase(tx, principal, { unitId, reason: "aging_basis_review", episodeKey: `reported-receipt:${oldReceipt.id}`, signature: { receipt: oldReceipt.receivedDate }, evidence: { why: "The reported received date is over twenty days old and the unit was physically seen, but a current-stay check-in is not established.", reportedRow: oldReceipt, physicalEvidence: data.custody.last, certainty: "reported_receipt_not_confirmed_current_stay" }, nextAction: "Confirm the current warehouse stay before claiming a twenty-day physical age." }, now));
+    else await clearCases(tx, principal, unitId, ["aging_basis_review"], "The current reported receipt dates no longer support the earlier aging warning. Physical stay remains unestablished.", { reportedRows: data.rows, physicalEvidence: data.custody.last });
   }
+  if (data.custody.warehouseEvidence && data.custody.currentCheckIn) await clearCases(tx, principal, unitId, ["aging_basis_review"], "A supported current-stay check-in now provides the physical aging basis independently of reported received dates.", { checkIn: data.custody.currentCheckIn });
   for (const expectation of data.expectations.filter((item) => item.status === "expected" && item.expectedAt && item.expectedAt <= now)) {
     if (!data.checkedIn(expectation.activatedAt)) opened.push(await ensureCase(tx, principal, { unitId, reason: "expected_return_not_confirmed", episodeKey: expectation.id, signature: { expectation: expectation.id }, evidence: { why: expectation.evidence, expectation, trailStopsAt: "Return expected; no qualifying physical check-in confirmation.", physicalPresenceClaim: false }, nextAction: "Confirm the expected return/check-in. Do not claim this unit is in the warehouse." }, now));
     else {
@@ -193,7 +207,7 @@ async function evaluateUnit(tx: Prisma.TransactionClient, principal: Principal, 
       if (existing && existing.status !== "resolved") { await tx.officeCase.update({ where: { id: existing.id }, data: { status: "resolved", resolution: "A qualifying check-in confirms this expected return.", resolvedAt: now, revision: { increment: 1 } } }); await caseEvent(tx, existing.id, principal.userId, "condition_cleared", "Expected return checked in.", { expectationId: expectation.id }); }
     }
   }
-  return { openedOrRetainedCaseIds: opened, scheduleCurrent: data.scheduleCurrent, warehouseEvidenceAt: iso(data.custody.last?.capturedAt), warehousePresenceClaim: "as_observed_only" as const };
+  return { openedOrRetainedCaseIds: opened, scheduleCurrent: data.scheduleCurrent, currentWarehouseEvidence: data.custody.warehouseEvidence, warehouseEvidenceAt: iso(data.custody.last?.capturedAt), warehousePresenceClaim: "as_observed_only" as const };
 }
 
 export const recordOfficeScheduleInputSchema = z.object({ operationId: operation, unitId: id, deliveryDate: date.nullable(), nextDeliveryDate: date.nullable(), complete: z.boolean(), sourceAsOf: stamp, sourceRef: explanation, evidence: explanation }).strict();
@@ -395,25 +409,28 @@ export async function recordOfficeDispositionExecution(principal: Principal, raw
   });
 }
 
-async function candidateUnits(tx: Prisma.TransactionClient, input: { unitIds?: string[]; limit?: number; afterUnitId?: string }) {
+export const officeEvaluationCandidateWhere: Prisma.WarehouseUnitWhereInput = { OR: [{ officeSchedules: { some: {} } }, { officeDispositions: { some: {} } }, { returnExpectations: { some: {} } }, { observations: { some: {} } }, { observationCorrections: { some: {} } }, { identifiers: { some: { kind: "submission", revokedAt: null } } }] };
+async function candidateUnits(tx: Prisma.TransactionClient, input: { unitIds?: string[]; limit?: number; afterUnitId?: string; throughUnitId?: string }) {
   const limit = input.limit ?? 100;
-  const units = await tx.warehouseUnit.findMany({ where: input.unitIds ? { id: { in: input.unitIds } } : { id: { gt: input.afterUnitId ?? "" }, OR: [{ officeSchedules: { some: {} } }, { officeDispositions: { some: {} } }, { returnExpectations: { some: {} } }, { observations: { some: {} } }, { observationCorrections: { some: {} } }, { identifiers: { some: { kind: "submission", revokedAt: null } } }] }, orderBy: { id: "asc" }, take: limit + 1, select: { id: true } });
+  const units = await tx.warehouseUnit.findMany({ where: { ...(input.unitIds ? {} : officeEvaluationCandidateWhere), id: { ...(input.unitIds ? { in: input.unitIds } : {}), gt: input.afterUnitId ?? "", ...(input.throughUnitId ? { lte: input.throughUnitId } : {}) } }, orderBy: { id: "asc" }, take: limit + 1, select: { id: true } });
   return { units: units.slice(0, limit), hasMore: units.length > limit, nextAfterUnitId: units.length > limit ? units[limit - 1].id : null };
 }
 export const officeEvaluationInputSchema = z.object({ unitIds: z.array(id).min(1).max(200).optional(), limit: z.number().int().min(1).max(200).default(100), afterUnitId: id.optional() }).strict();
 export const evaluateOfficeWorkInputSchema = officeEvaluationInputSchema;
 export const getExpectedReturnWorklistInputSchema = officeEvaluationInputSchema;
+export async function evaluateOfficePageInTransaction(tx: Prisma.TransactionClient, principal: Principal, input: { unitIds?: string[]; limit?: number; afterUnitId?: string; throughUnitId?: string }, now = new Date()) {
+  const capability = principal.capabilities.includes("office.decide") ? "office.decide" : "inventory.write";
+  await assertCurrentPrincipal(tx, principal, capability);
+  const page = await candidateUnits(tx, input);
+  const evaluations = [];
+  for (const unit of page.units) evaluations.push({ unitId: unit.id, ...await evaluateUnit(tx, principal, unit.id, now) });
+  return { evaluations, hasMore: page.hasMore, nextAfterUnitId: page.nextAfterUnitId };
+}
 export async function evaluateOfficeWork(principal: Principal, raw: unknown = {}) {
   const input = officeEvaluationInputSchema.parse(raw);
   const capability = principal.capabilities.includes("office.decide") ? "office.decide" : "inventory.write";
   assertCapability(principal, capability);
-  return prisma.$transaction(async (tx) => {
-    await assertCurrentPrincipal(tx, principal, capability);
-    const page = await candidateUnits(tx, input);
-    const evaluations = [];
-    for (const unit of page.units) evaluations.push({ unitId: unit.id, ...await evaluateUnit(tx, principal, unit.id, new Date()) });
-    return { evaluations, hasMore: page.hasMore, nextAfterUnitId: page.nextAfterUnitId };
-  }, { timeout: 60_000 });
+  return prisma.$transaction((tx) => evaluateOfficePageInTransaction(tx, principal, input), { timeout: 60_000 });
 }
 
 export const listOfficeCasesInputSchema = z.object({ unitId: id.optional(), status: z.enum(["active", "all", "open", "assigned", "watching", "resolved"]).default("active"), limit: z.number().int().min(1).max(200).default(100), afterId: id.optional() }).strict();
