@@ -11,6 +11,8 @@ model User {
   username              String             @unique
   displayName           String
   pinHash               String
+  passwordHash          String?
+  passwordChangedAt     DateTime?
   role                  Role               @default(user)
   isActive              Boolean            @default(true)
   authVersion           Int                @default(1)
@@ -19,6 +21,10 @@ model User {
   lastLoginAt           DateTime?
   favoriteToolIds       String[]           @default([])
   accessGrants          AppAccessGrant[]
+  authSessions          UserSession[]
+  recoveryTokens        IdentityRecoveryToken[]
+  roleBundles           UserRoleBundle[]
+  mfa                   UserMfa?
   marsImportBatches     MarsImportBatch[]
   marsEvents            MarsEvent[]
   marsAuditSessions     MarsAuditSession[]
@@ -35,10 +41,105 @@ model User {
   labelTemplatesUpdated LabelTemplate[]    @relation("LabelTemplateUpdatedBy")
 }
 
+model UserSession {
+  id                      String    @id
+  userId                  String
+  authVersion             Int
+  createdAt               DateTime  @default(now())
+  lastActivityAt          DateTime  @default(now())
+  lastStrongAuthenticatedAt DateTime @default(now())
+  mfaVerifiedAt           DateTime?
+  expiresAt               DateTime
+  revokedAt               DateTime?
+  lockedAt                DateTime?
+  deviceLabel             String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model UserMfa {
+  userId              String            @id
+  encryptedSecret     String
+  enrollmentSessionId String
+  pendingExpiresAt    DateTime?
+  enabledAt           DateTime?
+  lastUsedStep        Int               @default(-1)
+  createdAt           DateTime          @default(now())
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recoveryCodes       MfaRecoveryCode[]
+}
+
+model MfaRecoveryCode {
+  id         String    @id @default(cuid())
+  userId     String
+  codeHash   String
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  mfa        UserMfa   @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+}
+
+model IdentityRecoveryToken {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  userId      String
+  authVersion Int
+  purpose     String
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  issuedById  String?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model IdentityAudit {
+  id           String   @id @default(cuid())
+  action       String
+  actorUserId  String?
+  targetUserId String?
+  sessionId    String?
+  sourceHash   String?
+  reason       String?
+  createdAt    DateTime @default(now())
+
+  @@index([targetUserId, createdAt])
+  @@index([actorUserId, createdAt])
+}
+
+model AuthRateLimit {
+  key         String   @id
+  windowStart DateTime
+  attempts    Int      @default(1)
+}
+
+model RoleBundle {
+  id           String           @id @default(cuid())
+  name         String           @unique
+  description  String           @default("")
+  capabilities String[]
+  isSystem     Boolean          @default(false)
+  updatedAt    DateTime         @updatedAt
+  assignments  UserRoleBundle[]
+}
+
+model UserRoleBundle {
+  userId   String
+  bundleId String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bundle   RoleBundle @relation(fields: [bundleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, bundleId])
+}
+
 model AppAccessGrant {
   id          String   @id @default(cuid())
   tokenHash   String   @unique
   userId      String
+  sessionId   String?
   authVersion Int
   clientName  String
   audience    String   @default("temcotools-mcp")
@@ -85,13 +186,6 @@ model LabelTemplate {
   @@index([kind, isActive, name])
 }
 
-model Pipeline {
-  id        String   @id @default(cuid())
-  name      String
-  steps     Json     @default("[]")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
 
 model MarsImportBatch {
   id               String            @id @default(cuid())
@@ -277,6 +371,8 @@ model PickWaveScan {
   pickWaveId      String
   itemId          String?
   scannedValue    String
+  captureEventId  String?       @unique
+  captureResult   Json?
   matched         Boolean       @default(false)
   alreadyScanned  Boolean       @default(false)
   scannedByUserId String?
@@ -354,6 +450,9 @@ model InventoryAuditItem {
   lastScannedAt    DateTime?
   lastScanWaveName  String?
   archivedAt       DateTime?
+  unitId           String?
+  unit             WarehouseUnit? @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  sourceRevisions  InventorySourceRevision[]
 
   @@index([archivedAt, sourceChangedAt, lpn])
   @@index([verifiedAt])
@@ -370,6 +469,11 @@ model InventoryAuditImport {
   unchangedCount Int
   duplicateCount Int
   blankCount     Int
+  scope          String   @default("warehouse")
+  coverage       String   @default("partial")
+  sourceAsOf     DateTime?
+  uploadedByUserId String?
+  memberships    InventoryImportMembership[]
 
   @@index([createdAt])
 }
@@ -390,3 +494,301 @@ model InventoryAuditScan {
   @@index([lpn, scannedAt])
   @@index([pickWaveId])
 }
+
+// Centrally managed source for known external-page integrations. Draft source
+// stays private; only immutable, deliberately published versions are served.
+model Payload {
+  id                 String           @id
+  name               String
+  purpose            String
+  targetOrigins      String[]
+  draftSource        String
+  protocolVersion    Int              @default(1)
+  operationNames     String[]         @default([])
+  revision           Int              @default(1)
+  enabled            Boolean          @default(true)
+  publishedVersionId String?          @unique
+  createdByUserId    String
+  updatedByUserId    String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  versions           PayloadVersion[] @relation("PayloadVersions")
+  publishedVersion   PayloadVersion?  @relation("PayloadPublished", fields: [publishedVersionId], references: [id], onDelete: Restrict)
+  audits             PayloadAudit[]
+}
+
+model PayloadVersion {
+  id              String    @id @default(cuid())
+  payloadId       String
+  version         Int
+  purpose         String
+  targetOrigins   String[]
+  source          String
+  protocolVersion Int
+  operationNames  String[]
+  contentHash     String
+  publishedByUserId String
+  publishedAt     DateTime  @default(now())
+  note            String
+  payload         Payload   @relation("PayloadVersions", fields: [payloadId], references: [id], onDelete: Restrict)
+  currentFor      Payload?  @relation("PayloadPublished")
+
+  @@unique([payloadId, version])
+  @@index([payloadId, publishedAt])
+}
+
+model PayloadAudit {
+  id          String   @id @default(cuid())
+  payloadId   String
+  actorUserId String
+  action      String
+  revision    Int
+  versionId   String?
+  note        String
+  createdAt   DateTime @default(now())
+  payload     Payload  @relation(fields: [payloadId], references: [id], onDelete: Restrict)
+
+  @@index([payloadId, createdAt])
+}
+
+model LabelWorkflow {
+  purpose            String @id
+  name               String
+  draftZpl           String
+  requiredFields     String[]
+  rules              Json
+  widthMm            Float
+  heightMm           Float
+  dpi                Int
+  revision           Int @default(1)
+  enabled            Boolean @default(true)
+  publishedVersionId String? @unique
+  updatedByUserId    String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  versions           LabelWorkflowVersion[] @relation("LabelWorkflowVersions")
+  publishedVersion   LabelWorkflowVersion? @relation("LabelWorkflowPublished", fields: [publishedVersionId], references: [id], onDelete: Restrict)
+  audits             LabelWorkflowAudit[]
+}
+
+model LabelWorkflowVersion {
+  id                 String @id @default(cuid())
+  purpose            String
+  version            Int
+  name               String
+  zpl                String
+  requiredFields     String[]
+  rules              Json
+  widthMm            Float
+  heightMm           Float
+  dpi                Int
+  contentHash        String
+  publishedByUserId  String
+  note               String
+  publishedAt        DateTime @default(now())
+  workflow           LabelWorkflow @relation("LabelWorkflowVersions", fields: [purpose], references: [purpose], onDelete: Restrict)
+  currentFor         LabelWorkflow? @relation("LabelWorkflowPublished")
+
+  @@unique([purpose, version])
+}
+
+model LabelWorkflowAudit {
+  id          String @id @default(cuid())
+  purpose     String
+  actorUserId String
+  action      String
+  revision    Int
+  versionId   String?
+  note        String
+  createdAt   DateTime @default(now())
+  workflow    LabelWorkflow @relation(fields: [purpose], references: [purpose], onDelete: Restrict)
+
+  @@index([purpose, createdAt])
+}
+
+model PrintingDevice {
+  id            String @id
+  userId        String
+  sessionId     String
+  authVersion   Int
+  tokenHash     String
+  name          String
+  mode          String
+  printerIds    String[]
+  lastSeenAt    DateTime @default(now())
+  leaseExpiresAt DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([mode, leaseExpiresAt])
+  @@index([userId, sessionId])
+}
+
+model LabelIssuance {
+  id                   String @id @default(cuid())
+  operationId          String
+  actorUserId          String
+  actorSessionId       String
+  actorAuthVersion     Int
+  actorGrantId         String?
+  actorAuthSource      String
+  actorCapabilities    String[]
+  unitId               String?
+  purpose              String
+  printerId            String
+  workflowVersionId    String?
+  contentFingerprint   String
+  inputFingerprint     String
+  renderedZpl          String
+  mode                 String
+  deviceId             String
+  state                String @default("queued")
+  automatic            Boolean @default(false)
+  reprintOf            String?
+  reason               String?
+  ruleId               String?
+  claimTokenHash       String?
+  reportFingerprint    String?
+  dispatchedAt         DateTime?
+  reportedAt           DateTime?
+  physicallyConfirmedAt DateTime?
+  appliedAt            DateTime?
+  reconciledAt         DateTime?
+  reconciliationNote   String?
+  createdAt            DateTime @default(now())
+  events               LabelIssuanceEvent[]
+
+  @@unique([actorUserId, operationId])
+  @@index([unitId, purpose, createdAt])
+  @@index([deviceId, state, createdAt])
+  @@index([contentFingerprint, printerId])
+}
+
+model LabelIssuanceEvent {
+  id          String @id @default(cuid())
+  issuanceId  String
+  actorUserId String
+  deviceId    String?
+  action      String
+  state       String
+  note        String
+  createdAt   DateTime @default(now())
+  issuance    LabelIssuance @relation(fields: [issuanceId], references: [id], onDelete: Restrict)
+
+  @@index([issuanceId, createdAt])
+}
+
+// Physical identity is independent of order context, source rows and submissions.
+model WarehouseUnit {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  createdByUserId  String?
+  creationEvidence String?
+  creationFingerprint String?
+  inventoryRows   InventoryAuditItem[]
+  identifiers     WarehouseIdentifier[]
+  observations    WarehousePhysicalObservation[]
+  observationCorrections WarehouseObservationCorrection[]
+}
+
+model WarehouseIdentifier {
+  id                  String   @id @default(cuid())
+  unitId              String
+  unit                WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  kind                String
+  namespace           String
+  value               String
+  rawValue            String
+  evidence            String
+  createdByUserId     String?
+  createdAt           DateTime @default(now())
+  revokedAt           DateTime?
+  revokedByUserId      String?
+  revocationReason    String?
+
+  @@index([kind, namespace, value, revokedAt])
+  @@index([unitId, createdAt])
+}
+
+model InventorySourceRevision {
+  id                String   @id @default(cuid())
+  inventoryItemId   String
+  inventoryItem     InventoryAuditItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  revision          Int
+  contentHash       String
+  sourceData        Json
+  lpn               String
+  status            String
+  receivedDate      String
+  orderNumber       String
+  vendor            String
+  description       String
+  customerName      String
+  recordedAt        DateTime @default(now())
+  migrationSnapshot Boolean @default(false)
+  memberships       InventoryImportMembership[]
+
+  @@unique([inventoryItemId, revision])
+}
+
+model InventoryImportMembership {
+  id               String   @id @default(cuid())
+  importId         String
+  importBatch      InventoryAuditImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+  sourceRevisionId String
+  sourceRevision   InventorySourceRevision @relation(fields: [sourceRevisionId], references: [id], onDelete: Restrict)
+  lpn              String
+
+  @@unique([importId, lpn])
+  @@index([lpn, importId])
+}
+
+model WarehousePhysicalObservation {
+  id                    String   @id @default(cuid())
+  userId                String
+  eventId               String
+  fingerprint           String
+  rawIdentifier         String
+  identifierType        String
+  identifierNamespace   String?
+  type                  String
+  location              String?
+  deviceId              String?
+  pickWaveId            String?
+  captureMethod         String
+  capturedAt            DateTime
+  receivedAt            DateTime @default(now())
+  unitId                String?
+  unit                  WarehouseUnit? @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  resolution            String
+  candidateUnitIds      Json
+  corrections           WarehouseObservationCorrection[]
+
+  @@unique([userId, eventId])
+  @@index([unitId, capturedAt])
+  @@index([resolution, receivedAt])
+}
+
+model WarehouseObservationCorrection {
+  id               String   @id @default(cuid())
+  observationId    String
+  observation      WarehousePhysicalObservation @relation(fields: [observationId], references: [id], onDelete: Restrict)
+  unitId           String?
+  unit             WarehouseUnit? @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  reason           String
+  userId           String
+  createdAt        DateTime @default(now())
+  revision         Int
+
+  @@index([observationId, createdAt])
+  @@unique([observationId, revision])
+}
+
+
+
+
+
+
+
+
+
