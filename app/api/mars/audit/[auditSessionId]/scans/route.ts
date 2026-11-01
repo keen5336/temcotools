@@ -9,6 +9,7 @@ export async function POST(
   context: { params: Promise<{ auditSessionId: string }> }
 ) {
   const session = await getSession();
+  if (session.userId && !session.capabilities?.includes("workflow.execute")) return Response.json({ error: "You do not have permission for this action." }, { status: 403 });
   if (!session.userId) {
     return NextResponse.json(
       { ok: false, error: "Authentication is required." },

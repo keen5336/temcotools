@@ -1,7 +1,7 @@
 import NavBar from "@/components/NavBar";
 import MarsInventoryScreen from "@/components/mars/MarsInventoryScreen";
 import type { InventoryUrlState } from "@/components/mars/MarsInventoryClient";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import {
   getMarsOperationalOverview,
   listMarsUnits,
@@ -19,7 +19,7 @@ export default async function MarsInventoryPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const params = await searchParams;
   const initialState = parseInventoryState(params);
   const [overview, initialResponse] = await Promise.all([

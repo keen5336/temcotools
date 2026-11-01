@@ -1,10 +1,10 @@
 import NavBar from "@/components/NavBar";
 import MarsNav from "@/components/mars/MarsNav";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getMarsReconciliation } from "@/lib/mars/reconciliation";
 
 export default async function MarsReconciliationPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const data = await getMarsReconciliation();
 
   return (

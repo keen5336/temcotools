@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import MarsNav from "@/components/mars/MarsNav";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getMarsUnitDetail } from "@/lib/mars/inventory";
 
 export default async function MarsInventoryDetailPage({
@@ -10,7 +10,7 @@ export default async function MarsInventoryDetailPage({
 }: {
   params: Promise<{ requestNumber: string }>;
 }) {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const { requestNumber } = await params;
   const unit = await getMarsUnitDetail(requestNumber);
 

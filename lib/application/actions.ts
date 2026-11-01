@@ -27,8 +27,8 @@ type Action = { capability?: Capability; capabilitiesAny?: readonly Capability[]
 const record = (input: unknown) => z.record(z.string(), z.unknown()).parse(input);
 const text = (input: unknown, key: string) => z.string().trim().min(1).max(200).parse(record(input)[key]);
 const withInput = <T>(fn: (principal: Principal, input: T) => unknown | Promise<unknown>) => (principal: Principal, input: unknown) => fn(principal, input as T);
-const userCeremony = (principal: Principal, action: () => unknown | Promise<unknown>) => principal.grantId
-  ? { status: "requires_user_interaction", actionUrl: `${new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").origin}/account/security`, instruction: "Open Account security in your own session to complete this credential/authenticator ceremony, then inspect its status. Do not send passwords, authenticator secrets or recovery codes to an MCP client." }
+const userCeremony = (principal: Principal, action: () => unknown | Promise<unknown>, path = "/account/security") => principal.grantId
+  ? { status: "requires_user_interaction", actionUrl: `${new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").origin}${path}`, instruction: "Open this page in your own authenticated session to complete the credential/authenticator ceremony, then inspect its status. Do not send passwords, authenticator secrets or recovery codes to an MCP client." }
   : action();
 
 // One explicit application action list. UI APIs and MCP call these same domain
@@ -82,7 +82,8 @@ export const applicationActions = {
   "identity.users": { capability: "users.manage", description: "List users and assigned bundles", run: (p: Principal, input: unknown) => identity.listIdentityUsers(p, z.string().max(200).parse(record(input).search ?? "")) },
   "identity.user.create": { capability: "users.manage", description: "Create an account for assisted strong enrollment", run: identity.createIdentityUser },
   "identity.user.update": { capability: "users.manage", description: "Change access/assignment with current strong authorization", run: identity.updateIdentityUser },
-  "identity.recovery.issue": { capability: "users.manage", description: "Issue one-use assisted enrollment/reset authorization", run: identity.issueRecovery },
+  "identity.recovery.issue": { capability: "users.manage", description: "Initiate a private assisted enrollment/reset handoff through the authorized administrator", run: (p: Principal, input: unknown) => userCeremony(p, () => identity.issueRecovery(p, input), "/admin/users") },
+  "identity.factor-reset.issue": { capability: "users.manage", description: "Initiate a private exact-person lost-factor recovery with current administrator proof", run: (p: Principal, input: unknown) => userCeremony(p, () => mfa.issueAssistedFactorReset(p, input), "/admin/users") },
   "identity.bundles": { capability: "users.manage", description: "List capability-backed role bundles", run: identity.listRoleBundles },
   "identity.bundle.save": { capability: "users.manage", description: "Create/change a bundle without silently granting legacy users new rights", run: identity.saveRoleBundle },
   "identity.audit": { capability: "users.manage", description: "Review access and recovery attribution without credentials", run: identity.listIdentityAudit },

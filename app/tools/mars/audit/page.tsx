@@ -1,11 +1,11 @@
 import NavBar from "@/components/NavBar";
 import MarsAuditClient from "@/components/mars/MarsAuditClient";
 import MarsNav from "@/components/mars/MarsNav";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { listSubmittedMarsAuditSessions } from "@/lib/mars/audit";
 
 export default async function MarsAuditPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const auditHistory = await listSubmittedMarsAuditSessions(20);
 
   return (
