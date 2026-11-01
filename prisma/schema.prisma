@@ -25,6 +25,8 @@ model User {
   recoveryTokens        IdentityRecoveryToken[]
   roleBundles           UserRoleBundle[]
   mfa                   UserMfa?
+  oauthGrants           OAuthGrant[]
+  dashboardPreference   DashboardPreference?
   marsImportBatches     MarsImportBatch[]
   marsEvents            MarsEvent[]
   marsAuditSessions     MarsAuditSession[]
@@ -41,6 +43,14 @@ model User {
   labelTemplatesUpdated LabelTemplate[]    @relation("LabelTemplateUpdatedBy")
 }
 
+model DashboardPreference {
+  userId    String   @id
+  widgetIds String[] @default([])
+  revision  Int      @default(1)
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 model UserSession {
   id                      String    @id
   userId                  String
@@ -53,6 +63,7 @@ model UserSession {
   revokedAt               DateTime?
   lockedAt                DateTime?
   deviceLabel             String
+  oauthGrants             OAuthGrant[]
   user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
@@ -79,6 +90,88 @@ model MfaRecoveryCode {
   mfa        UserMfa   @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@unique([userId, codeHash])
+}
+
+model OAuthClient {
+  id          String                      @id
+  name        String
+  metadata    Json
+  createdAt   DateTime                    @default(now())
+  disabledAt  DateTime?
+  requests    OAuthAuthorizationRequest[]
+  grants      OAuthGrant[]
+}
+
+model OAuthAuthorizationRequest {
+  id                String      @id
+  clientId          String
+  redirectUri       String
+  state             String?
+  codeChallenge     String
+  resource          String
+  scopes            String[]
+  boundUserId       String?
+  boundSessionId    String?
+  createdAt         DateTime    @default(now())
+  expiresAt         DateTime
+  resolvedAt        DateTime?
+  deniedAt          DateTime?
+  client            OAuthClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model OAuthGrant {
+  id                String                   @id @default(cuid())
+  requestId         String                   @unique
+  clientId          String
+  userId            String
+  sessionId         String
+  authVersion       Int
+  issuer            String
+  resource          String
+  scopes            String[]
+  refreshGeneration Int                      @default(0)
+  createdAt         DateTime                 @default(now())
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  revokedReason     String?
+  client            OAuthClient              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session           UserSession              @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  codes             OAuthAuthorizationCode[]
+  tokens            OAuthToken[]
+
+  @@index([userId, createdAt])
+}
+
+model OAuthAuthorizationCode {
+  id            String     @id @default(cuid())
+  codeHash      String     @unique
+  grantId       String
+  clientId      String
+  redirectUri   String
+  codeChallenge String
+  resource      String
+  createdAt     DateTime   @default(now())
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  grant         OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+}
+
+model OAuthToken {
+  id         String     @id @default(cuid())
+  tokenHash  String     @unique
+  grantId    String
+  kind       String
+  generation Int
+  scopes     String[]
+  createdAt  DateTime   @default(now())
+  expiresAt  DateTime
+  consumedAt DateTime?
+  grant      OAuthGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+
+  @@index([grantId, kind])
 }
 
 model IdentityRecoveryToken {
@@ -186,6 +279,13 @@ model LabelTemplate {
   @@index([kind, isActive, name])
 }
 
+model Pipeline {
+  id        String   @id @default(cuid())
+  name      String
+  steps     Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
 
 model MarsImportBatch {
   id               String            @id @default(cuid())
@@ -689,6 +789,12 @@ model WarehouseUnit {
   identifiers     WarehouseIdentifier[]
   observations    WarehousePhysicalObservation[]
   observationCorrections WarehouseObservationCorrection[]
+  officeCases OfficeCase[]
+  officeSchedules OfficeScheduleFact[]
+  officeDispositions OfficeDisposition[]
+  originalExchanges OfficeExchange[] @relation("ExchangeOriginal")
+  replacementExchanges OfficeExchange[] @relation("ExchangeReplacement")
+  returnExpectations OfficeReturnExpectation[]
 }
 
 model WarehouseIdentifier {
@@ -782,4 +888,172 @@ model WarehouseObservationCorrection {
 
   @@index([observationId, createdAt])
   @@unique([observationId, revision])
+}
+
+model OfficeCase {
+  id                String @id @default(cuid())
+  caseKey           String @unique
+  unitId            String
+  unit              WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  reason            String
+  episodeKey        String
+  status            String @default("open")
+  evidence          Json
+  conditionSignature String
+  responsibleUserId String?
+  nextAction        String?
+  reviewAt          DateTime?
+  reviewTrigger     String @default("date_or_conflict")
+  resolution        String?
+  resolvedAt        DateTime?
+  revision          Int @default(1)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  events            OfficeCaseEvent[]
+  dispositions      OfficeDisposition[]
+
+  @@index([unitId, status])
+  @@index([status, reviewAt])
+}
+
+model OfficeCaseEvent {
+  id          String @id @default(cuid())
+  caseId      String
+  case        OfficeCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  action      String
+  userId      String
+  reason      String
+  evidence    Json
+  createdAt   DateTime @default(now())
+
+  @@index([caseId, createdAt])
+}
+
+model OfficeScheduleFact {
+  id               String @id @default(cuid())
+  unitId           String
+  unit             WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  deliveryDate     String?
+  nextDeliveryDate String?
+  complete         Boolean
+  source           String @default("manual_office")
+  sourceAsOf       DateTime
+  sourceRef        String
+  evidence         String
+  recordedByUserId String
+  recordedAt       DateTime @default(now())
+
+  @@index([unitId, sourceAsOf])
+}
+
+model OfficeDisposition {
+  id                 String @id @default(cuid())
+  unitId             String
+  unit               WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  caseId             String?
+  case               OfficeCase? @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  kind               String
+  reason             String
+  instruction        String
+  status             String @default("active")
+  decidedByUserId    String
+  authorizedByUserId String?
+  authorizedAt      DateTime?
+  triggerAt         DateTime?
+  expiresAt         DateTime?
+  requireNoUpcomingDate Boolean @default(false)
+  targetLocation    String?
+  triggeredByObservationId String?
+  triggeredAt       DateTime?
+  revokedAt         DateTime?
+  revokedByUserId   String?
+  revocationReason  String?
+  createdAt         DateTime @default(now())
+  revision          Int @default(1)
+  executions        OfficeDispositionExecution[]
+
+  @@index([unitId, status])
+}
+
+model OfficeDispositionExecution {
+  id             String @id @default(cuid())
+  dispositionId  String
+  disposition    OfficeDisposition @relation(fields: [dispositionId], references: [id], onDelete: Restrict)
+  action         String
+  observationId  String
+  evidence       String
+  executedByUserId String
+  executedAt     DateTime @default(now())
+
+  @@index([dispositionId, executedAt])
+}
+
+model OfficeExchange {
+  id                String @id @default(cuid())
+  originalUnitId    String
+  originalUnit      WarehouseUnit @relation("ExchangeOriginal", fields: [originalUnitId], references: [id], onDelete: Restrict)
+  replacementUnitId String
+  replacementUnit   WarehouseUnit @relation("ExchangeReplacement", fields: [replacementUnitId], references: [id], onDelete: Restrict)
+  orderReference    String
+  evidence          String
+  status            String @default("pending")
+  createdByUserId   String
+  createdAt         DateTime @default(now())
+  attempts          OfficeExchangeAttempt[]
+  expectations      OfficeReturnExpectation[]
+
+  @@index([originalUnitId, replacementUnitId])
+}
+
+model OfficeExchangeAttempt {
+  id              String @id @default(cuid())
+  exchangeId      String
+  exchange        OfficeExchange @relation(fields: [exchangeId], references: [id], onDelete: Restrict)
+  outcome         String
+  occurredAt      DateTime
+  source          String @default("manual_office")
+  sourceAsOf      DateTime
+  evidence        String
+  recordedByUserId String
+  recordedAt      DateTime @default(now())
+  expectations    OfficeReturnExpectation[]
+
+  @@index([exchangeId, occurredAt])
+}
+
+model OfficeReturnExpectation {
+  id              String @id @default(cuid())
+  unitId          String
+  unit            WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  exchangeId      String?
+  exchange        OfficeExchange? @relation(fields: [exchangeId], references: [id], onDelete: Restrict)
+  sourceAttemptId String?
+  sourceAttempt   OfficeExchangeAttempt? @relation(fields: [sourceAttemptId], references: [id], onDelete: Restrict)
+  kind            String
+  status          String
+  condition       String
+  expectedAt      DateTime?
+  activatedAt     DateTime?
+  evidence        String
+  source          String @default("manual_office")
+  sourceAsOf      DateTime?
+  sourceRef       String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  supersededAt    DateTime?
+  supersededReason String?
+
+  @@index([unitId, status])
+  @@unique([exchangeId, kind, sourceAttemptId])
+}
+
+model OfficeCommandReceipt {
+  id          String @id @default(cuid())
+  userId      String
+  operationId String
+  fingerprint String
+  result      Json
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, operationId])
 }
