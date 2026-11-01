@@ -14,6 +14,14 @@ Work only on `v2` in `/Volumes/MacDev/ProjectArchive/Development/worktrees/t3cod
 
 ## Meaningful integrated validation
 
+The qualified local candidate identities were rechecked against their full source revision:
+
+| Local image | Image ID |
+| --- | --- |
+| `temcotools-v2-app-candidate:5bb9268` | `sha256:7398872d80920af7973d0e26716105e70028be8ef8dc7f1e5ff8f22717f5c924` |
+| `temcotools-v2-mcp-candidate:5bb9268` | `sha256:3ac11e087ed8b61d429ada11c143662511b579b207bb052706c22bd647dd22d3` |
+| `temcotools-v2-migrator-candidate:5bb9268` | `sha256:f22ebac83e497c18f413e4847dded67dd4404d147d37b0ed978cc9a8f727911d` |
+
 Exact5bb9268 Office paging/coverage/expiry8 PASS `20261101-021452-build-55384.json`, including the owner's112-explicit-ID correction through both canonical actions. IDs traverse in ascending order exactly once to `hasMore=false`; targeted subsets never mark global coverage/checkpoints fresh, and default/global paging remains covered.
 
 The final5bb9268 runtime differs from4f7bd22 only in file-table readability and44px actions, rechecked above. Other relevant runtime files are unchanged from these4f7bd22 checks:
@@ -48,7 +56,7 @@ Dependency audit remains9 moderate production advisories; all dependencies25 (1l
 
 ## Remaining gates and next concrete action
 
-The source-independent implementation and qualification above are complete for this checkpoint. The full agreed v2 build is **not complete**: the following upstream/device/human/deployment work remains. Adam is home without DMP access; private DMP/official-finals questions stay parked tonight. See the [bounded questions](open-questions.md) for the exact evidence boundaries.
+The source-independent implementation and qualification above are complete for this checkpoint. **Build state: blocked on the external evidence/access/authority gates below; the full agreed v2 build is not complete.** The final audit rechecked the running service, current source, command/MCP boundary, launch/recovery package, local image identities and available access routes. No useful independent implementation package or active helper remains. Adam is home without DMP access; private DMP/official-finals questions stay parked tonight. See the [bounded questions](open-questions.md) for the exact evidence boundaries.
 
 1. **DMP/official finals:** obtain the qualified read-only reference/session for unit/MSN/line/quantity/attempt/exchange fields and Ashe's exact finals action/export. Next implementation package is the evidenced normalization adapter, resulting pick work and official demand comparison. Current manual/workbook/office facts remain explicitly qualified as such; the working named relay is preserved.
 2. **MARS creation:** supported creation/duplicate/result contract and separate live-trial authority. Exact-unit human-assisted intents, labels and uncertain-result retention already operate locally. No invented automatic submission can be qualified without that contract.

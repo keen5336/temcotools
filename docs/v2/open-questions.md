@@ -1,8 +1,8 @@
 # TemcoTools v2: bounded open questions
 
-These questions gate particular capabilities, not the entire plan. The [strategy](strategy.md) fixes the operational model; the [implementation plan](implementation-plan.md) can begin with source-independent access and lookup work. No customer samples, credentials or captured production payloads belong in this public repository.
+These questions gate particular capabilities. The [strategy](strategy.md) fixes the operational model; the [implementation plan](implementation-plan.md) has advanced through the qualified source-independent implementation. The full build now depends on the remaining gates recorded in [build status](build-status.md). No customer samples, credentials or captured production payloads belong in this public repository.
 
-Late-night owner steering: Adam is home without DMP access. Q1/Q2 reference requests are parked until work access is convenient; do not ask for credentials/screens tonight. Authenticated MCP is now running locally as described in the [handoff](mcp-runbook.md#running-isolated-local-preview). Independent implementation/qualification continues. Baseline source statements below are explicitly historical where v2 has since implemented the planned boundary; [build status](build-status.md) is the implementation record.
+Late-night owner steering: Adam is home without DMP access. Q1/Q2 reference requests are parked until work access is convenient; do not ask for credentials/screens tonight. Authenticated MCP is now running locally as described in the [handoff](mcp-runbook.md#running-isolated-local-preview). Continue independent implementation when useful work becomes available; do not invent contracts or create idle retries. Baseline source statements below are explicitly historical where v2 has since implemented the planned boundary; [build status](build-status.md) is the implementation record.
 
 ## Q1. Obtainable unit, line, attempt and submission links
 
