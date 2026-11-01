@@ -64,6 +64,41 @@ async function facts(tx: Prisma.TransactionClient, unitId: string, now = new Dat
   return { observations, schedule, rows, expectations, dispositions, custody, today, scheduleCurrent, upcoming, checkedIn };
 }
 
+// Internal writer seam for MARS preparation/start/link. The caller must enforce
+// its own current command capability in this same transaction. A placed unit's
+// executed disposition remains prior office authority, not a completed submission.
+export async function assertCurrentRtvAuthorization(tx: Prisma.TransactionClient, unitId: string, dispositionId: string, now = new Date()) {
+  id.parse(unitId); id.parse(dispositionId);
+  if (!Number.isFinite(now.getTime())) throw new OfficeError("Use a valid authorization review time.");
+  await tx.$executeRaw`SELECT id FROM "OfficeDisposition" WHERE id=${dispositionId} FOR UPDATE`;
+  const disposition = await tx.officeDisposition.findUnique({ where: { id: dispositionId } });
+  if (!disposition || disposition.unitId !== unitId || !["rtv", "conditional_rtv"].includes(disposition.kind) || !["active", "triggered", "executed"].includes(disposition.status) || !disposition.authorizedByUserId || !disposition.authorizedAt || disposition.authorizedAt > now || disposition.revokedAt || !disposition.expiresAt || disposition.expiresAt <= now) throw new OfficeError("A current, unrevoked and unexpired RTV authorization for this exact physical unit is required.", 409);
+  // Existing source/schedule/disposition/observation inserts carry this unit's
+  // foreign-key KEY SHARE lock. FOR UPDATE serializes their acceptance with the
+  // guarded local MARS intent transition; it does not claim an upstream effect.
+  await tx.$executeRaw`SELECT id FROM "WarehouseUnit" WHERE id=${unitId} FOR UPDATE`;
+  const current = await facts(tx, unitId, now);
+  const last = current.custody.last;
+  if (!current.custody.warehouseEvidence || !last || last.capturedAt < disposition.authorizedAt || (disposition.triggerAt && (disposition.triggerAt > now || last.capturedAt < disposition.triggerAt))) throw new OfficeError("Confirm this exact unit in the warehouse with a qualifying scan after its authorization/trigger; departure, unknown custody or conflicting physical evidence cannot support RTV.", 409);
+  let triggerObservationId: string | null = null;
+  if (disposition.kind === "conditional_rtv") {
+    if (!["triggered", "executed"].includes(disposition.status) || !disposition.triggerAt || !disposition.triggeredAt || disposition.triggeredAt > now || !disposition.triggeredByObservationId) throw new OfficeError("This conditional RTV instruction has not met its stored qualifying-scan trigger.", 409);
+    triggerObservationId = disposition.triggeredByObservationId;
+  }
+  // Lock the original proof rows too: correcting an association away from this
+  // unit must not race the intent writer through a null/other-unit correction.
+  for (const observationId of [...new Set([last.id, ...(triggerObservationId ? [triggerObservationId] : [])])].sort()) await tx.$executeRaw`SELECT id FROM "WarehousePhysicalObservation" WHERE id=${observationId} FOR UPDATE`;
+  const refreshed = await facts(tx, unitId, now);
+  if (!refreshed.custody.warehouseEvidence || refreshed.custody.last?.id !== last.id) throw new OfficeError("Physical identity/custody changed while reviewing RTV. Refresh and confirm the unit again.", 409);
+  if (triggerObservationId) {
+    const trigger = refreshed.observations.find((item) => item.id === triggerObservationId);
+    if (!trigger || trigger.type === "departure" || trigger.capturedAt < disposition.authorizedAt || trigger.capturedAt < disposition.triggerAt!) throw new OfficeError("The original conditional trigger no longer identifies this authorized physical unit. Office must review it.", 409);
+  }
+  if (refreshed.dispositions.some((item) => !item.revokedAt && ["hold", "customer_property"].includes(item.kind))) throw new OfficeError("A current hold/customer-property instruction conflicts with RTV for this exact unit. Office must resolve it first.", 409);
+  if (disposition.requireNoUpcomingDate && (!refreshed.scheduleCurrent || refreshed.upcoming)) throw new OfficeError("This authorization requires a complete current schedule with no upcoming delivery date. Refresh/review the scheduling evidence first.", 409);
+  return { ...disposition, eligibility: { reviewedAt: now.toISOString(), physicalObservationId: last.id, observedAt: last.capturedAt.toISOString(), conditionalTriggerObservationId: triggerObservationId, scheduleFactId: disposition.requireNoUpcomingDate ? refreshed.schedule?.id ?? null : null, meaning: "Prior exact-unit office authority and independent physical evidence only; no MARS submission, pickup or print completion is implied." } };
+}
+
 async function ensureCase(tx: Prisma.TransactionClient, principal: Principal, input: { unitId: string; reason: string; episodeKey: string; evidence: unknown; signature: unknown; nextAction: string }, now: Date) {
   const caseKey = fingerprint([input.unitId, input.reason, input.episodeKey]);
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`office-case:${caseKey}`},0))`;
