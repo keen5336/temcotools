@@ -47,7 +47,7 @@ export default function ApiRelayClient() {
     try {
       const [year, month, day] = deliveryDate.split("-");
       const parameters = operation === "deliveries" ? { deliveryDate: `${month}/${day}/${year}`, locationNumber } : operation === "session" ? {} : JSON.parse(input);
-      const result = await control("request", { connectionId: connectionId || status?.connections.find((c) => c.ready)?.id, operation, input: parameters });
+      const result = await control("request", { operationId: id, connectionId: connectionId || status?.connections.find((c) => c.ready)?.id, operation, input: parameters });
       setReceipts((items) => items.map((item) => item.id === id ? { ...item, result: JSON.stringify(result, null, 2) } : item));
     } catch (error) {
       setReceipts((items) => items.map((item) => item.id === id ? { ...item, result: error instanceof Error ? error.message : "Request failed." } : item));

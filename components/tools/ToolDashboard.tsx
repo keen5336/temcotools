@@ -7,8 +7,8 @@ import { useFavorites } from "./FavoritesProvider";
 import Star from "./Star";
 
 export default function ToolDashboard() {
-  const { role, favoriteIds, loaded, saving, error, change, reload } = useFavorites();
-  const { favorites, remaining } = toolSections(role, favoriteIds);
+  const { role, capabilities, favoriteIds, loaded, saving, error, change, reload } = useFavorites();
+  const { favorites, remaining } = toolSections(role, favoriteIds, capabilities);
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);

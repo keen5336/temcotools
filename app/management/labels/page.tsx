@@ -1,9 +1,9 @@
 import NavBar from "@/components/NavBar";
 import LabelConfigurationClient from "@/components/labels/LabelConfigurationClient";
-import { requireManager } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 
 export default async function LabelConfigurationPage() {
-  const session = await requireManager();
+  const session = await requireCapability("labels.manage");
   return (
     <div className="min-h-screen bg-base-200">
       <NavBar session={session} />

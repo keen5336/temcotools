@@ -8,8 +8,8 @@ import { useFavorites } from "./FavoritesProvider";
 import Star from "./Star";
 
 export default function MobileToolDrawer() {
-  const { role, favoriteIds, loaded } = useFavorites();
-  const { favorites, remaining } = toolSections(role, favoriteIds);
+  const { role, capabilities, favoriteIds, loaded } = useFavorites();
+  const { favorites, remaining } = toolSections(role, favoriteIds, capabilities);
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
   const pathname = usePathname();

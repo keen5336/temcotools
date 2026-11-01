@@ -95,8 +95,9 @@ export async function importInventoryReport(options: { rows: LpnSourceRow[]; fil
   }, { timeout: 120_000, maxWait: 120_000 });
 }
 
-export async function exportPickWaveToAudit(id: string) {
+export async function exportPickWaveToAudit(id: string, principal?: Principal) {
   return prisma.$transaction(async (tx) => {
+    if (principal) await assertCurrentPrincipal(tx, principal, "inventory.write");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WRITE_LOCK})`;
     const wave = await tx.pickWave.findUnique({ where: { id }, select: {
       name: true, scans: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: {
@@ -145,8 +146,9 @@ export async function exportPickWaveToAudit(id: string) {
   }, { timeout: 120_000, maxWait: 120_000 });
 }
 
-export async function archiveAuditItems(ids: string[], archived: boolean) {
+export async function archiveAuditItems(ids: string[], archived: boolean, principal?: Principal) {
   return prisma.$transaction(async (tx) => {
+    if (principal) await assertCurrentPrincipal(tx, principal, "inventory.write");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WRITE_LOCK})`;
     return tx.inventoryAuditItem.updateMany({ where: { id: { in: ids } }, data: { archivedAt: archived ? new Date() : null } });
   }, { timeout: 30_000, maxWait: 120_000 });

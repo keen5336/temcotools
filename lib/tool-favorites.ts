@@ -1,3 +1,4 @@
+import type { Capability } from "./auth/principal";
 import { TOOLS, toolsForRole, visibleFavoriteIds, type ToolRole } from "./tools";
 
 export type FavoriteChange = { action: "set"; toolId: string; favorite: boolean } | { action: "reorder"; order: string[] };
@@ -13,16 +14,16 @@ export function parseFavoriteChange(value: unknown): FavoriteChange {
   throw new FavoriteError("Invalid favorites update.");
 }
 
-export function changeFavorites(stored: readonly string[], role: ToolRole, change: FavoriteChange) {
+export function changeFavorites(stored: readonly string[], role: ToolRole, change: FavoriteChange, capabilities?: readonly Capability[]) {
   const known = new Set(TOOLS.map((tool) => tool.id));
   const current = [...new Set(stored)].filter((id) => known.has(id));
-  const allowed = new Set(toolsForRole(role).map((tool) => tool.id));
+  const allowed = new Set(toolsForRole(role, capabilities).map((tool) => tool.id));
   if (change.action === "set") {
     if (!allowed.has(change.toolId)) throw new FavoriteError("This tool is unavailable to your account.", 403);
     return change.favorite ? [...new Set([...current, change.toolId])] : current.filter((id) => id !== change.toolId);
   }
   if (change.order.some((id) => !allowed.has(id))) throw new FavoriteError("This tool is unavailable to your account.", 403);
-  const visible = visibleFavoriteIds(current, role);
+  const visible = visibleFavoriteIds(current, role, capabilities);
   if (change.order.some((id) => !visible.includes(id))) throw new FavoriteError("Favorites changed in another tab. Refresh and try again.", 409);
   // Keep favorites added concurrently in another tab, and preserve hidden
   // favorites in case an administrator later restores this user's role.

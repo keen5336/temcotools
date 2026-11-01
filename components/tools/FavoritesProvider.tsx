@@ -2,9 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { changeFavorites, type FavoriteChange } from "@/lib/tool-favorites";
+import type { Capability } from "@/lib/auth/principal";
 import { visibleFavoriteIds, type ToolRole } from "@/lib/tools";
 
-type Preferences = { favoriteIds: string[]; role: ToolRole };
+type Preferences = { favoriteIds: string[]; role: ToolRole; capabilities?: readonly Capability[] };
 type Favorites = Preferences & { loaded: boolean; saving: boolean; error: string; reload: () => void; change: (change: FavoriteChange) => void };
 const Context = createContext<Favorites | null>(null);
 export function useFavorites() {
@@ -13,8 +14,8 @@ export function useFavorites() {
   return context;
 }
 
-export default function FavoritesProvider({ userId, role, children }: { userId: string | null; role: ToolRole; children: React.ReactNode }) {
-  const [preferences, setPreferences] = useState<Preferences>({ favoriteIds: [], role });
+export default function FavoritesProvider({ userId, role, capabilities, children }: { userId: string | null; role: ToolRole; capabilities: readonly Capability[]; children: React.ReactNode }) {
+  const [preferences, setPreferences] = useState<Preferences>({ favoriteIds: [], role, capabilities });
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -24,9 +25,9 @@ export default function FavoritesProvider({ userId, role, children }: { userId: 
   const controller = useRef<AbortController | null>(null);
   const requestSerial = useRef(0);
   const accept = useCallback((data: Preferences) => {
-    const next = { role: data.role, favoriteIds: visibleFavoriteIds(data.favoriteIds, data.role) };
+    const next = { role: data.role, capabilities: data.capabilities ?? capabilities, favoriteIds: visibleFavoriteIds(data.favoriteIds, data.role, data.capabilities ?? capabilities) };
     current.current = next; setPreferences(next);
-  }, []);
+  }, [capabilities]);
   const load = useCallback(async () => {
     if (!userId || busy.current) return;
     const serial = ++requestSerial.current;
@@ -51,7 +52,7 @@ export default function FavoritesProvider({ userId, role, children }: { userId: 
   async function change(update: FavoriteChange) {
     if (!userId || !loaded || busy.current) return;
     const previous = current.current;
-    const optimistic = changeFavorites(previous.favoriteIds, previous.role, update);
+    const optimistic = changeFavorites(previous.favoriteIds, previous.role, update, previous.capabilities);
     requestSerial.current++;
     busy.current = true; setSaving(true); setError(""); accept({ ...previous, favoriteIds: optimistic });
     try {

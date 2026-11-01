@@ -1,9 +1,9 @@
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
 import MarsLabelClient from "./MarsLabelClient";
 
 export default async function MarsLabelPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("labels.read");
 
   return (
     <div className="min-h-screen bg-base-200">

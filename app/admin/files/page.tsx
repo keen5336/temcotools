@@ -1,9 +1,9 @@
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
 import AdminFileManagerClient from "@/components/AdminFileManagerClient";
 
 export default async function AdminFilesPage() {
-  const session = await requireAdmin();
+  const session = await requireCapability("files.manage");
 
   return (
     <div className="min-h-screen bg-base-200">

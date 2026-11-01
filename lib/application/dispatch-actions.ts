@@ -1,0 +1,21 @@
+import * as dispatch from "@/lib/dispatch/service";
+export const dispatchActions = {
+  "dispatch.adapter": { capability: "workflow.read", description: "Inspect real source qualification; manual snapshots are never called official DMP finals", run: dispatch.getDispatchAdapterStatus },
+  "dispatch.boards": { capability: "workflow.read", description: "List dispatch-day/scope boards", run: dispatch.listDispatchBoards },
+  "dispatch.board": { capability: "workflow.read", description: "Read immutable demand versions and current head", run: dispatch.getDispatchBoard },
+  "dispatch.requirements": { capability: "workflow.read", description: "Review quantity slots and missing/ambiguous/conflicting matches", run: dispatch.reconcileDispatchRequirements },
+  "dispatch.snapshot.create": { capability: "office.decide", description: "Record an explicitly manual-reviewed normalized demand snapshot with provenance", run: dispatch.createDispatchSnapshot },
+  "dispatch.snapshot.workbook": { capability: "office.decide", description: "Create an explicitly unqualified workbook-fallback draft using existing parsing and reviewed route-to-lane mapping", run: dispatch.createDispatchWorkbookSnapshot },
+  "dispatch.snapshot.approve": { capability: "office.decide", description: "Approve a complete snapshot using its expected prior head; preserve amendments", run: dispatch.approveDispatchSnapshot },
+  "dispatch.allocate": { capability: "dispatch.allocate", description: "Allocate a specific supported physical unit to one requirement slot", run: dispatch.allocateDispatchUnit },
+  "dispatch.release": { capability: "dispatch.allocate", description: "Release an allocation while retaining its history", run: dispatch.releaseDispatchAllocation },
+  "dispatch.pick-wave": { capability: "dispatch.allocate", description: "Generate a native Pick Wave bound to actual unit/quantity slots", run: dispatch.generateDispatchPickWave },
+  "finals.create": { capability: "workflow.execute", description: "Begin selected-day lane verification against one accepted snapshot", run: dispatch.createFinalsSession },
+  "finals.get": { capability: "workflow.read", description: "Read exact requirements, confirmed actual lanes and preserved signoffs/amendments", run: dispatch.getFinalsSession },
+  "finals.scan": { capability: "workflow.execute", description: "Record actual scanned lane and unique event; wrong lane never fulfills destination before fresh placement confirmation", run: dispatch.recordFinalsScan },
+  "finals.scans": { capability: "workflow.read", description: "Page complete lane scan/exception evidence", run: dispatch.getFinalsScanHistory },
+  "finals.exception.review": { capability: "dispatch.signoff", description: "Record explicit authorized exception review without manufacturing required-unit confirmation", run: dispatch.reviewFinalsException },
+  "finals.empty-lane.confirm": { capability: "workflow.execute", description: "Record explicit physical empty-lane inspection for removed demand", run: dispatch.confirmDispatchLaneEmpty },
+  "finals.signoff": { capability: "dispatch.signoff", description: "Sign a specific current lane revision with current proof; manual source remains unqualified as official finals", run: dispatch.signOffDispatchLane },
+  "finals.observation.review": { capabilitiesAny: ["inventory.write", "workflow.execute"], description: "Recheck your observation against retained physical lane confirmation", run: dispatch.reviewDispatchObservation },
+} as const;

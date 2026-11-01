@@ -15,13 +15,18 @@ const safe = target?.hostname === "127.0.0.1" && target.port === "55439" && targ
 test("real database and MCP preserve identity, candidate boundaries and grant revocation", { skip: !configured }, async () => {
   assert.ok(safe, "Integration test refuses anything except the dedicated local v2 test database.");
   const suffix = randomUUID(), lpn = `000-V2-${suffix.toUpperCase()}`, order = `ORDER_%_${suffix}`;
-  const user = await prisma.user.create({ data: { username: `v2-fixture-${suffix}`, displayName: "Synthetic operator", pinHash: "not-a-usable-credential", role: "user" } });
-  const other = await prisma.user.create({ data: { username: `v2-other-${suffix}`, displayName: "Other synthetic operator", pinHash: "not-a-usable-credential" } });
+  const user = await prisma.user.create({ data: { username: `v2-fixture-${suffix}`, displayName: "Synthetic operator", pinHash: "not-a-usable-credential", role: "user", roleBundles: { create: { bundleId: "legacy-user" } } } });
+  const other = await prisma.user.create({ data: { username: `v2-other-${suffix}`, displayName: "Other synthetic operator", pinHash: "not-a-usable-credential", roleBundles: { create: { bundleId: "legacy-user" } } } });
   const now = Date.now();
   const claim = { userId: user.id, authVersion: user.authVersion, issuedAt: now, expiresAt: now + 60_000, sessionId: randomUUID() };
+  await prisma.userSession.create({ data: { id: claim.sessionId, userId: user.id, authVersion: user.authVersion, createdAt: new Date(now), lastActivityAt: new Date(now), lastStrongAuthenticatedAt: new Date(now), expiresAt: new Date(claim.expiresAt), deviceLabel: "Synthetic MCP test" } });
+  const otherSessionId = randomUUID();
+  await prisma.userSession.create({ data: { id: otherSessionId, userId: other.id, authVersion: other.authVersion, createdAt: new Date(now), lastActivityAt: new Date(now), lastStrongAuthenticatedAt: new Date(now), expiresAt: new Date(claim.expiresAt), deviceLabel: "Other synthetic MCP test" } });
   const principal = await resolvePrincipal(claim, id => prisma.user.findUnique({ where: { id } }));
   const otherPrincipal = await resolvePrincipal({ ...claim, userId: other.id, authVersion: other.authVersion }, id => prisma.user.findUnique({ where: { id } }));
   assert.ok(principal); assert.ok(otherPrincipal);
+  principal.sessionId = claim.sessionId; principal.strongAuthenticatedAt = now;
+  otherPrincipal.sessionId = otherSessionId; otherPrincipal.strongAuthenticatedAt = now;
   const capturedAt = new Date("2026-10-01T13:00:00Z");
   await prisma.inventoryAuditItem.create({ data: { lpn, status: "Delivered", orderNumber: order, vendor: "Synthetic vendor", receivedDate: "2026-09-01", description: "Synthetic appliance", customerName: "Fixture recipient", contentHash: "fixture", sourceData: { LPN: lpn, privateRuntimeField: "synthetic-only" }, archivedAt: new Date() } });
   await prisma.inventoryAuditScan.create({ data: { sourceScanId: suffix, pickWaveId: `fixture-${suffix}`, pickWaveName: "Synthetic historical pass", scannedValue: lpn, lpn, scannedAt: capturedAt, scannedByName: "Synthetic operator", matchedPickWave: false, duplicateInWave: false } });
@@ -52,6 +57,8 @@ test("real database and MCP preserve identity, candidate boundaries and grant re
     const content = response.content as { type: string; text: string }[];
     assert.deepEqual(JSON.parse(content[0].text), uiResult);
     assert.equal((await client.callTool({ name: "mars_workflow_summary", arguments: {} })).isError, true);
+    assert.equal((await client.callTool({ name: "application_action", arguments: { action: "identity.session.lock", input:{} } })).isError, true);
+    assert.equal((await client.callTool({ name: "application_action", arguments: { action: "access.grants", input:{} } })).isError, true);
     assert.equal((await revokeAccessGrant(otherPrincipal, grant.grant.id)).revoked, false);
     assert.ok(await authenticateAccessGrant(grant.token));
     await prisma.user.update({ where: { id: user.id }, data: { authVersion: { increment: 1 } } });

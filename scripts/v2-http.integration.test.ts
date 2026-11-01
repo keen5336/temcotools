@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
-import bcrypt from "bcryptjs";
+import { hashPassword } from "../lib/auth/passwords";
 import { sealData } from "iron-session";
 import { prisma } from "../lib/db";
 
@@ -24,7 +24,10 @@ test("HTTP APIs enforce current sessions, exact origin and private user grants",
   child.stdout.on("data", chunk => { output = (output + chunk).slice(-4000); });
   child.stderr.on("data", chunk => { output = (output + chunk).slice(-4000); });
   const username = `http-fixture-${randomUUID()}`;
-  const user = await prisma.user.create({ data: { username, displayName: "Synthetic HTTP operator", role: "admin", pinHash: await bcrypt.hash("135790", 12) } });
+  const password = "Synthetic HTTP test passphrase 7";
+  const passwordHash = await hashPassword(password);
+  const user = await prisma.user.create({ data: { username, displayName: "Synthetic HTTP operator", role: "admin", pinHash: "not-usable", passwordHash, roleBundles: { create: { bundleId: "legacy-admin" } } } });
+  const backup = await prisma.user.create({ data: { username: username + "-backup", displayName: "Synthetic backup administrator", role: "admin", pinHash: "not-usable", passwordHash, roleBundles: { create: { bundleId: "legacy-admin" } } } });
   try {
     let ready = false;
     for (let i = 0; i < 100; i++) {
@@ -34,12 +37,15 @@ test("HTTP APIs enforce current sessions, exact origin and private user grants",
     }
     assert.ok(ready, "Test app did not become ready.");
     assert.equal((await fetch(`${origin}/api/warehouse/lookup?value=synthetic`)).status, 401);
-    const body = JSON.stringify({ username, pin: "135790" });
+    const body = JSON.stringify({ username, password });
     assert.equal((await fetch(`${origin}/api/auth/login`, { method: "POST", body, headers: { "Content-Type": "application/json" } })).status, 403);
     const login = await fetch(`${origin}/api/auth/login`, { method: "POST", body, headers: { Origin: origin, "Content-Type": "application/json" } });
     assert.equal(login.status, 200);
     const cookie = login.headers.getSetCookie()[0]?.split(";")[0]; assert.ok(cookie);
     const authorized = { Cookie: cookie, Origin: origin, "Content-Type": "application/json" };
+    // The identity suite tests real TOTP enrollment/replay. This fixture supplies
+    // an already verified factor to exercise current HTTP authorization plumbing.
+    await prisma.userSession.updateMany({ where: { userId:user.id }, data:{mfaVerifiedAt:new Date()} });
     assert.equal((await fetch(`${origin}/api/warehouse/lookup?value=synthetic`, { headers: authorized })).status, 200);
     assert.equal((await fetch(`${origin}/api/access-grants`, { method: "POST", body: JSON.stringify({ clientName: "Synthetic HTTP client", scopes: ["inventory.read"] }), headers: { ...authorized, Origin: "https://wrong.example" } })).status, 403);
     const created = await fetch(`${origin}/api/access-grants`, { method: "POST", body: JSON.stringify({ clientName: "Synthetic HTTP client", scopes: ["inventory.read"] }), headers: authorized });
@@ -56,7 +62,7 @@ test("HTTP APIs enforce current sessions, exact origin and private user grants",
     if (child.exitCode === null && child.signalCode === null) {
       const stopped = once(child, "exit"); child.kill("SIGTERM"); await stopped;
     }
-    await prisma.user.deleteMany({ where: { id: user.id } });
+    await prisma.user.deleteMany({ where: { id: { in: [user.id, backup.id] } } });
     await prisma.$disconnect();
   }
 });

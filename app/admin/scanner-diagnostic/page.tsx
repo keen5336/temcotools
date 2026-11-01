@@ -1,8 +1,8 @@
 import ScannerDiagnosticClient from "@/components/admin/ScannerDiagnosticClient";
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 
 export default async function ScannerDiagnosticPage() {
-  await requireAdmin();
+  await requireCapability("diagnostics.use");
 
   return <ScannerDiagnosticClient />;
 }

@@ -12,8 +12,9 @@ export async function apiRelayControl(action: string, owner: RelayOwner, data: R
   return result;
 }
 
-export async function revokeApiRelaySession(session: { userId?: string; apiRelaySessionId?: string }) {
-  if (!session.userId || !session.apiRelaySessionId) return;
-  try { await apiRelayControl("revoke", { userId: session.userId, sessionId: session.apiRelaySessionId }); }
+export async function revokeApiRelaySession(session: { userId?: string; apiRelaySessionId?: string; sessionId?: string }) {
+  if (!session.userId || (!session.apiRelaySessionId && !session.sessionId)) return;
+  const relaySessionId = session.sessionId ? `v2:${createHash("sha256").update(JSON.stringify(session.sessionId)).digest("hex")}` : session.apiRelaySessionId!;
+  try { await apiRelayControl("revoke", { userId: session.userId, sessionId: relaySessionId }); }
   catch { /* An unreachable broker fails closed when its two-minute lease expires. */ }
 }

@@ -94,6 +94,9 @@ export default function NavBar({ session }: NavBarProps) {
               </li>
             )}
             <li>
+              <Link href="/account/security">Account security / lock</Link>
+              </li>
+              <li>
               <button onClick={handleSignOut}>Sign out</button>
             </li>
           </ul>

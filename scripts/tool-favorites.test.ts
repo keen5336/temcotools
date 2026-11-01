@@ -13,6 +13,12 @@ test("restricted tools follow the current role", () => {
   assert.equal(toolsForRole("manager").some((t) => t.id === "files"), false);
   assert.equal(toolsForRole("admin").some((t) => t.id === "users"), true);
 });
+test("explicit bundles drive navigation without granting payload administration through a coarse role", () => {
+  assert.equal(toolsForRole("user", ["users.manage"]).some(tool => tool.id === "users"), true);
+  assert.equal(toolsForRole("admin", ["inventory.read"]).some(tool => tool.id === "users"), false);
+  assert.equal(toolsForRole("user", ["payloads.manage"]).some(tool => tool.id === "payloads"), false);
+  assert.equal(toolsForRole("user", []).some(tool => tool.id === "warehouse"), false);
+});
 test("set operations are idempotent and append new favorites without losing others", () => {
   const set = { action: "set", toolId: "pick-waves", favorite: true } as const;
   const first = changeFavorites(["api-relay"], "user", set);

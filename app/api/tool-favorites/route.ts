@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
+import { getCurrentPrincipal } from "@/lib/auth";
 import { FavoriteError, parseFavoriteChange } from "@/lib/tool-favorites";
 import { getToolFavorites, saveToolFavorites } from "@/lib/tool-favorites-store";
 
@@ -12,9 +12,9 @@ function failure(error: unknown) {
 
 export async function GET() {
   try {
-    const session = await getSession();
-    if (!session.userId || !session.isActive) return reply({ error: "Sign in to use favorites." }, 401);
-    return reply(await getToolFavorites(session.userId));
+    const principal = await getCurrentPrincipal();
+    if (!principal) return reply({ error: "Sign in to use favorites." }, 401);
+    return reply(await getToolFavorites(principal));
   } catch (error) { return failure(error); }
 }
 
@@ -22,12 +22,12 @@ export async function PATCH(req: NextRequest) {
   const origin = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
   if (req.headers.get("origin") !== new URL(origin).origin) return reply({ error: "Same-origin request required." }, 403);
   try {
-    const session = await getSession();
-    if (!session.userId || !session.isActive) return reply({ error: "Sign in to use favorites." }, 401);
+    const principal = await getCurrentPrincipal();
+    if (!principal) return reply({ error: "Sign in to use favorites." }, 401);
     if (Number(req.headers.get("content-length")) > 4096) return reply({ error: "Favorites update is too large." }, 413);
     const body = await req.json().catch(() => null);
     // The session is the sole source of user identity. Client-supplied user IDs
     // are never used, and tool access is checked against the current DB role.
-    return reply(await saveToolFavorites(session.userId, parseFavoriteChange(body)));
+    return reply(await saveToolFavorites(principal, parseFavoriteChange(body)));
   } catch (error) { return failure(error); }
 }

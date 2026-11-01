@@ -5,6 +5,7 @@ import { THEMES } from "@/lib/themes";
 import { getSession } from "@/lib/auth";
 import LabelRelayProvider from "@/components/labels/LabelRelayProvider";
 import ApiRelayLease from "@/components/api-relay/ApiRelayLease";
+import SessionActivity from "@/app/account/security/SessionActivity";
 import FavoritesProvider from "@/components/tools/FavoritesProvider";
 
 export const metadata: Metadata = {
@@ -31,7 +32,7 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="antialiased">
-        <ThemeProvider><FavoritesProvider key={userId || "anonymous"} userId={userId} role={userId ? session.role : "user"}><ApiRelayLease userId={userId} /><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></FavoritesProvider></ThemeProvider>
+        <ThemeProvider><FavoritesProvider key={userId || "anonymous"} userId={userId} role={userId ? session.role : "user"} capabilities={session.capabilities ?? []}><SessionActivity userId={userId} /><ApiRelayLease userId={userId} /><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></FavoritesProvider></ThemeProvider>
       </body>
     </html>
   );

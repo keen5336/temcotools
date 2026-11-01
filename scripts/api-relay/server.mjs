@@ -41,7 +41,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
     if (!job) return;
     clearTimeout(job.timer);
     c.pending.delete(id);
-    job.resolve(result);
+    job.resolve({ ...result, dispatchState: job.started ? "dispatched" : "not_dispatched" });
     dispatch(c);
   };
   const disconnect = (c, message = "DMP relay disconnected. Requests were not retried; check DMP before repeating an operation.") => {
@@ -50,7 +50,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
     // Remove all jobs before resolving; none can be dispatched during teardown.
     const jobs = [...c.pending.values()];
     c.pending.clear();
-    for (const job of jobs) { clearTimeout(job.timer); job.resolve({ ok: false, error: message }); }
+    for (const job of jobs) { clearTimeout(job.timer); job.resolve({ ok: false, error: message, dispatchState: job.started ? "dispatched" : "not_dispatched" }); }
     c.ws.close(1000, "Relay ended");
   };
   const dispatch = async (c) => {

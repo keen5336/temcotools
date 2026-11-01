@@ -1,9 +1,9 @@
-import { requireAdmin } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
 import AdminUsersClient from "@/components/AdminUsersClient";
 
 export default async function AdminUsersPage() {
-  const session = await requireAdmin();
+  const session = await requireCapability("users.manage");
 
   return (
     <div className="min-h-screen bg-base-200">

@@ -1,9 +1,9 @@
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
 import BarcodeGeneratorClient from "./BarcodeGeneratorClient";
 
 export default async function BarcodeGeneratorPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("labels.read");
 
   return (
     <div className="min-h-screen bg-base-200">

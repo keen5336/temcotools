@@ -1,9 +1,10 @@
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import NavBar from "@/components/NavBar";
+import Link from "next/link";
 import PipelineBuilderClient from "./PipelineBuilderClient";
 
 export default async function ReportEnginePage() {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
 
   return (
     <div className="min-h-screen bg-base-200">
@@ -13,10 +14,10 @@ export default async function ReportEnginePage() {
           Report Engine
         </h1>
         <p className="text-base-content/70 mb-8 print:hidden">
-          Build data transformation pipelines on CSV files and export formatted
-          reports.
+          Legacy tool pending retirement after replacement views and owner acceptance. Use shared source data and saved operational views for the v2 workflow.
         </p>
-        <PipelineBuilderClient />
+        <div className="flex flex-wrap gap-3"><Link className="btn btn-primary" href="/tools/inventory-audit">Shared WMS import and export</Link><Link className="btn btn-outline" href="/tools/lpn-put-away">Put Away</Link><Link className="btn btn-outline" href="/tools/warehouse">Unit history</Link></div>
+        <div className="mt-8"><PipelineBuilderClient /></div>
       </main>
     </div>
   );
