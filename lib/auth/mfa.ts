@@ -1,9 +1,11 @@
 import type { Prisma } from "@prisma/client";
+import { createHash, randomBytes } from "node:crypto";
 import { generateSecret, generateURI } from "otplib";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertRecentPasswordAuthentication, type Principal } from "./principal";
-import { assertIdentityPrincipal, consumeIdentityBudget, type IdentityContext } from "./identity";
+import { assertIdentityPrincipal, assertManageableAccess, consumeIdentityBudget, type IdentityContext } from "./identity";
+import { assertCanRemoveRecoveryFactor } from "./recovery-guards";
 import { IdentityError, verifyPassword } from "./passwords";
 import { decryptMfaSecret, encryptMfaSecret, generateMfaRecoveryCodes, hashMfaRecoveryCode } from "./mfa-crypto";
 import { verifyTotpStep } from "./totp";
@@ -131,10 +133,37 @@ export async function disableMfa(principal: Principal, input: unknown, context: 
   return prisma.$transaction(async (tx) => {
     const current = await assertIdentityPrincipal(tx, principal, "account.self");
     await consumeProof(tx, current, data);
+    await assertCanRemoveRecoveryFactor(tx, current.userId);
     await tx.userMfa.delete({ where: { userId: current.userId } });
     await tx.userSession.updateMany({ where: { userId: current.userId }, data: { mfaVerifiedAt: null } });
     await tx.userSession.updateMany({ where: { userId: current.userId, id: { not: current.sessionId }, revokedAt: null }, data: { revokedAt: new Date() } });
     await audit(tx, current, "mfa_disabled");
     return { enabled: false, message: "Authenticator disabled. Privileged actions require enrolling and verifying an authenticator again." };
+  });
+}
+
+/** Private administrator-to-person recovery. No email or public factor bypass. */
+export async function issueAssistedFactorReset(principal: Principal, input: unknown) {
+  const data = z.object({ userId: z.string().min(1).max(200), reason: z.string().trim().min(5).max(300) }).strict().parse(input);
+  const token = `reset_${randomBytes(32).toString("base64url")}`;
+  return prisma.$transaction(async (tx) => {
+    const current = await assertIdentityPrincipal(tx, principal, "users.manage", true);
+    await tx.$queryRaw`SELECT id FROM "User" WHERE id=${data.userId} FOR UPDATE`;
+    await assertManageableAccess(tx, current, { targetUserId: data.userId });
+    const target = await tx.user.findUnique({ where: { id: data.userId }, select: { id: true, isActive: true, authVersion: true } });
+    if (!target?.isActive) throw new IdentityError("Choose an active account.");
+    await assertCanRemoveRecoveryFactor(tx, target.id);
+    const at = new Date(), expiresAt = new Date(at.getTime() + 30 * 60_000);
+    await tx.user.update({ where: { id: target.id }, data: { passwordHash: null, passwordChangedAt: null, authVersion: { increment: 1 } } });
+    await tx.userSession.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: at, mfaVerifiedAt: null } });
+    await tx.appAccessGrant.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: at } });
+    await tx.oAuthGrant.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: at, revokedReason: "Authorized assisted factor recovery." } });
+    await tx.printingDevice.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: at } });
+    await tx.identityRecoveryToken.updateMany({ where: { userId: target.id, consumedAt: null }, data: { consumedAt: at } });
+    await tx.mfaRecoveryCode.updateMany({ where: { userId: target.id, consumedAt: null }, data: { consumedAt: at } });
+    await tx.userMfa.updateMany({ where: { userId: target.id }, data: { enabledAt: null, pendingExpiresAt: at, enrollmentSessionId: "assisted-factor-recovery" } });
+    const saved = await tx.identityRecoveryToken.create({ data: { userId: target.id, purpose: "reset", tokenHash: createHash("sha256").update(token).digest("hex"), authVersion: target.authVersion + 1, expiresAt, issuedById: current.userId }, select: { id: true, purpose: true, expiresAt: true } });
+    await tx.identityAudit.create({ data: { action: "assisted_factor_reset_issued", actorUserId: current.userId, targetUserId: target.id, sessionId: current.sessionId, reason: data.reason } });
+    return { ...saved, token, message: "Privately deliver this one-use code to the verified person. They set a new password and enroll a new authenticator. Previous credentials, factors, sessions and client grants were revoked; no email was sent." };
   });
 }

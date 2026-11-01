@@ -285,7 +285,7 @@ export async function listIdentityUsers(principal: Principal, search = "") {
   });
 }
 
-async function assertManageableAccess(tx: Prisma.TransactionClient, actor: Principal, input: { targetUserId?: string; role?: string; bundleIds?: string[]; capabilities?: readonly string[] }) {
+export async function assertManageableAccess(tx: Prisma.TransactionClient, actor: Principal, input: { targetUserId?: string; role?: string; bundleIds?: string[]; capabilities?: readonly string[] }) {
   const permitted = new Set(actor.capabilities);
   const check = (capabilities: readonly string[]) => {
     if (capabilities.some(capability => capability !== "account.self" && !permitted.has(capability as Capability))) {

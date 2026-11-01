@@ -72,6 +72,12 @@ test("privileged MFA commands against disposable PostgreSQL", { skip: !testUrl }
       await mfa.verifyMfa(actor, { password, recoveryCode: recoveryCodes[0] }, context);
     });
     await suite.test("disable requires password plus a fresh second factor and removes privileged proof across sessions", async () => {
+      await assert.rejects(mfa.disableMfa(actor, { password, recoveryCode: recoveryCodes[1] }, context), /another enrolled active system administrator/);
+      const backup = await prisma.user.create({ data: { username: `${namespace}-backup`, displayName: "Synthetic backup administrator", pinHash: "disabled:v2", role: "admin", passwordHash: await hashPassword(password), passwordChangedAt: new Date(), roleBundles: { create: { bundleId: "legacy-admin" } } } });
+      const backupLogin = await identity.signInWithPassword({ username: backup.username, password }, { source: `${namespace}-backup` });
+      const backupActor = await principalFor(backupLogin.claim);
+      const setup = await mfa.beginMfaEnrollment(backupActor, { password }, { source: `${namespace}-backup` });
+      await mfa.confirmMfaEnrollment(backupActor, { token: await generate({ secret: setup.secret }) }, { source: `${namespace}-backup` });
       const other = await identity.signInWithPassword({ username: user.username, password }, context);
       await mfa.disableMfa(actor, { password, recoveryCode: recoveryCodes[1] }, context);
       assert.equal((await mfa.getMfaStatus(actor)).enabled, false);
