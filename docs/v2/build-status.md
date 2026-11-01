@@ -1,37 +1,47 @@
 # TemcoTools v2 build status
 
-Standing mandate (2026-10-31): implement, test, review, correct, commit and push the agreed v2 build continuously until complete or no useful work remains without a genuine owner-dependent input. This supersedes the initial documents-only boundary and the plan's requirement for a separate implementation assignment. Keep advancing independent work when a source/device feature is pending.
+Standing mandate: implement, test, review, correct, commit and push continuously until the agreed build is complete or no useful work remains without a genuine owner-dependent input. Stage completion and passing checks are progress updates. Keep advancing independent packages around source/device qualification gaps.
 
-Work only on `v2` in the isolated MacDev worktree. Preserve `main`, `v1` at `fea1f22af1b2fae788388f2aefed3e3998e98d09`, existing local work and production operation. This mandate does not authorize production deployment, paid provisioning, actual mail/DNS changes or live operational mutations. Existing relevant read-only inspection is authorized; never publish secrets/customer data. Inherit GPT-6.1 Sol / `reasoningEffort=xhigh` for helpers and keep integration in the main thread.
+Work on `v2` only, in `/Volumes/MacDev/ProjectArchive/Development/worktrees/t3code/temcotools/v2` (T3 alias `/Users/openclaw/.t3/worktrees/temcotools/v2`). Preserve main/v1 at `fea1f22af1b2fae788388f2aefed3e3998e98d09`, original local work and production. Remote refs and the clean original checkout were rechecked during this run. No deployment, live operational mutation, paid provisioning, actual mail or DNS change is authorized. Helpers inherit GPT-6.1 Sol / Extra High; the main thread owns integration and continuation.
 
 ## Current checkpoint
 
-- Published baseline: `0e7958487e7ddeb22542c9729c64d9f1751b15a6` (planning documents; no runtime validation claimed).
-- Latest tested runtime checkpoint: `e9145c76acbd0ee17350166bed25cbdeaf14a578` (slice 1; subsequent working changes are listed below). `main`/`v1` remote hashes and original checkout remain preserved.
-- Mounted external worktree/storage routing verified; independent locked dependencies installed. Original checkout/dependencies are preserved. Disposable PostgreSQL: task-owned container `temcotools-v2-build-db`, loopback port 55439, database `temcotools_v2_test`, data under external Qualification storage. No production database connection was used.
-- Active native helpers: `/root/access_foundation` (strong identity, server sessions and capability bundles), `/root/inventory_lookup` (shared WMS, units/aliases and observations), `/root/payload_manager` (mobile admin payload manager). They inherit parent model/settings. Main owns MCP/queue/scan integration, validation, commits and this status.
+- Published runtime packages through `cec2b5a`, followed by `57cd444` (retained MARS capability guards/private recovery handoff) and `d50653e` (migration/recovery tooling).
+- Latest combined source validation: optimized **88-route build**, TypeScript and changed-file ESLint passed, followed by **15 database/HTTP/SDK/phone-viewport checks**, captured in the runtime commits through `cec2b5a`. Build receipt `20261031-230131-build-72956.json`; HTTP/mobile receipt `20261031-230320-build-74275.json`. Later/in-progress changes are not covered by those receipts. Exact committed-source container qualification is the next check; this is not a production release.
+- Test data: task-owned `temcotools-v2-build-db`, loopback port 55439, synthetic `temcotools_v2_test`; 27 applied migrations. Separate upgrade/recovery/restore databases are described in [cutover runbook](cutover-runbook.md). No production database was used.
+- Main/v1 are unchanged. No upstream DMP/MARS mutation, actual printer effect, mail or deployment was performed.
 
 ## Completion matrix
 
-| Area | State | Next concrete result |
+| Area | Implemented and checked locally | Remaining work/qualification |
 | --- | --- | --- |
-| 1. Current access + global lookup | Implemented; source/local synthetic validation passed | DB-backed current user/generation, 12h expiry, exact-origin mutation guard, global LPN/order candidates, phone UI and user-bound scoped stdio MCP. PIN replacement and per-session revocation follow in slice 2. |
-| 2. Strong identity / capabilities / remote MCP | Implementing | Revocable server sessions, strong credentials/recovery, bundles and authenticated remote transport. |
-| 3. Shared WMS / units / observations | Implementing | Retained source revisions, shared Put Away, durable attributed scan ingestion. |
-| 4. Admin payload manager | Implementing | Mobile source drafts, immutable versions, publish/rollback, stable loader IDs. |
-| 5. DMP history and picks | Source-independent boundaries can proceed | Preserve working relay; qualify actual unit/attempt/line mapping before automatic normalization. |
-| 6. Finals | Domain/UI implementation can proceed | Versioned demand/lane confirmations; official source equivalence pending evidence. |
-| 7. Cases / expected returns | Planned | Durable dispositions/watch triggers and separate A/B obligations. |
-| 8. Labels / devices / effect receipts | Planned | Versioned rules/content/jobs and no replay of uncertain effects. |
-| 9. MARS workflow / migration / cutover | Planned | Human-assisted submission linking until upstream creation is evidenced; additive migration/recovery package. |
+| Access/identity | Strong scrypt passwords, assisted one-use enrollment/reset, individual server sessions/idle/absolute expiry/revocation, current bundles/scopes, TOTP/recovery codes and assisted lost-factor protection | Actual enrollment delivery and device/operator acceptance; real mail provider remains unconfigured |
+| Remote MCP | Maintained SDK OAuth/PKCE, exact resource, phone consent, opaque/rotating credentials, per-call/current-writer checks, scoped stdio grants | Finish retained MARS/local utility parity and action documentation; actual-client/proxy/container qualification pending |
+| WMS/units/observations | Shared import/full rows/revisions/membership, stable typed aliases, ambiguity/corrections, shared Put Away, complete history pagination/export | Live cross-system links need evidenced upstream mappings; unit notes/context are next |
+| Warehouse scan/picks | Persistent original-person IndexedDB queue, global evidence before local work, exact dispatch unit bindings, no order-only fallback, visible/blocking office handling | More actual-device/operator acceptance; authoritative shared label context integration underway |
+| Payload administration | Mobile draft/source editing/import/export, immutable versions, publish/rollback/disable, stable loaders, isolated preview, current queued DMP authority, in-flight replacement protection | Actual external-page/CSP/device acceptance of managed publication; preserved owner-confirmed working relay is distinct from new qualification |
+| DMP | Existing named relay retained; durable intent/response hashes, uncertain mutation retry blocking, current grant/payload/operation checks | Qualified full unit/line/quantity/attempt/replacement snapshot adapter pending actual obtainable field evidence |
+| Dispatch/finals | Manual/workbook snapshots, explicit quantity allocation, native waves, actual lane evidence, WRONG LANE/destination rescan, immutable manual signatures, targeted amendments | **Official DMP/Ashe finals equivalence is unqualified**; all current surfaces say manual/workbook. Real dispatch acceptance pending |
+| Office/expected returns | Durable cases/watch/reopen/dispositions, separate instruction/execution, correct missed-exchange A/B obligations and five return gaps | Upstream automatic scheduling/outcome ingestion pending; current facts are explicitly manual office statements |
+| Labels/devices | Versioned purposes/rules/preview, relevant-content fingerprints, issuance/reprint/reconciliation, current connected-device claims and uncertain-result protection; retained printers/direct/laptop modes | Server-derived shared unit/date/route/disposition context underway. Physical printing/media/network qualification pending |
+| Retained tools/admin | Capability-backed navigation, Scan Lists/Route Recon/import/export, per-person local drafts, file custody/operation receipts, mobile file moves and printer/template management | Legacy Report Engine remains pending retirement/owner acceptance; MARS parity/safety extension underway |
+| Home | Authorized priority/progress/source/observation/label widgets with account-saved order/defaults; unknown source state shown explicitly | Add new notes/MARS context as their packages land; phone/operator acceptance pending |
+| Migration/recovery | Guarded preflight/backfill/private bootstrap, actual pinned-v1 upgrade through 27 migrations, populated dump/restore of 17-table comparison, restored-access revocation | Renew qualification after new migrations; production backup/key custody/cutover and operator acceptance remain explicit launch gates |
 
-No source-independent feature is blocked at this checkpoint. Exact upstream mappings, official-finals semantics, real Zebra/printer behavior, recovery provider readiness and live-effect authority remain qualification dependencies; they are not claimed implemented or accepted. See [open questions](open-questions.md).
+## Meaningful validation
 
-## Validation and next action
+The latest combined checks exercise real local PostgreSQL, production Next HTTP, SDK OAuth/MCP and a fresh Chromium 390×844 profile. The queued observation survives reload and user switching, remains with its original person, and saves once. OAuth checks include actual password/TOTP proof, PKCE/resource/code/refresh behavior and current revocation/narrowed writer scope. This is phone-viewport validation, not Zebra hardware acceptance.
 
-Slice 1: Prisma generation and all 14 migrations passed on a dedicated empty PostgreSQL database. TypeScript, changed-file ESLint and optimized Next build passed. 57 focused authorization/query/favorites/DMP/printer-relay tests passed. Two real-database/SDK/HTTP integration scenarios passed: UI/MCP query equality, scoped grants, role-generation revocation, legacy-cookie rejection, exact-origin enforcement and relay entrypoint rejection after revocation. No actual Zebra/operator, physical printer, live upstream, mail or deployment qualification is claimed. Initial dependency audit reports existing high/critical advisories; triage/update remains required before release.
+Scoped packages additionally passed: warehouse/history15, dispatch10, office8, payload4, labels4, printer relay13, DMP relay28, retained list/report3, admin resource2, and maintenance6 plus pinned-v1 upgrade/restore checks. Counts refer to their scoped receipts and are not a claim that every later edit was retested together. The latest DMP intent test also proves no replay after lost response/fresh-ID retry, no stored raw response payload and read-only scope denial. Next 16.4.3/security updates removed high/critical dependency advisories; low/moderate advisories still require bounded release triage.
 
-Next concrete packages are running concurrently: strong identity/server sessions, shared WMS/unit/observation data, and admin payload management. Main next integrates durable attributed observation capture/Pick Wave and MCP command parity. Do not stop on this checkpoint.
+## Active packages and next action
+
+- Main: exact committed-source/container qualification, remaining command parity, integration/review/corrections and status publication. Capture the tested candidate SHA before accepting new changes into that receipt.
+- `/root/access_foundation`: completed identity/OAuth/recovery; now retained MARS shared commands, import/audit safety and exact-unit human-assisted submission intent. No guessed creation endpoint.
+- `/root/inventory_lookup`: completed WMS/office/dispatch/finals; now durable unit notes and shared current RTV authorization guard.
+- `/root/payload_manager`: completed payload/labels/files/retained lists; now server-derived unit label context and unified mobile unit history.
+
+These native helper references identify this active run; they are not persistent scheduled workers. Upcoming packages are source-independent and useful; none requires a new assignment from Adam. Exact upstream contracts, official finals, physical devices, recovery delivery/provider readiness and production authority gate their dependent acceptance, not ongoing independent development. See [open questions](open-questions.md) and [MCP runbook](mcp-runbook.md).
 
 ## Continuation policy
 

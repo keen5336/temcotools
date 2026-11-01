@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ops_tools
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set the existing or newly provisioned private database password}
       POSTGRES_DB: ops_tools
     volumes:
       - db_data:/var/lib/postgresql/data
@@ -29,8 +29,11 @@ services:
       - "127.0.0.1:3000:3000"
     environment:
       ADMIN_FILE_MANAGER_ROOT: /data/admin-files
-      DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
-      SESSION_SECRET: ${SESSION_SECRET:-changeme-at-least-32-characters-long}
+      DATABASE_URL: ${DATABASE_URL:?Set the private database URL for this composition}
+      SESSION_SECRET: ${SESSION_SECRET:?Set a private session secret of at least 32 characters}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:?Set and preserve the 32-byte base64url MFA encryption key}
+      MCP_ISSUER_URL: ${MCP_ISSUER_URL:-https://temco.chronchive.com/}
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:-https://temco.chronchive.com/mcp}
       TRUST_PROXY: "true"
       PROTOCOL: "https"
       NODE_ENV: "production"
@@ -42,7 +45,6 @@ services:
       DMP_IDENTITY_PATH: ${DMP_IDENTITY_PATH-/identity/me}
       DMP_IDENTITY_SUBJECT_PATH: ${DMP_IDENTITY_SUBJECT_PATH-subject}
       DMP_API_OPERATIONS: ${DMP_API_OPERATIONS:-}
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       db:
         condition: service_healthy
@@ -90,6 +92,8 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-}
       DMP_ORIGINS: ${DMP_ORIGINS-https://dmp.extapps.homedepot.com}
       API_RELAY_HOST: "0.0.0.0"
+      API_RELAY_APP_URL: http://app:3000
+      API_RELAY_APP_ORIGIN: https://temco.chronchive.com
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3003/health || exit 1"]
       interval: 15s
@@ -109,7 +113,7 @@ services:
     profiles:
       - maintenance
     environment:
-      DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
+      DATABASE_URL: ${DATABASE_URL:?Set the private database URL for this composition}
     networks:
       - temco_net
 
@@ -120,13 +124,49 @@ services:
     profiles:
       - mcp
     environment:
-      DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
+      DATABASE_URL: ${DATABASE_URL:?Set the private database URL for this composition}
       NODE_ENV: production
+      TEMCO_MCP_TOKEN: ${TEMCO_MCP_TOKEN:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+      MCP_ISSUER_URL: ${MCP_ISSUER_URL:-https://temco.chronchive.com/}
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:-https://temco.chronchive.com/mcp}
+      NEXT_PUBLIC_APP_URL: https://temco.chronchive.com/
+      API_RELAY_INTERNAL_URL: http://api-relay:3003
+    volumes:
+      - ./runtime/admin-files:/data/admin-files
     depends_on:
       db:
         condition: service_healthy
     networks:
       - temco_net
+
+  mcp-http:
+    image: temcotools-mcp
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    profiles: [mcp-http]
+    command: ["node", "--import", "tsx", "scripts/mcp-http-server.ts"]
+    restart: unless-stopped
+    ports: ["127.0.0.1:3004:3004"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set the private database URL for this composition}
+      NODE_ENV: production
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+      MCP_ISSUER_URL: ${MCP_ISSUER_URL:-https://temco.chronchive.com/}
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:-https://temco.chronchive.com/mcp}
+      NEXT_PUBLIC_APP_URL: https://temco.chronchive.com/
+      MCP_HTTP_HOST: "0.0.0.0"
+      MCP_HTTP_PORT: "3004"
+      API_RELAY_INTERNAL_URL: http://api-relay:3003
+    volumes:
+      - ./runtime/admin-files:/data/admin-files
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [temco_net]
 
 networks:
   temco_net:

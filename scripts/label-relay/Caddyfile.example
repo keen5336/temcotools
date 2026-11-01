@@ -1,4 +1,9 @@
 temco.chronchive.com {
+  # Enable alongside the explicitly configured mcp-http composition profile.
+  @authenticated_mcp path /mcp /authorize /token /register /revoke /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource/mcp
+  handle @authenticated_mcp {
+    reverse_proxy 127.0.0.1:3004
+  }
   handle /api/api-relay/ws {
     reverse_proxy 127.0.0.1:3003
   }

@@ -17,7 +17,8 @@
     "test:favorites": "tsx --test scripts/tool-favorites.test.ts",
     "test:v2": "tsx --test scripts/access.test.ts scripts/warehouse-lookup.test.ts",
     "test:v2:integration": "tsx --test scripts/v2-*.integration.test.ts",
-    "test:v2:identity": "tsx --test scripts/access.test.ts scripts/identity.test.ts scripts/identity.integration.test.ts scripts/mfa.test.ts scripts/mfa.integration.test.ts"
+    "test:v2:identity": "tsx --test scripts/access.test.ts scripts/identity.test.ts scripts/identity.integration.test.ts scripts/mfa.test.ts scripts/mfa.integration.test.ts",
+    "mcp:http": "tsx scripts/mcp-http-server.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

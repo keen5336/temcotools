@@ -1,5 +1,5 @@
 # Dockerfile for Next.js
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 
 # Install dependencies only when needed
 FROM base AS deps
@@ -28,7 +28,7 @@ LABEL org.opencontainers.image.source="https://github.com/keen5336/temcotools" \
       com.temcotools.workload-class="database-migration" \
       com.temcotools.production-eligible="true"
 COPY prisma ./prisma
-COPY prisma.config.js ./prisma.config.js
+COPY prisma.config.ts ./prisma.config.ts
 USER node
 CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
 
@@ -53,7 +53,7 @@ RUN adduser --system --uid 1001 --ingroup nodejs nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/scripts ./scripts
-COPY --from=builder /app/prisma.config.js ./prisma.config.js
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 
 # Set the correct permission for prerender cache
 RUN mkdir .next
