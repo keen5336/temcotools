@@ -98,11 +98,13 @@ export async function deriveUnitLabelContext(tx: Prisma.TransactionClient, raw: 
     put("partNumber", slot.partNumber, "accepted_dispatch_allocation", [allocation.id, snapshot.id], snapshot.sourceAsOf, snapshot.approvedAt, qualification);
     if (slot.orderReference) put("orderNumber", slot.orderReference, "accepted_dispatch_allocation", [allocation.id, snapshot.id], snapshot.sourceAsOf, snapshot.approvedAt, "Order is allocation context, never physical-unit identity.");
   }
-  const dispositions = unit.officeDispositions.filter(item => ["active", "triggered"].includes(item.status) && !item.revokedAt && (!item.expiresAt || item.expiresAt > now));
+  // Confirmed RTV placement completes that floor action, while its submission,
+  // label and pickup instructions remain current until expiry or revocation.
+  const dispositions = unit.officeDispositions.filter(item => ["active", "triggered", "executed"].includes(item.status) && !item.revokedAt && (!item.expiresAt || item.expiresAt > now));
   const dispositionPriorities: Record<string, number> = { hold: 0, customer_property: 1, rtv: 2, conditional_rtv: 3, reschedule: 4 };
   const priority = (kind: string) => dispositionPriorities[kind] ?? 5;
   dispositions.sort((a, b) => priority(a.kind) - priority(b.kind) || b.createdAt.getTime() - a.createdAt.getTime() || a.id.localeCompare(b.id));
-  const instructions = dispositions.map(item => item.kind === "conditional_rtv" && item.status !== "triggered" ? `Conditional instruction${item.triggerAt ? " after " + item.triggerAt.toISOString() : ""}: ${item.instruction}` : item.instruction);
+  const instructions = dispositions.map(item => item.kind === "conditional_rtv" && !["triggered", "executed"].includes(item.status) ? `Conditional instruction${item.triggerAt ? " after " + item.triggerAt.toISOString() : ""}: ${item.instruction}` : item.instruction);
   const activeCases = unit.officeCases.filter(item => item.status !== "resolved");
   if (!instructions.length) for (const item of activeCases) if (item.nextAction) instructions.push(`${item.status === "watching" ? "Office watch" : "Office review"}: ${item.nextAction}`);
   const instruction = [...new Set(instructions)].join(" | ");

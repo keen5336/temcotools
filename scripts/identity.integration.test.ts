@@ -36,6 +36,17 @@ test("identity commands against disposable PostgreSQL", { skip: !testUrl }, asyn
     const setup = await mfa.beginMfaEnrollment(actor, { password }, context);
     await mfa.confirmMfaEnrollment(actor, { token: await generate({ secret: setup.secret }) }, context);
     actor = await principalFor(signedIn.claim);
+    await suite.test("concurrent case variants cannot create duplicate account identities", async () => {
+      const username = `${namespace}-case-variant`;
+      const outcomes = await Promise.allSettled([
+        identity.createIdentityUser(actor, { username, displayName: "Synthetic concurrent account" }),
+        identity.createIdentityUser(actor, { username: username.toUpperCase(), displayName: "Synthetic concurrent account" }),
+      ]);
+      assert.equal(outcomes.filter(outcome => outcome.status === "fulfilled").length, 1);
+      assert.equal(await prisma.user.count({ where: { username: { equals: username, mode: "insensitive" } } }), 1);
+      const refused = outcomes.find(outcome => outcome.status === "rejected");
+      assert.ok(refused?.status === "rejected" && refused.reason instanceof identity.IdentityError && refused.reason.status === 409);
+    });
     await suite.test("delegated access administration cannot assign or recover authority beyond its client scope", async () => {
       const { createAccessGrant, authenticateAccessGrant } = await import("../lib/application/grants");
       const grant = await createAccessGrant(actor, { clientName: "Synthetic narrow administrator", scopes: ["users.manage"], lifetimeMinutes: 5 });

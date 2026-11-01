@@ -1,5 +1,8 @@
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { normalizeLpn } from "@/lib/lpn-report";
+import { z } from "zod";
+
+export const warehouseLookupInput = z.object({ kind: z.enum(["lpn", "order"]), value: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(50).optional() });
 
 export type WarehouseLookupInput = { kind: "lpn" | "order"; value: string; limit?: number };
 
@@ -122,11 +125,9 @@ function observation(scan: WarehouseScanRow): WarehouseObservation {
 }
 
 function parseInput(input: unknown): Required<WarehouseLookupInput> {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new WarehouseLookupError("Choose LPN or order lookup and enter a value.");
-  const body = input as Record<string, unknown>;
-  if (body.kind !== "lpn" && body.kind !== "order") throw new WarehouseLookupError("Choose LPN or order lookup.");
-  if (typeof body.value !== "string" || !body.value.trim() || body.value.trim().length > 500) throw new WarehouseLookupError("Enter a value between 1 and 500 characters.");
-  if (body.limit !== undefined && (!Number.isInteger(body.limit) || Number(body.limit) < 1 || Number(body.limit) > 50)) throw new WarehouseLookupError("Candidate limit must be between 1 and 50.");
+  const validated = warehouseLookupInput.safeParse(input);
+  if (!validated.success) throw new WarehouseLookupError("Choose LPN or order lookup, a value of 1–500 characters and a candidate limit of 1–50.");
+  const body = validated.data;
   return { kind: body.kind, value: body.kind === "lpn" ? normalizeLpn(body.value) : body.value.trim(), limit: Number(body.limit ?? 20) };
 }
 

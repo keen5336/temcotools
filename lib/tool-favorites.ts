@@ -1,5 +1,8 @@
 import type { Capability } from "./auth/principal";
 import { TOOLS, toolsForRole, visibleFavoriteIds, type ToolRole } from "./tools";
+import { z } from "zod";
+
+export const favoriteChangeInput = z.discriminatedUnion("action", [z.object({ action: z.literal("set"), toolId: z.string().max(80), favorite: z.boolean() }), z.object({ action: z.literal("reorder"), order: z.array(z.string().max(80)).max(TOOLS.length) })]);
 
 export type FavoriteChange = { action: "set"; toolId: string; favorite: boolean } | { action: "reorder"; order: string[] };
 export class FavoriteError extends Error {
@@ -7,8 +10,9 @@ export class FavoriteError extends Error {
 }
 
 export function parseFavoriteChange(value: unknown): FavoriteChange {
-  if (!value || typeof value !== "object") throw new FavoriteError("Invalid favorites update.");
-  const data = value as Record<string, unknown>;
+  const parsed = favoriteChangeInput.safeParse(value);
+  if (!parsed.success) throw new FavoriteError("Invalid favorites update.");
+  const data = parsed.data;
   if (data.action === "set" && typeof data.toolId === "string" && data.toolId.length <= 80 && typeof data.favorite === "boolean") return { action: "set", toolId: data.toolId, favorite: data.favorite };
   if (data.action === "reorder" && Array.isArray(data.order) && data.order.length <= TOOLS.length && data.order.every((id) => typeof id === "string" && id.length <= 80) && new Set(data.order).size === data.order.length) return { action: "reorder", order: data.order };
   throw new FavoriteError("Invalid favorites update.");

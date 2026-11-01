@@ -1,4 +1,6 @@
 FROM node:24-alpine
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.revision=$VCS_REF
 
 WORKDIR /app
 
@@ -8,6 +10,8 @@ RUN npm ci
 COPY prisma ./prisma
 COPY lib ./lib
 COPY scripts ./scripts
+# The retained label defaults/parser are shared by UI and application commands.
+COPY app/tools/rtv-label/marsLabelShared.ts ./app/tools/rtv-label/marsLabelShared.ts
 COPY prisma.config.ts tsconfig.json ./
 
 RUN npx prisma generate

@@ -4,13 +4,20 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, AuthorizationError, CAPABILITIES, type Capability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
-import { currentPrintingDevice, hashDeviceToken } from "./devices";
+import { currentPrintingDevice, hashDeviceToken, printingDeviceAuthorityInput } from "./devices";
 import { fingerprint, LabelError, renderLabelVersion, matchesApprovedLegacyTemplate } from "./model";
 import { LABEL_PURPOSES, type LabelDispatchClaim } from "./types";
 import { assertUnitContextScopes, deriveUnitLabelContext, unitLabelDispatchDay, validateAutomaticUnitLabelObservation } from "./unit-context";
 
 const idSchema = z.string().min(1).max(100);
-const prepareSchema = z.object({ operationId: z.string().min(16).max(100), unitId: idSchema.optional(), purpose: z.enum(LABEL_PURPOSES), printerId: idSchema, versionId: idSchema.optional(), fields: z.record(z.string(), z.string().max(2000)).default({}), legacyZpl: z.string().min(1).max(128 * 1024).optional(), mode: z.enum(["direct", "relay"]), deviceId: idSchema.optional(), automatic: z.boolean().default(false), reprintOf: idSchema.optional(), reason: z.string().trim().min(3).max(500).optional() });
+export const labelPrepareInput = z.object({ operationId: z.string().min(16).max(100).describe("Durable caller operation ID; retry the same ID and inputs after a lost response."), unitId: idSchema.optional(), purpose: z.enum(LABEL_PURPOSES), printerId: idSchema, versionId: idSchema.optional(), fields: z.record(z.string(), z.string().max(2000)).default({}), legacyZpl: z.string().min(1).max(128 * 1024).optional().describe("Explicit approved legacy-template content snapshot; at most 128 KiB UTF-8. Not arbitrary printer commands."), mode: z.enum(["direct", "relay"]), deviceId: idSchema.optional(), automatic: z.boolean().default(false), reprintOf: idSchema.optional(), reason: z.string().trim().min(3).max(500).optional() });
+export const labelDispatchClaimInput = printingDeviceAuthorityInput.extend({ issuanceId: idSchema });
+export const labelDeliveryReportInput = labelDispatchClaimInput.extend({ reportToken: z.string().min(30).max(100).meta({ writeOnly: true, description: "One-use report authority returned by this actual device's successful dispatch claim." }), status: z.enum(["sent_unconfirmed", "unknown", "not_sent"]), note: z.string().trim().max(500).default("") });
+export const labelCancelInput = z.object({ issuanceId: idSchema, reason: z.string().trim().min(3).max(500) });
+export const labelReconcileInput = z.object({ issuanceId: idSchema, outcome: z.enum(["printed", "applied", "not_printed"]), reason: z.string().trim().min(3).max(500) });
+export const labelIssuanceInput = z.object({ issuanceId: idSchema });
+export const labelIssuanceListInput = z.object({ unitId: idSchema.optional() });
+export const labelReprintInput = z.object({ operationId: z.string().min(16).max(100), issuanceId: idSchema, printerId: idSchema.optional(), mode: z.enum(["direct", "relay"]), deviceId: idSchema.optional(), reason: z.string().trim().min(3).max(500).describe("Explicit new reprint reason after inspecting the original receipt/printer. Never an automatic replay.") });
 const receiptFields = { id: true, operationId: true, actorUserId: true, unitId: true, purpose: true, printerId: true, workflowVersionId: true, contentFingerprint: true, mode: true, deviceId: true, state: true, automatic: true, reprintOf: true, reason: true, ruleId: true, createdAt: true, dispatchedAt: true, reportedAt: true, physicallyConfirmedAt: true, appliedAt: true, reconciledAt: true, reconciliationNote: true } as const;
 async function event(tx: Prisma.TransactionClient, row: { id: string; state: string }, actor: string, action: string, note: string, deviceId?: string) {
   await tx.labelIssuanceEvent.create({ data: { issuanceId: row.id, actorUserId: actor, deviceId, action, state: row.state, note } });
@@ -44,7 +51,7 @@ export async function prepareLabelIssuance(principal: Principal, input: unknown)
 // Trusted application orchestration only; HTTP/MCP bodies cannot supply a DB
 // transaction or bypass the current actor and native issuance validation.
 export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionClient, principal: Principal, input: unknown) {
-  const data = prepareSchema.parse(input), inputFingerprint = fingerprint(data);
+  const data = labelPrepareInput.parse(input), inputFingerprint = fingerprint(data);
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`label-operation:${principal.userId}:${data.operationId}`}, 811))`;
     const existing = await tx.labelIssuance.findUnique({ where: { actorUserId_operationId: { actorUserId: principal.userId, operationId: data.operationId } } });
@@ -101,7 +108,7 @@ export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionCl
     return { created: true, issuance: receipt(issuance) };
 }
 export async function claimLabelDispatch(principal: Principal, input: unknown): Promise<LabelDispatchClaim | { dispatch: false; issuance: ReturnType<typeof receipt> }> {
-  const data = z.object({ issuanceId: idSchema, deviceId: idSchema, deviceToken: z.string().min(30).max(100) }).parse(input);
+  const data = labelDispatchClaimInput.parse(input);
   return prisma.$transaction(async tx => {
     const device = await currentPrintingDevice(tx, principal, data.deviceId, data.deviceToken);
     const row = await lockIssuance(tx, data.issuanceId);
@@ -166,7 +173,7 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
   });
 }
 export async function reportLabelDelivery(principal: Principal, input: unknown) {
-  const data = z.object({ issuanceId: idSchema, deviceId: idSchema, deviceToken: z.string().min(30).max(100), reportToken: z.string().min(30).max(100), status: z.enum(["sent_unconfirmed", "unknown", "not_sent"]), note: z.string().trim().max(500).default("") }).parse(input);
+  const data = labelDeliveryReportInput.parse(input);
   return prisma.$transaction(async tx => {
     await currentPrintingDevice(tx, principal, data.deviceId, data.deviceToken);
     const row = await lockIssuance(tx, data.issuanceId);
@@ -183,7 +190,7 @@ export async function reportLabelDelivery(principal: Principal, input: unknown) 
   });
 }
 export async function cancelQueuedLabel(principal: Principal, input: unknown) {
-  const data = z.object({ issuanceId: idSchema, reason: z.string().trim().min(3).max(500) }).parse(input);
+  const data = labelCancelInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");
     const row = await lockIssuance(tx, data.issuanceId);
@@ -195,7 +202,7 @@ export async function cancelQueuedLabel(principal: Principal, input: unknown) {
   });
 }
 export async function reconcileLabelIssuance(principal: Principal, input: unknown) {
-  const data = z.object({ issuanceId: idSchema, outcome: z.enum(["printed", "applied", "not_printed"]), reason: z.string().trim().min(3).max(500) }).parse(input);
+  const data = labelReconcileInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");
     const row = await lockIssuance(tx, data.issuanceId);
@@ -208,6 +215,7 @@ export async function reconcileLabelIssuance(principal: Principal, input: unknow
   });
 }
 export async function getLabelIssuance(principal: Principal, issuanceId: string) {
+  labelIssuanceInput.parse({ issuanceId });
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal);
     const row = await tx.labelIssuance.findUnique({ where: { id: idSchema.parse(issuanceId) }, include: { events: { orderBy: { createdAt: "asc" } } } });
@@ -216,17 +224,18 @@ export async function getLabelIssuance(principal: Principal, issuanceId: string)
   });
 }
 export async function listLabelIssuances(principal: Principal, unitId?: string) {
+  labelIssuanceListInput.parse({ unitId });
   return prisma.$transaction(async tx => { await assertCurrentPrincipal(tx, principal, "labels.read"); return tx.labelIssuance.findMany({ where: unitId ? { unitId: idSchema.parse(unitId) } : {}, select: receiptFields, orderBy: { createdAt: "desc" }, take: 100 }); });
 }
 export async function listPendingLabelDispatches(principal: Principal, input: unknown) {
-  const data = z.object({ deviceId: idSchema, deviceToken: z.string().min(30).max(100) }).parse(input);
+  const data = printingDeviceAuthorityInput.parse(input);
   return prisma.$transaction(async tx => {
     const device = await currentPrintingDevice(tx, principal, data.deviceId, data.deviceToken);
     return { issuances: await tx.labelIssuance.findMany({ where: { deviceId: data.deviceId, state: "queued", printerId: { in: device.printerIds } }, select: receiptFields, orderBy: { createdAt: "asc" }, take: 10 }) };
   });
 }
 export async function reprintLabelIssuance(principal: Principal, input: unknown) {
-  const data = z.object({ operationId: z.string().min(16).max(100), issuanceId: idSchema, printerId: idSchema.optional(), mode: z.enum(["direct", "relay"]), deviceId: idSchema.optional(), reason: z.string().trim().min(3).max(500) }).parse(input);
+  const data = labelReprintInput.parse(input);
   const inputFingerprint = fingerprint({ action: "reprint_snapshot", ...data });
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");

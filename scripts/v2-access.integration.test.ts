@@ -56,6 +56,16 @@ test("real database and MCP preserve identity, candidate boundaries and grant re
     assert.equal(response.isError, undefined);
     const content = response.content as { type: string; text: string }[];
     assert.deepEqual(JSON.parse(content[0].text), uiResult);
+    const description = await client.callTool({ name: "application_action_info", arguments: { action: "warehouse.lookup" } });
+    assert.equal(description.isError, undefined);
+    const described = JSON.parse((description.content as { text: string }[])[0].text);
+    assert.deepEqual(described.inputSchema.required.sort(), ["kind", "value"]);
+    assert.deepEqual(described.inputSchema.properties.kind.enum, ["lpn", "order"]);
+    const commandLookup = await client.callTool({ name: "application_action", arguments: { action: described.name, input: { kind: "lpn", value: lpn } } });
+    assert.deepEqual(JSON.parse((commandLookup.content as { text: string }[])[0].text), uiResult, "Discovered MCP input executes the same lookup as the UI domain seam.");
+    const missingInput = await client.callTool({ name: "application_action", arguments: { action: "warehouse.lookup", input: { kind: "lpn" } } });
+    assert.equal(missingInput.isError, true); assert.match((missingInput.content as { text: string }[])[0].text, /Invalid input: value/);
+    assert.equal((await client.callTool({ name: "application_action_info", arguments: { action: "payloads.get" } })).isError, true, "Scoped discovery cannot expose private administration contracts.");
     assert.equal((await client.callTool({ name: "mars_workflow_summary", arguments: {} })).isError, true);
     assert.equal((await client.callTool({ name: "application_action", arguments: { action: "identity.session.lock", input:{} } })).isError, true);
     assert.equal((await client.callTool({ name: "application_action", arguments: { action: "access.grants", input:{} } })).isError, true);

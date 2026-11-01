@@ -11,6 +11,7 @@ export const MAX_SAVED_SCANS = 20_000;
 export const MAX_RETAINED_CSV_BYTES = 32 * 1024 * 1024;
 export class RetainedListError extends Error { constructor(message: string, public status = 400) { super(message); } }
 const idSchema = z.string().min(1).max(200);
+export const scanListSaveInput = z.object({ localDraftId: z.string().trim().min(1).max(200).describe("Stable device draft ID scoped by the current person; changed content under the same ID conflicts."), name: z.string().trim().min(1).max(120), createdAt: z.string().datetime({ offset: true }), scans: z.array(z.object({ value: z.string().max(500).transform(normalizeScannedValue).refine(value => Boolean(value) && !value.includes("\0"), "Scanned values cannot be empty or contain NUL."), scannedAt: z.string().datetime({ offset: true }) })).min(1).max(MAX_SAVED_SCANS) });
 const summarySelect = { id: true, name: true, createdAt: true, updatedAt: true, closedAt: true, archivedAt: true, createdByUser: { select: { displayName: true } }, _count: { select: { items: true } } } satisfies Prisma.ScanListSessionSelect;
 const detailSelect = { id: true, name: true, createdAt: true, updatedAt: true, closedAt: true, archivedAt: true, createdByUser: { select: { displayName: true } }, items: { orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true, scannedValue: true, createdAt: true } } } satisfies Prisma.ScanListSessionSelect;
 export async function currentRetainedPrincipal(principal?: Principal) { const current = principal ?? await getCurrentPrincipal(); if (!current) throw new AuthorizationError("Sign in required."); return current; }
@@ -29,7 +30,7 @@ export async function getScanList(id: string, principal?: Principal) {
 }
 export async function saveScanList(options: unknown, principal?: Principal) {
   const actor = await currentRetainedPrincipal(principal);
-  const data = z.object({ localDraftId: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(120), createdAt: z.string().datetime({ offset: true }), scans: z.array(z.object({ value: z.string().max(500).transform(normalizeScannedValue).refine(value => Boolean(value) && !value.includes("\0"), "Scanned values cannot be empty or contain NUL."), scannedAt: z.string().datetime({ offset: true }) })).min(1).max(MAX_SAVED_SCANS) }).parse(options);
+  const data = scanListSaveInput.parse(options);
   const createdAt = new Date(data.createdAt), scans = data.scans.map(scan => ({ scannedValue: scan.value, createdAt: new Date(scan.scannedAt), scannedByUserId: actor.userId }));
   const contentHash = savedScanFingerprint({ name: data.name, createdAt, scans });
   const scopedDraftId = "v2:" + createHash("sha256").update(JSON.stringify([actor.userId, data.localDraftId])).digest("hex");

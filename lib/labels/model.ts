@@ -6,9 +6,9 @@ export class LabelError extends Error {
   constructor(message: string, readonly status = 400, readonly code = "label_error") { super(message); this.name = "LabelError"; }
 }
 const ruleSchema = z.object({ id: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/), name: z.string().trim().min(1).max(100), class: z.enum(LABEL_RULE_CLASSES), priority: z.number().int().min(0).max(1000), enabled: z.boolean(), automatic: z.boolean(), conditions: z.array(z.object({ field: z.enum(LABEL_FIELDS), operator: z.enum(["equals", "not_equals", "empty", "not_empty"]), value: z.string().max(500).optional() })).max(12) });
-const draftSchema = z.object({ purpose: z.enum(LABEL_PURPOSES).exclude(["legacy_manual"]), name: z.string().trim().min(1).max(100), zpl: z.string().min(1).max(128 * 1024), requiredFields: z.array(z.enum(LABEL_FIELDS)).max(LABEL_FIELDS.length), rules: z.array(ruleSchema).max(32), widthMm: z.number().min(20).max(300), heightMm: z.number().min(20).max(500), dpi: z.union([z.literal(203), z.literal(300), z.literal(600)]) });
+export const labelDraftInput = z.object({ purpose: z.enum(LABEL_PURPOSES).exclude(["legacy_manual"]), name: z.string().trim().min(1).max(100), zpl: z.string().min(1).max(128 * 1024).describe("Complete ZPL, at most 128 KiB UTF-8; use only the supported field placeholders."), requiredFields: z.array(z.enum(LABEL_FIELDS)).max(LABEL_FIELDS.length), rules: z.array(ruleSchema).max(32), widthMm: z.number().min(20).max(300), heightMm: z.number().min(20).max(500), dpi: z.union([z.literal(203), z.literal(300), z.literal(600)]) });
 export function validateLabelDraft(input: unknown): LabelDraft {
-  const result = draftSchema.safeParse(input);
+  const result = labelDraftInput.safeParse(input);
   if (!result.success) throw new LabelError("Enter a known purpose, template, fields, rules and supported media dimensions.");
   const draft = result.data;
   if (Buffer.byteLength(draft.zpl) > 128 * 1024 || !draft.zpl.includes("^XA") || !draft.zpl.includes("^XZ")) throw new LabelError("Provide a complete ZPL label of at most 128 KiB.");

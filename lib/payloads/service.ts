@@ -1,13 +1,24 @@
 import type { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, assertRecentAuthentication, AuthorizationError, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { dmpConfig } from "@/lib/api-relay/config";
-import { PayloadError, payloadContentHash, payloadIdSchema, sourceChanges, validatePayloadDraft, type PayloadDraft, type PublishedPayloadVersion } from "./model";
+import { PayloadError, payloadContentHash, payloadDraftInput, payloadIdSchema, sourceChanges, validatePayloadDraft, type PayloadDraft, type PublishedPayloadVersion } from "./model";
 import { payloadPreviewDocument } from "./types";
 import { MARS_LABEL_PAYLOAD_ID } from "@/lib/mars-label-bookmarklet";
 
 const versionSummary = { id: true, version: true, contentHash: true, publishedAt: true, publishedByUserId: true, note: true } as const;
+const payloadNote = z.string().trim().min(1).max(500), payloadRevision = z.number().int().min(1), versionId = z.string().min(1).max(100);
+export const payloadGetInput = z.object({ id: payloadIdSchema });
+export const payloadVersionInput = payloadGetInput.extend({ versionId });
+export const payloadVersionsInput = payloadGetInput.extend({ beforeVersion: z.number().int().min(1).optional() });
+export const payloadCreateInput = payloadDraftInput.extend({ id: payloadIdSchema, note: payloadNote });
+export const payloadDraftSaveInput = payloadCreateInput.extend({ expectedRevision: payloadRevision });
+export const payloadPublishInput = payloadGetInput.extend({ expectedRevision: payloadRevision, note: payloadNote, reviewedNoSecrets: z.literal(true).describe("The publishing administrator explicitly reviewed the source for credentials/customer data.") });
+export const payloadRollbackInput = payloadGetInput.extend({ expectedRevision: payloadRevision, versionId, note: payloadNote });
+export const payloadEnabledInput = payloadGetInput.extend({ expectedRevision: payloadRevision, enabled: z.boolean(), note: payloadNote });
+function commandInput<T>(schema: z.ZodType<T>, input: unknown): T { const parsed = schema.safeParse(input); if (!parsed.success) throw new PayloadError("Provide the required payload fields, current revision and audit note."); return parsed.data; }
 function admin(principal: Principal, recent = false) {
   assertCapability(principal, "payloads.manage");
   if (principal.role !== "admin") throw new AuthorizationError("Payload source administration is restricted to system administrators.");
@@ -28,8 +39,8 @@ function contract(payloadId: string, draft: PayloadDraft) {
   }
 }
 function id(value: string) { const parsed = payloadIdSchema.safeParse(value); if (!parsed.success) throw new PayloadError("Invalid payload ID."); return parsed.data; }
-function revision(value: number) { if (!Number.isSafeInteger(value) || value < 1) throw new PayloadError("A current revision is required."); return value; }
-function note(value: unknown) { if (typeof value !== "string" || !value.trim() || value.trim().length > 500) throw new PayloadError("Enter an audit note of at most 500 characters."); return value.trim(); }
+function revision(value: number) { const result = payloadRevision.safeParse(value); if (!result.success) throw new PayloadError("A current revision is required."); return result.data; }
+function note(value: unknown) { const result = payloadNote.safeParse(value); if (!result.success) throw new PayloadError("Enter an audit note of at most 500 characters."); return result.data; }
 async function lockPayload(tx: Prisma.TransactionClient, payloadId: string, expectedRevision: number) {
   await tx.$queryRaw`SELECT id FROM "Payload" WHERE id = ${payloadId} FOR UPDATE`;
   const payload = await tx.payload.findUnique({ where: { id: payloadId } });
@@ -55,24 +66,25 @@ export async function getPayload(principal: Principal, payloadId: string) {
 }
 export async function getPayloadVersion(principal: Principal, payloadId: string, versionId: string) {
   admin(principal);
-  if (typeof versionId !== "string" || !versionId || versionId.length > 100) throw new PayloadError("Invalid version ID.");
+  commandInput(payloadVersionInput, { id: payloadId, versionId });
   const version = await prisma.payloadVersion.findFirst({ where: { id: versionId, payloadId: id(payloadId) } });
   if (!version) throw new PayloadError("Version not found.", 404);
   return version;
 }
 export async function listPayloadVersions(principal: Principal, payloadId: string, beforeVersion?: number) {
   admin(principal);
-  if (beforeVersion !== undefined && (!Number.isSafeInteger(beforeVersion) || beforeVersion < 1)) throw new PayloadError("Invalid version cursor.");
+  commandInput(payloadVersionsInput, { id: payloadId, beforeVersion });
   const versions = await prisma.payloadVersion.findMany({ where: { payloadId: id(payloadId), ...(beforeVersion === undefined ? {} : { version: { lt: beforeVersion } }) }, select: versionSummary, orderBy: { version: "desc" }, take: 51 });
   return { versions: versions.slice(0, 50), nextBeforeVersion: versions.length > 50 ? versions[49].version : null };
 }
 export function previewPayloadDraft(principal: Principal, input: unknown) {
   admin(principal);
   const draft = validatePayloadDraft(input);
-  return { valid: true, contentHash: payloadContentHash(draft), previewHtml: payloadPreviewDocument(draft.source), limitations: "Syntax and synthetic DOM preview only. No external session, network or live relay authority; actual-device/upstream qualification remains separate." };
+  return { valid: true, contentHash: payloadContentHash(draft), previewHtml: payloadPreviewDocument(draft.source), limitations: "Syntax and synthetic DOM preview only, without app session or relay authority. The sandbox and CSP block fetch, sockets, subresources, forms and popups; frame self-navigation is not qualified. Actual-device/upstream qualification remains separate." };
 }
 export async function createPayload(principal: Principal, input: PayloadDraft & { id: string; note: string }) {
   admin(principal, true);
+  input = commandInput(payloadCreateInput, input);
   const payloadId = id(input.id), draft = validatePayloadDraft(input), auditNote = note(input.note);
   contract(payloadId, draft);
   return prisma.$transaction(async tx => {
@@ -85,6 +97,7 @@ export async function createPayload(principal: Principal, input: PayloadDraft & 
 }
 export async function savePayloadDraft(principal: Principal, input: PayloadDraft & { id: string; expectedRevision: number; note: string }) {
   admin(principal);
+  input = commandInput(payloadDraftSaveInput, input);
   const payloadId = id(input.id), expectedRevision = revision(input.expectedRevision), draft = validatePayloadDraft(input), auditNote = note(input.note);
   contract(payloadId, draft);
   return prisma.$transaction(async tx => {
@@ -100,6 +113,7 @@ export async function savePayloadDraft(principal: Principal, input: PayloadDraft
 }
 export async function publishPayload(principal: Principal, input: { id: string; expectedRevision: number; note: string; reviewedNoSecrets: boolean }) {
   admin(principal, true);
+  input = commandInput(payloadPublishInput, input);
   const payloadId = id(input.id), expectedRevision = revision(input.expectedRevision), auditNote = note(input.note);
   if (input.reviewedNoSecrets !== true) throw new PayloadError("Review the source for credentials/customer data before publication.");
   return prisma.$transaction(async tx => {
@@ -116,6 +130,7 @@ export async function publishPayload(principal: Principal, input: { id: string; 
 }
 export async function rollbackPayload(principal: Principal, input: { id: string; expectedRevision: number; versionId: string; note: string }) {
   admin(principal, true);
+  input = commandInput(payloadRollbackInput, input);
   const payloadId = id(input.id), expectedRevision = revision(input.expectedRevision), auditNote = note(input.note);
   if (typeof input.versionId !== "string" || !input.versionId || input.versionId.length > 100) throw new PayloadError("Choose a valid published version ID.");
   return prisma.$transaction(async tx => {
@@ -130,6 +145,7 @@ export async function rollbackPayload(principal: Principal, input: { id: string;
 }
 export async function setPayloadEnabled(principal: Principal, input: { id: string; expectedRevision: number; enabled: boolean; note: string }) {
   admin(principal, true);
+  input = commandInput(payloadEnabledInput, input);
   const payloadId = id(input.id), expectedRevision = revision(input.expectedRevision), auditNote = note(input.note);
   if (typeof input.enabled !== "boolean") throw new PayloadError("Choose enabled or disabled.");
   return prisma.$transaction(async tx => {

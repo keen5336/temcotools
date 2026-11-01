@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
@@ -14,8 +15,33 @@ export type ObservationInput = {
   captureMethod?: "scanner" | "manual" | "ocr";
 };
 
+// Shared command input contracts also describe these actions to MCP clients.
+// The domain checks below still enforce timestamp, custody and identity rules.
+const unitIdInput = z.string().trim().min(1).max(200);
+const evidenceInput = z.string().trim().min(1).max(2000);
+export const warehouseIdentifierInput = z.object({ value: z.string().min(1).max(500), kind: z.enum([...IDENTIFIER_KINDS, "auto"]).optional(), namespace: z.string().max(100).optional() });
+export const warehouseUnitInput = z.object({ unitId: unitIdInput });
+export const warehouseHistoryInput = warehouseUnitInput.extend({ cursor: z.string().max(1000).optional(), limit: z.number().int().min(1).max(200).optional() });
+export const warehouseCreateInput = z.object({ operationId: z.string().trim().min(1).max(150), evidence: evidenceInput });
+export const warehouseAliasInput = warehouseIdentifierInput.extend({ unitId: unitIdInput, kind: z.enum(IDENTIFIER_KINDS), evidence: evidenceInput });
+export const warehouseUnlinkInput = z.object({ identifierId: unitIdInput, reason: evidenceInput });
+export const warehouseCorrectionInput = z.object({ observationId: unitIdInput, operationId: z.string().trim().min(1).max(150), unitId: unitIdInput.nullable(), reason: evidenceInput, expectedRevision: z.number().int().min(0) });
+export const warehouseObservationInput = z.object({
+  eventId: z.string().trim().min(1).max(150), rawIdentifier: z.string().min(1).max(500),
+  identifierType: z.enum([...IDENTIFIER_KINDS, "auto"]).optional(), namespace: z.string().trim().max(100).optional(),
+  type: z.enum(["presence", "check_in", "placement", "departure"]), location: z.string().trim().max(200).optional(),
+  capturedAt: z.string().max(100), deviceId: unitIdInput.optional(), capturedByUserId: unitIdInput.optional(),
+  pickWaveId: unitIdInput.optional(), captureMethod: z.enum(["scanner", "manual", "ocr"]).optional(),
+});
+
 export class WarehouseCommandError extends Error {
   constructor(message: string, readonly status = 400) { super(message); this.name = "WarehouseCommandError"; }
+}
+
+function commandInput<T extends z.ZodType>(schema: T, input: unknown): z.output<T> {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) throw new WarehouseCommandError(`Invalid input: ${parsed.error.issues.slice(0, 3).map(issue => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`);
+  return parsed.data;
 }
 
 function text(value: unknown, field: string, max = 500) {
@@ -25,6 +51,7 @@ function text(value: unknown, field: string, max = 500) {
 function optionalText(value: unknown, field: string, max = 200) { return value === undefined || value === null || value === "" ? null : text(value, field, max); }
 function hash(value: unknown) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 function parseIdentifier(input: WarehouseIdentifierInput) {
+  input = commandInput(warehouseIdentifierInput, input);
   const kind = input.kind ?? "auto";
   if (kind !== "auto" && !IDENTIFIER_KINDS.includes(kind)) throw new WarehouseCommandError("Choose LPN, MSN, serial, submission or automatic identifier lookup.");
   return { kind, value: text(input.value, "Identifier").toUpperCase(), namespace: optionalText(input.namespace, "Identifier namespace", 100)?.toLowerCase() ?? null };
@@ -57,6 +84,7 @@ function observationReceipt(observation: { id: string; userId: string; eventId: 
 
 async function persistPhysicalObservation(tx: Prisma.TransactionClient, principal: Principal, input: ObservationInput, capability: "inventory.write" | "workflow.execute") {
   assertCapability(principal, capability);
+  input = commandInput(warehouseObservationInput, input);
   const eventId = text(input.eventId, "Scan event ID", 150);
   text(input.rawIdentifier, "Scanned identifier");
   const rawIdentifier = input.rawIdentifier;
@@ -102,6 +130,7 @@ export async function resolveWarehouseIdentifierInTransaction(tx: Prisma.Transac
 
 export async function createWarehouseUnit(principal: Principal, input: { operationId: string; evidence: string }) {
   assertCapability(principal, "inventory.identify");
+  input = commandInput(warehouseCreateInput, input);
   const operationId = text(input.operationId, "Operation ID", 150);
   const evidence = text(input.evidence, "Identity evidence", 2000);
   const id = `manual-unit:${hash([principal.userId, operationId])}`;
@@ -121,6 +150,7 @@ export async function createWarehouseUnit(principal: Principal, input: { operati
 
 export async function linkWarehouseIdentifier(principal: Principal, input: { unitId: string; kind: WarehouseIdentifierKind; value: string; namespace?: string; evidence: string }) {
   assertCapability(principal, "inventory.identify");
+  input = commandInput(warehouseAliasInput, input);
   const unitId = text(input.unitId, "Physical unit ID", 200);
   const evidence = text(input.evidence, "Link evidence", 2000);
   const identifier = parseIdentifier(input);
@@ -140,6 +170,7 @@ export async function linkWarehouseIdentifier(principal: Principal, input: { uni
 
 export async function unlinkWarehouseIdentifier(principal: Principal, input: { identifierId: string; reason: string }) {
   assertCapability(principal, "inventory.identify");
+  input = commandInput(warehouseUnlinkInput, input);
   const identifierId = text(input.identifierId, "Identifier link ID", 200);
   const reason = text(input.reason, "Correction reason", 2000);
   return prisma.$transaction(async (tx) => {
@@ -156,6 +187,7 @@ export async function unlinkWarehouseIdentifier(principal: Principal, input: { i
 
 export async function correctWarehouseObservation(principal: Principal, input: { observationId: string; operationId: string; unitId: string | null; reason: string; expectedRevision: number }) {
   assertCapability(principal, "inventory.identify");
+  input = commandInput(warehouseCorrectionInput, input);
   const observationId = text(input.observationId, "Observation ID", 200);
   const operationId = text(input.operationId, "Operation ID", 150);
   const unitId = input.unitId === null ? null : text(input.unitId, "Physical unit ID", 200);
@@ -181,6 +213,7 @@ export async function correctWarehouseObservation(principal: Principal, input: {
 
 export async function getWarehouseUnit(principal: Principal, input: { unitId: string }, transaction?: Prisma.TransactionClient) {
   assertCapability(principal, "inventory.read");
+  input = commandInput(warehouseUnitInput, input);
   const unitId = text(input.unitId, "Physical unit ID", 200);
   const read = async (tx: Prisma.TransactionClient) => {
     const unit = await tx.warehouseUnit.findUnique({ where: { id: unitId }, include: { identifiers: { orderBy: [{ createdAt: "desc" }, { id: "desc" }] }, inventoryRows: { include: { sourceRevisions: { orderBy: { revision: "desc" }, take: 20, include: { memberships: { include: { importBatch: true }, orderBy: [{ importBatch: { createdAt: "desc" } }, { id: "desc" }], take: 5 } } } } } } });
@@ -212,6 +245,7 @@ export async function getWarehouseUnit(principal: Principal, input: { unitId: st
 
 function historyCursor(at: Date, recordId: string) { return Buffer.from(JSON.stringify({ at: at.toISOString(), id: recordId })).toString("base64url"); }
 function parseHistoryInput(input: { unitId: string; cursor?: string; limit?: number }) {
+  input = commandInput(warehouseHistoryInput, input);
   const unitId = text(input.unitId, "Physical unit ID", 200);
   const limit = input.limit ?? 50;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new WarehouseCommandError("History page size must be 1–200.");

@@ -11,7 +11,15 @@ import { ADMIN_FILES_ROOT, AdminFileError, adminEntryFingerprint, listAdminDirec
 import { fingerprint } from "@/lib/labels/model";
 
 const operationId = z.string().min(16).max(100), relative = z.string().max(2048).default("").transform(normalizeRelativePath);
+const requiredRelative = z.string().min(1).max(2048).transform(normalizeRelativePath).describe("Explicit relative managed path; the root itself cannot be downloaded, moved or deleted.");
 const expected = z.string().regex(/^[a-f0-9]{64}$/), optionalExpected = expected.optional();
+const filenameInput = z.string().min(1).max(240).transform(validateAdminFileName).describe("One managed filename/folder name without separators, control characters or reserved upload prefix.");
+export const adminFilesListInput = z.object({ path: relative });
+export const adminFileDownloadInput = z.object({ path: requiredRelative });
+export const adminFilesUploadInput = z.object({ operationId, path: relative, files: z.array(z.object({ name: filenameInput, contentBase64: z.string().max(Math.ceil(MAX_ADMIN_FILE_BYTES / 3) * 4).describe("Canonical base64 file content, at most 64 MiB decoded; aggregate batch is at most 128 MiB."), replace: z.boolean().default(false), expectedFingerprint: optionalExpected.describe("Current target fingerprint is required with explicit replacement.") })).min(1).max(40) });
+export const adminDirectoryCreateInput = z.object({ operationId, path: relative, folderName: filenameInput });
+export const adminFileMoveInput = z.object({ operationId, path: requiredRelative, destinationPath: requiredRelative, expectedFingerprint: expected });
+export const adminFileDeleteInput = z.object({ operationId, path: requiredRelative, expectedFingerprint: expected });
 const MIME_TYPES: Record<string, string> = { ".csv": "text/csv", ".json": "application/json", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".txt": "text/plain; charset=utf-8", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".zip": "application/zip" };
 type Metadata = Record<string, unknown>;
 type FileOperationReceipt = { ok: boolean; operationId: string; status: "completed" | "unknown" | "not_applied"; result?: Metadata; error?: string };
@@ -76,15 +84,15 @@ export function createAdminFileCommands(configuredRoot = ADMIN_FILES_ROOT) {
     }
   }
   async function listAdminFiles(principal: Principal, input: unknown = {}) {
-    const data = z.object({ path: relative }).parse(input);
+    const data = adminFilesListInput.parse(input);
     return read(principal, "listed", { path: data.path }, async () => ({ currentPath: data.path, parentPath: data.path.split("/").slice(0, -1).join("/"), entries: await listAdminDirectory(data.path, root) }));
   }
   async function downloadAdminFile(principal: Principal, input: unknown) {
-    const data = z.object({ path: relative }).parse(input);
+    const data = adminFileDownloadInput.parse(input);
     return read(principal, "downloaded", { path: data.path }, async () => { const file = await readAdminFileBytes(data.path, root); return { filename: file.filename, contentType: MIME_TYPES[path.extname(file.filename).toLowerCase()] ?? "application/octet-stream", size: file.bytes.length, fingerprint: file.fingerprint, contentBase64: file.bytes.toString("base64") }; });
   }
   async function uploadAdminFiles(principal: Principal, input: unknown) {
-    const data = z.object({ operationId, path: relative, files: z.array(z.object({ name: z.string().transform(validateAdminFileName), contentBase64: z.string(), replace: z.boolean().default(false), expectedFingerprint: optionalExpected })).min(1).max(40) }).parse(input);
+    const data = adminFilesUploadInput.parse(input);
     const files = data.files.map(file => ({ ...file, bytes: decodeUpload(file.contentBase64) }));
     if (new Set(files.map(file => file.name)).size !== files.length) throw new AdminFileError("Each upload must have a distinct filename.");
     if (files.reduce((sum, file) => sum + file.bytes.length, 0) > MAX_ADMIN_UPLOAD_BYTES) throw new AdminFileError("The upload batch exceeds 128 MiB.", 413);
@@ -110,16 +118,16 @@ export function createAdminFileCommands(configuredRoot = ADMIN_FILES_ROOT) {
     });
   }
   async function createAdminDirectory(principal: Principal, input: unknown) {
-    const data = z.object({ operationId, path: relative, folderName: z.string().transform(validateAdminFileName) }).parse(input);
+    const data = adminDirectoryCreateInput.parse(input);
     return mutate(principal, "mkdir", data.operationId, data, async dispatch => { const target = await secureAdminPath(data.path ? `${data.path}/${data.folderName}` : data.folderName, root, true); if (target.exists) throw new AdminFileError("That file or folder already exists.", 409); dispatch(); await fs.mkdir(target.resolved, { mode: 0o700 }); return { path: target.clean }; });
   }
   async function moveAdminFile(principal: Principal, input: unknown) {
-    const data = z.object({ operationId, path: relative, destinationPath: relative, expectedFingerprint: expected }).parse(input);
+    const data = adminFileMoveInput.parse(input);
     if (!data.path || !data.destinationPath || data.path === data.destinationPath || data.destinationPath.startsWith(`${data.path}/`)) throw new AdminFileError("Choose distinct managed source and destination paths outside the source folder.");
     return mutate(principal, "move", data.operationId, data, async dispatch => { const source = await secureAdminPath(data.path, root), target = await secureAdminPath(data.destinationPath, root, true); await checkFingerprint(source.resolved, data.expectedFingerprint); await checkTree(source.resolved); if (target.exists) throw new AdminFileError("Destination already exists. Choose another name or remove it explicitly.", 409, "file_exists"); dispatch(); await fs.rename(source.resolved, target.resolved); return { path: target.clean, previousPath: source.clean }; });
   }
   async function deleteAdminFile(principal: Principal, input: unknown) {
-    const data = z.object({ operationId, path: relative, expectedFingerprint: expected }).parse(input);
+    const data = adminFileDeleteInput.parse(input);
     if (!data.path) throw new AdminFileError("The managed root cannot be deleted.");
     return mutate(principal, "delete", data.operationId, data, async dispatch => { const source = await secureAdminPath(data.path, root); await checkFingerprint(source.resolved, data.expectedFingerprint); await checkTree(source.resolved); dispatch(); await fs.rm(source.resolved, { recursive: true, force: false }); return { path: source.clean }; });
   }

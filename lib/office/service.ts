@@ -196,8 +196,9 @@ async function evaluateUnit(tx: Prisma.TransactionClient, principal: Principal, 
   return { openedOrRetainedCaseIds: opened, scheduleCurrent: data.scheduleCurrent, warehouseEvidenceAt: iso(data.custody.last?.capturedAt), warehousePresenceClaim: "as_observed_only" as const };
 }
 
+export const recordOfficeScheduleInputSchema = z.object({ operationId: operation, unitId: id, deliveryDate: date.nullable(), nextDeliveryDate: date.nullable(), complete: z.boolean(), sourceAsOf: stamp, sourceRef: explanation, evidence: explanation }).strict();
 export async function recordOfficeSchedule(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, unitId: id, deliveryDate: date.nullable(), nextDeliveryDate: date.nullable(), complete: z.boolean(), sourceAsOf: stamp, sourceRef: explanation, evidence: explanation }).strict().parse(raw);
+  const data = recordOfficeScheduleInputSchema.parse(raw);
   if (Date.parse(data.sourceAsOf) > Date.now() + 300_000) throw new OfficeError("Source-as-of cannot be in the future.");
   return command(principal, data.operationId, "schedule", data, "office.decide", async (tx) => {
     await unitExists(tx, data.unitId);
@@ -206,8 +207,9 @@ export async function recordOfficeSchedule(principal: Principal, raw: unknown) {
   });
 }
 
+export const createOfficeExchangeInputSchema = z.object({ operationId: operation, originalUnitId: id, replacementUnitId: id, orderReference: z.string().trim().min(1).max(200), evidence: explanation }).strict();
 export async function createOfficeExchange(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, originalUnitId: id, replacementUnitId: id, orderReference: z.string().trim().min(1).max(200), evidence: explanation }).strict().parse(raw);
+  const data = createOfficeExchangeInputSchema.parse(raw);
   if (data.originalUnitId === data.replacementUnitId) throw new OfficeError("Original and replacement must be distinct physical units.");
   return command(principal, data.operationId, "exchange", data, "office.decide", async (tx) => {
     await unitExists(tx, data.originalUnitId); await unitExists(tx, data.replacementUnitId);
@@ -217,8 +219,9 @@ export async function createOfficeExchange(principal: Principal, raw: unknown) {
   });
 }
 
+export const recordOfficeExchangeAttemptInputSchema = z.object({ operationId: operation, exchangeId: id, outcome: z.enum(["missed", "successful_exchange"]), occurredAt: stamp, sourceAsOf: stamp, expectedBackAt: stamp.optional(), evidence: explanation }).strict();
 export async function recordOfficeExchangeAttempt(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, exchangeId: id, outcome: z.enum(["missed", "successful_exchange"]), occurredAt: stamp, sourceAsOf: stamp, expectedBackAt: stamp.optional(), evidence: explanation }).strict().parse(raw);
+  const data = recordOfficeExchangeAttemptInputSchema.parse(raw);
   if (Date.parse(data.occurredAt) > Date.now() + 300_000 || Date.parse(data.sourceAsOf) > Date.now() + 300_000) throw new OfficeError("Attempt/source time cannot be in the future.");
   if (Date.parse(data.sourceAsOf) < Date.parse(data.occurredAt) || (data.expectedBackAt && Date.parse(data.expectedBackAt) < Date.parse(data.occurredAt))) throw new OfficeError("Source-as-of and expected return cannot precede the recorded attempt.");
   return command(principal, data.operationId, "exchange_attempt", data, "office.decide", async (tx) => {
@@ -244,8 +247,9 @@ export async function recordOfficeExchangeAttempt(principal: Principal, raw: unk
   });
 }
 
+export const manageOfficeCaseInputSchema = z.object({ operationId: operation, caseId: id, expectedRevision: z.number().int().positive(), action: z.enum(["assign", "watch", "resolve", "reopen"]), reason: explanation, responsibleUserId: id.nullable().optional(), nextAction: z.string().trim().min(1).max(1000).optional(), reviewAt: stamp.nullable().optional(), reviewTrigger: z.enum(["date_or_conflict", "conflict_only"]).default("date_or_conflict") }).strict();
 export async function manageOfficeCase(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, caseId: id, expectedRevision: z.number().int().positive(), action: z.enum(["assign", "watch", "resolve", "reopen"]), reason: explanation, responsibleUserId: id.nullable().optional(), nextAction: z.string().trim().min(1).max(1000).optional(), reviewAt: stamp.nullable().optional(), reviewTrigger: z.enum(["date_or_conflict", "conflict_only"]).default("date_or_conflict") }).strict().parse(raw);
+  const data = manageOfficeCaseInputSchema.parse(raw);
   if (data.action === "watch" && !data.nextAction) throw new OfficeError("A watch needs a durable next action/instruction.");
   if (data.action === "watch" && data.reviewTrigger === "date_or_conflict" && !data.reviewAt) throw new OfficeError("Choose a review date or explicit conflicting-evidence trigger.");
   return command(principal, data.operationId, "manage_case", data, "office.decide", async (tx) => {
@@ -261,8 +265,9 @@ export async function manageOfficeCase(principal: Principal, raw: unknown) {
   });
 }
 
+export const createOfficeReturnExpectationInputSchema = z.object({ operationId: operation, unitId: id, activatedAt: stamp, expectedAt: stamp, sourceAsOf: stamp, sourceRef: explanation, evidence: explanation }).strict();
 export async function createOfficeReturnExpectation(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, unitId: id, activatedAt: stamp, expectedAt: stamp, sourceAsOf: stamp, sourceRef: explanation, evidence: explanation }).strict().parse(raw);
+  const data = createOfficeReturnExpectationInputSchema.parse(raw);
   if (Date.parse(data.activatedAt) > Date.parse(data.expectedAt) || Date.parse(data.sourceAsOf) > Date.now() + 300_000) throw new OfficeError("Use a valid expectation interval and source-as-of time.");
   return command(principal, data.operationId, "return_expectation", data, "office.decide", async (tx) => {
     await unitExists(tx, data.unitId);
@@ -271,8 +276,9 @@ export async function createOfficeReturnExpectation(principal: Principal, raw: u
   });
 }
 
+export const createOfficeDispositionInputSchema = z.object({ operationId: operation, unitId: id, caseId: id.optional(), kind: z.enum(["reschedule", "customer_property", "hold", "rtv", "conditional_rtv"]), reason: explanation, instruction: explanation, triggerAt: stamp.optional(), expiresAt: stamp.optional(), requireNoUpcomingDate: z.boolean().default(false), targetLocation: z.string().trim().min(1).max(200).optional() }).strict();
 export async function createOfficeDisposition(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, unitId: id, caseId: id.optional(), kind: z.enum(["reschedule", "customer_property", "hold", "rtv", "conditional_rtv"]), reason: explanation, instruction: explanation, triggerAt: stamp.optional(), expiresAt: stamp.optional(), requireNoUpcomingDate: z.boolean().default(false), targetLocation: z.string().trim().min(1).max(200).optional() }).strict().parse(raw);
+  const data = createOfficeDispositionInputSchema.parse(raw);
   const rtv = data.kind === "rtv" || data.kind === "conditional_rtv";
   if (rtv && !data.expiresAt) throw new OfficeError("RTV authorization requires an explicit expiry.");
   if (data.kind === "conditional_rtv" && !data.triggerAt) throw new OfficeError("Conditional RTV requires its exact scan-after deadline.");
@@ -287,8 +293,9 @@ export async function createOfficeDisposition(principal: Principal, raw: unknown
   }, rtv);
 }
 
+export const revokeOfficeDispositionInputSchema = z.object({ operationId: operation, dispositionId: id, expectedRevision: z.number().int().positive(), reason: explanation }).strict();
 export async function revokeOfficeDisposition(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, dispositionId: id, expectedRevision: z.number().int().positive(), reason: explanation }).strict().parse(raw);
+  const data = revokeOfficeDispositionInputSchema.parse(raw);
   const target = await prisma.officeDisposition.findUnique({ where: { id: data.dispositionId }, select: { kind: true } });
   if (!target) throw new OfficeError("Disposition not found.", 404);
   const rtv = target.kind === "rtv" || target.kind === "conditional_rtv";
@@ -354,8 +361,9 @@ export async function reviewWorkflowOfficeObservation(tx: Prisma.TransactionClie
   return evaluateObservation(tx, principal, observationId, new Date());
 }
 
+export const reviewOfficeObservationInputSchema = z.object({ observationId: id }).strict();
 export async function reviewOfficeObservation(principal: Principal, raw: unknown) {
-  const { observationId } = z.object({ observationId: id }).strict().parse(raw);
+  const { observationId } = reviewOfficeObservationInputSchema.parse(raw);
   assertCapability(principal, "inventory.write");
   return prisma.$transaction(async (tx) => {
     await assertCurrentPrincipal(tx, principal, "inventory.write");
@@ -365,8 +373,9 @@ export async function reviewOfficeObservation(principal: Principal, raw: unknown
   });
 }
 
+export const recordOfficeDispositionExecutionInputSchema = z.object({ operationId: operation, dispositionId: id, observationId: id, evidence: explanation }).strict();
 export async function recordOfficeDispositionExecution(principal: Principal, raw: unknown) {
-  const data = z.object({ operationId: operation, dispositionId: id, observationId: id, evidence: explanation }).strict().parse(raw);
+  const data = recordOfficeDispositionExecutionInputSchema.parse(raw);
   return command(principal, data.operationId, "execute_disposition", data, "workflow.execute", async (tx) => {
     await tx.$executeRaw`SELECT id FROM "OfficeDisposition" WHERE id=${data.dispositionId} FOR UPDATE`;
     const disposition = await tx.officeDisposition.findUnique({ where: { id: data.dispositionId }, include: { executions: true } });
@@ -391,9 +400,11 @@ async function candidateUnits(tx: Prisma.TransactionClient, input: { unitIds?: s
   const units = await tx.warehouseUnit.findMany({ where: input.unitIds ? { id: { in: input.unitIds } } : { id: { gt: input.afterUnitId ?? "" }, OR: [{ officeSchedules: { some: {} } }, { officeDispositions: { some: {} } }, { returnExpectations: { some: {} } }, { observations: { some: {} } }, { observationCorrections: { some: {} } }, { identifiers: { some: { kind: "submission", revokedAt: null } } }] }, orderBy: { id: "asc" }, take: limit + 1, select: { id: true } });
   return { units: units.slice(0, limit), hasMore: units.length > limit, nextAfterUnitId: units.length > limit ? units[limit - 1].id : null };
 }
-const evaluationInput = z.object({ unitIds: z.array(id).min(1).max(200).optional(), limit: z.number().int().min(1).max(200).default(100), afterUnitId: id.optional() }).strict();
+export const officeEvaluationInputSchema = z.object({ unitIds: z.array(id).min(1).max(200).optional(), limit: z.number().int().min(1).max(200).default(100), afterUnitId: id.optional() }).strict();
+export const evaluateOfficeWorkInputSchema = officeEvaluationInputSchema;
+export const getExpectedReturnWorklistInputSchema = officeEvaluationInputSchema;
 export async function evaluateOfficeWork(principal: Principal, raw: unknown = {}) {
-  const input = evaluationInput.parse(raw);
+  const input = officeEvaluationInputSchema.parse(raw);
   const capability = principal.capabilities.includes("office.decide") ? "office.decide" : "inventory.write";
   assertCapability(principal, capability);
   return prisma.$transaction(async (tx) => {
@@ -405,24 +416,27 @@ export async function evaluateOfficeWork(principal: Principal, raw: unknown = {}
   }, { timeout: 60_000 });
 }
 
+export const listOfficeCasesInputSchema = z.object({ unitId: id.optional(), status: z.enum(["active", "all", "open", "assigned", "watching", "resolved"]).default("active"), limit: z.number().int().min(1).max(200).default(100), afterId: id.optional() }).strict();
 export async function listOfficeCases(principal: Principal, raw: unknown = {}) {
   assertCapability(principal, "workflow.read");
-  const data = z.object({ unitId: id.optional(), status: z.enum(["active", "all", "open", "assigned", "watching", "resolved"]).default("active"), limit: z.number().int().min(1).max(200).default(100), afterId: id.optional() }).strict().parse(raw);
+  const data = listOfficeCasesInputSchema.parse(raw);
   const cases = await prisma.officeCase.findMany({ where: { ...(data.unitId ? { unitId: data.unitId } : {}), ...(data.status === "all" ? {} : data.status === "active" ? { status: { not: "resolved" } } : { status: data.status }), ...(data.afterId ? { id: { gt: data.afterId } } : {}) }, orderBy: { id: "asc" }, take: data.limit + 1, include: { unit: { select: { inventoryRows: { select: { lpn: true, description: true } } } } } });
   return { cases: plain(cases.slice(0, data.limit)), hasMore: cases.length > data.limit, nextAfterId: cases.length > data.limit ? cases[data.limit - 1].id : null };
 }
 
+export const getOfficeCaseInputSchema = z.object({ caseId: id }).strict();
 export async function getOfficeCase(principal: Principal, raw: unknown) {
   assertCapability(principal, "workflow.read");
-  const { caseId } = z.object({ caseId: id }).strict().parse(raw);
+  const { caseId } = getOfficeCaseInputSchema.parse(raw);
   const result = await prisma.officeCase.findUnique({ where: { id: caseId }, include: { events: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] }, dispositions: { include: { executions: true }, orderBy: { createdAt: "desc" } }, unit: { select: { inventoryRows: { select: { lpn: true, description: true } } } } } });
   if (!result) throw new OfficeError("Office case not found.", 404);
   return plain(result);
 }
 
+export const getOfficeUnitContextInputSchema = z.object({ unitId: id }).strict();
 export async function getOfficeUnitContext(principal: Principal, raw: unknown) {
   assertCapability(principal, "workflow.read");
-  const { unitId } = z.object({ unitId: id }).strict().parse(raw);
+  const { unitId } = getOfficeUnitContextInputSchema.parse(raw);
   if (!await prisma.warehouseUnit.findUnique({ where: { id: unitId }, select: { id: true } })) throw new OfficeError("Physical unit not found.", 404);
   const [schedules, exchanges, expectations, dispositions] = await Promise.all([
     prisma.officeScheduleFact.findMany({ where: { unitId }, orderBy: { sourceAsOf: "desc" }, take: 100 }),
@@ -433,6 +447,7 @@ export async function getOfficeUnitContext(principal: Principal, raw: unknown) {
   return plain({ unitId, schedules, exchanges, expectations, dispositions, sourceQualification: "Manual office facts are not a qualified live DMP adapter." });
 }
 
+export const getOfficePeopleInputSchema = z.object({}).strict();
 export async function getOfficePeople(principal: Principal) {
   assertCapability(principal, "office.decide");
   return prisma.user.findMany({ where: { isActive: true }, select: { id: true, displayName: true, username: true }, orderBy: [{ displayName: "asc" }, { id: "asc" }] });
@@ -451,7 +466,7 @@ async function unitReturnWork(tx: Prisma.TransactionClient, unitId: string, now:
     else items.push({ key: `submission-ambiguous:${unitId}:${alias.value}`, kind: "ambiguous_submission_link", unitId, submissionNumber: alias.value, why: "This submission identifier is linked to several distinct physical units.", trailStopsAt: "Resolve physical identity before asserting submission status or creating another return.", physicalEvidenceAt: iso(data.custody.last?.capturedAt), certainty: "ambiguous_link_not_resolved_identity" });
   }
   const submissions = validValues.length ? await tx.$queryRaw<MarsUnit[]>`SELECT * FROM "MarsUnit" WHERE lower("requestNumber") IN (${Prisma.join(validValues)})` : [];
-  const rtv = data.dispositions.find((item) => ["rtv", "conditional_rtv"].includes(item.kind) && (item.kind === "rtv" || item.status === "triggered"));
+  const rtv = data.dispositions.find((item) => ["rtv", "conditional_rtv"].includes(item.kind) && (item.kind === "rtv" || ["triggered", "executed"].includes(item.status)));
   if (rtv && data.custody.warehouseEvidence && !submissions.length) {
     if (data.custody.currentCheckIn && !aliases.length) items.push({ key: `rtv-no-submission:${unitId}`, kind: "checked_in_rtv_without_submission", unitId, why: rtv.reason, trailStopsAt: "Physical check-in and RTV authority exist; no submission identity is linked.", physicalEvidenceAt: iso(data.custody.last?.capturedAt), certainty: "authorization_and_observation_separate_from_submission" });
     else items.push({ key: `seen-no-submission:${unitId}`, kind: "physically_seen_no_matching_submission", unitId, why: "This physically observed return-context unit has an eligible RTV disposition but no matching MARS submission.", trailStopsAt: aliases.length ? "Existing submission link cannot be verified against imported MARS records. Reconcile before creating another." : "RTV handling is authorized, but the trail has physical sighting rather than a confirmed return check-in and no submission link.", physicalEvidenceAt: iso(data.custody.last?.capturedAt), certainty: "linkage_gap_not_an_automatic_new_submission" });
@@ -469,7 +484,7 @@ async function unitReturnWork(tx: Prisma.TransactionClient, unitId: string, now:
 
 export async function getExpectedReturnWorklist(principal: Principal, raw: unknown = {}) {
   assertCapability(principal, "workflow.read");
-  const input = evaluationInput.parse(raw);
+  const input = officeEvaluationInputSchema.parse(raw);
   return prisma.$transaction(async (tx) => {
     const page = await candidateUnits(tx, input);
     const items: ReturnWorkItem[] = [];

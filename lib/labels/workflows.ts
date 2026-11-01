@@ -3,12 +3,19 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
-import { LabelError, labelVersionHash, renderLabelVersion, validateLabelDraft } from "./model";
+import { LabelError, labelDraftInput, labelVersionHash, renderLabelVersion, validateLabelDraft } from "./model";
 import { LABEL_PURPOSES, type LabelDraft } from "./types";
 
 const purposeSchema = z.enum(LABEL_PURPOSES).exclude(["legacy_manual"]);
 const noteSchema = z.string().trim().min(1).max(500);
 const expectedSchema = z.number().int().min(0);
+export const labelWorkflowPurposeInput = z.object({ purpose: purposeSchema });
+export const labelWorkflowSaveInput = labelDraftInput.extend({ expectedRevision: expectedSchema.describe("Use 0 to create a new purpose, otherwise its current revision."), note: noteSchema });
+export const labelWorkflowPublishInput = z.object({ purpose: purposeSchema, expectedRevision: expectedSchema.min(1), note: noteSchema });
+export const labelWorkflowRollbackInput = labelWorkflowPublishInput.extend({ versionId: z.string().min(1).max(100) });
+export const labelWorkflowEnabledInput = labelWorkflowPublishInput.extend({ enabled: z.boolean() });
+export const labelPreviewInput = labelDraftInput.extend({ fields: z.record(z.string(), z.string().max(2000)) });
+export const labelEvaluationInput = z.object({ purpose: purposeSchema, unitId: z.string().min(1).max(100), fields: z.record(z.string(), z.string().max(2000)) });
 const versionSummary = { id: true, version: true, name: true, contentHash: true, publishedAt: true, publishedByUserId: true, note: true } as const;
 async function lockedWorkflow(tx: Prisma.TransactionClient, purpose: string, expected: number) {
   await tx.$queryRaw`SELECT purpose FROM "LabelWorkflow" WHERE purpose = ${purpose} FOR UPDATE`;
@@ -35,14 +42,14 @@ export async function listPublishedLabelWorkflows(principal: Principal) {
 }
 export async function getLabelWorkflow(principal: Principal, purposeInput: string) {
   assertCapability(principal, "labels.manage");
-  const purpose = purposeSchema.parse(purposeInput);
+  const { purpose } = labelWorkflowPurposeInput.parse({ purpose: purposeInput });
   const workflow = await prisma.labelWorkflow.findUnique({ where: { purpose }, include: { publishedVersion: true, versions: { select: versionSummary, orderBy: { version: "desc" }, take: 100 }, audits: { orderBy: { createdAt: "desc" }, take: 100 } } });
   if (!workflow) throw new LabelError("Label workflow not found.", 404);
   return workflow;
 }
 export async function saveLabelWorkflow(principal: Principal, input: unknown) {
   assertCapability(principal, "labels.manage");
-  const envelope = z.object({ expectedRevision: expectedSchema, note: noteSchema }).parse(input);
+  const envelope = labelWorkflowSaveInput.parse(input);
   const draft = validateLabelDraft(input);
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.manage");
@@ -56,7 +63,7 @@ export async function saveLabelWorkflow(principal: Principal, input: unknown) {
   });
 }
 export async function publishLabelWorkflow(principal: Principal, input: unknown) {
-  const data = z.object({ purpose: purposeSchema, expectedRevision: expectedSchema.min(1), note: noteSchema }).parse(input);
+  const data = labelWorkflowPublishInput.parse(input);
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     const current = await lockedWorkflow(tx, data.purpose, data.expectedRevision);
@@ -69,7 +76,7 @@ export async function publishLabelWorkflow(principal: Principal, input: unknown)
   });
 }
 export async function rollbackLabelWorkflow(principal: Principal, input: unknown) {
-  const data = z.object({ purpose: purposeSchema, expectedRevision: expectedSchema.min(1), versionId: z.string().min(1).max(100), note: noteSchema }).parse(input);
+  const data = labelWorkflowRollbackInput.parse(input);
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     await lockedWorkflow(tx, data.purpose, data.expectedRevision);
@@ -81,7 +88,7 @@ export async function rollbackLabelWorkflow(principal: Principal, input: unknown
   });
 }
 export async function setLabelWorkflowEnabled(principal: Principal, input: unknown) {
-  const data = z.object({ purpose: purposeSchema, expectedRevision: expectedSchema.min(1), enabled: z.boolean(), note: noteSchema }).parse(input);
+  const data = labelWorkflowEnabledInput.parse(input);
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     await lockedWorkflow(tx, data.purpose, data.expectedRevision);
@@ -93,13 +100,13 @@ export async function setLabelWorkflowEnabled(principal: Principal, input: unkno
 export function previewLabelDraft(principal: Principal, input: unknown) {
   assertCapability(principal, "labels.manage");
   const draft = validateLabelDraft(input);
-  const fields = z.object({ fields: z.record(z.string(), z.string()) }).parse(input).fields;
+  const { fields } = labelPreviewInput.parse(input);
   return { ...renderLabelVersion({ id: "draft-preview", ...draft }, fields), widthMm: draft.widthMm, heightMm: draft.heightMm, dpi: draft.dpi, limitation: "Content and ZPL preview only; actual printer raster/media qualification is separate." };
 }
 export async function evaluateLabel(principal: Principal, input: { purpose: LabelDraft["purpose"]; unitId: string; fields: unknown }) {
   return prisma.$transaction(async tx => {
   const current = await assertCurrentPrincipal(tx, principal, "labels.read"); assertCapability(current, "inventory.read");
-  const purpose = purposeSchema.parse(input.purpose), unitId = z.string().min(1).max(100).parse(input.unitId);
+  const { purpose, unitId } = labelEvaluationInput.parse(input);
   const [unit, workflow, observations, issued] = await Promise.all([
     tx.warehouseUnit.findUnique({ where: { id: unitId }, select: { id: true } }),
     tx.labelWorkflow.findUnique({ where: { purpose }, include: { publishedVersion: true } }),

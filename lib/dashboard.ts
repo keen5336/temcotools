@@ -16,6 +16,7 @@ export const WIDGETS = [
 ] as const satisfies readonly { id: string; name: string; capability: Capability; href: string }[];
 export type WidgetId = typeof WIDGETS[number]["id"];
 const widgetSchema = z.enum(WIDGETS.map(widget => widget.id) as [WidgetId, ...WidgetId[]]);
+export const dashboardPreferencesInput = z.object({ widgetIds: z.array(widgetSchema).max(WIDGETS.length), expectedRevision: z.number().int().min(0), useDefaults: z.boolean().default(false) }).strict();
 export class DashboardError extends Error { constructor(message: string, readonly status = 409) { super(message); } }
 export function authorizedWidgets(capabilities: readonly Capability[]) { return WIDGETS.filter(widget => capabilities.includes(widget.capability)); }
 export function defaultWidgets(capabilities: readonly Capability[]) {
@@ -23,7 +24,7 @@ export function defaultWidgets(capabilities: readonly Capability[]) {
   return order.filter(id => authorizedWidgets(capabilities).some(widget => widget.id === id));
 }
 export async function saveDashboardPreferences(principal: Principal, input: unknown) {
-  const data = z.object({ widgetIds: z.array(widgetSchema).max(WIDGETS.length), expectedRevision: z.number().int().min(0), useDefaults: z.boolean().default(false) }).strict().parse(input);
+  const data = dashboardPreferencesInput.parse(input);
   if (new Set(data.widgetIds).size !== data.widgetIds.length) throw new DashboardError("Choose each widget once.", 400);
   return prisma.$transaction(async tx => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dashboard:${principal.userId}`}, 0))`;

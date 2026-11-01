@@ -24,7 +24,10 @@ const step = z.discriminatedUnion("type", [
 const pipelineSchema = z.object({ rows, steps: z.array(step).max(50) });
 const importSchema = z.object({ contentBase64: z.string(), format: z.enum(["xlsx", "csv"]) });
 const barcodeSchema = z.object({ values: z.string().max(100_000) });
+const noInput = z.object({});
 const rtvFieldsSchema = z.object(Object.fromEntries(Object.keys(emptyLabelFields()).map(key => [key, z.string().max(2000).default("")])));
+export const rtvParseInput = z.object({ text: z.string().max(100_000) });
+export const rtvRenderInput = z.object({ templateId: z.string().min(1).max(100), fields: rtvFieldsSchema });
 async function authority(principal: Principal, capability: Capability) { return prisma.$transaction(tx => assertCurrentPrincipal(tx, principal, capability)); }
 export async function runLegacyPipeline(principal: Principal, input: unknown) {
   await authority(principal, "workflow.read"); const data = pipelineSchema.parse(input);
@@ -55,9 +58,9 @@ export async function generateBarcodes(principal: Principal, input: unknown) {
   const values = barcodeValues(data.values);
   return { barcodes: values.map(value => ({ value, svg: bwipjs.toSVG(barcodeOptions(value)) })), physicalPrinting: "requires_authorized_browser_or_connected_device; no printing occurred" };
 }
-export async function parseRtvLabel(principal: Principal, input: unknown) { await authority(principal, "labels.read"); return { fields: parseFields(z.object({ text: z.string().max(100_000) }).parse(input).text), qualification: "Pasted page text requires review; parsing is not unit/submission identity evidence." }; }
+export async function parseRtvLabel(principal: Principal, input: unknown) { await authority(principal, "labels.read"); return { fields: parseFields(rtvParseInput.parse(input).text), qualification: "Pasted page text requires review; parsing is not unit/submission identity evidence." }; }
 export async function renderRtvLabel(principal: Principal, input: unknown) {
-  const data = z.object({ templateId: z.string().min(1).max(100), fields: rtvFieldsSchema }).parse(input);
+  const data = rtvRenderInput.parse(input);
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.read");
     const template = await tx.labelTemplate.findFirst({ where: { id: data.templateId, kind: "mars_return", isActive: true } });
@@ -72,8 +75,8 @@ export const utilityActions = {
   "reports.pipeline.import": { capability: "workflow.read", description: "Parse a bounded CSV/XLSX contentBase64 file into report rows", inputSchema: importSchema, run: importLegacyReport },
   "reports.pipeline.export": { capability: "workflow.read", description: "Run rows/steps and export the retained report as XLSX base64", inputSchema: pipelineSchema, run: exportLegacyReport },
   "labels.barcodes.generate": { capability: "labels.read", description: "Generate the same Code128 barcodes as the browser, as standalone SVGs", inputSchema: barcodeSchema, run: generateBarcodes },
-  "labels.rtv.parse": { capability: "labels.read", description: "Extract existing MARS label fields from supplied page text for human review", run: parseRtvLabel },
-  "labels.rtv.render": { capability: "labels.read", description: "Render an active managed template with reviewed fields, without printing", run: renderRtvLabel },
-  "labels.rtv.bookmarklet": { capability: "labels.read", description: "Generate the stable MARS field-review loader; no direct external-page print", run: rtvBookmarklet },
-  "scanner.diagnostics.open": { capability: "diagnostics.use", description: "Initiate scanner diagnostics on the actual authorized device", run: async (p: Principal) => { await authority(p, "diagnostics.use"); return { status: "requires_connected_device", actionUrl: `${new URL(z.string().url().parse(process.env.NEXT_PUBLIC_APP_URL)).origin}/admin/scanner-diagnostic`, limitation: "Keyboard/wedge/OCR events must come from the actual device. This server cannot claim hardware capture or acceptance." }; } },
+  "labels.rtv.parse": { capability: "labels.read", description: "Extract existing MARS label fields from supplied page text for human review", inputSchema: rtvParseInput, run: parseRtvLabel },
+  "labels.rtv.render": { capability: "labels.read", description: "Render an active managed template with reviewed fields, without printing", inputSchema: rtvRenderInput, run: renderRtvLabel },
+  "labels.rtv.bookmarklet": { capability: "labels.read", description: "Generate the stable MARS field-review loader; no direct external-page print", inputSchema: noInput, run: rtvBookmarklet },
+  "scanner.diagnostics.open": { capability: "diagnostics.use", description: "Initiate scanner diagnostics on the actual authorized device", inputSchema: noInput, run: async (p: Principal) => { await authority(p, "diagnostics.use"); return { status: "requires_connected_device", actionUrl: `${new URL(z.string().url().parse(process.env.NEXT_PUBLIC_APP_URL)).origin}/admin/scanner-diagnostic`, limitation: "Keyboard/wedge/OCR events must come from the actual device. This server cannot claim hardware capture or acceptance." }; } },
 } as const;

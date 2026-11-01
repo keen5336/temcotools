@@ -18,6 +18,10 @@ const publicUser = {
 } as const;
 const idSchema = z.string().min(1).max(200);
 const usernameSchema = z.string().trim().min(1).max(80);
+export const identitySessionRevokeInput = z.object({ sessionId: idSchema });
+export const identityCreateUserInput = z.object({ username: usernameSchema, displayName: z.string().trim().min(1).max(100), role: z.enum(["admin", "manager", "user"]).default("user") }).strict();
+export const identityUpdateUserInput = z.object({ id: idSchema, username: usernameSchema.optional(), displayName: z.string().trim().min(1).max(100).optional(), role: z.enum(["admin", "manager", "user"]).optional(), isActive: z.boolean().optional(), revokeSessions: z.boolean().optional(), bundleIds: z.array(idSchema).max(20).optional() }).strict();
+export const identitySaveBundleInput = z.object({ id: idSchema.optional(), name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).default(""), capabilities: z.array(z.enum(CAPABILITIES)).max(CAPABILITIES.length) });
 const NEUTRAL_RECOVERY = "If this account can recover, authorized office staff can arrange a one-use recovery code. No email has been sent.";
 export type IdentityContext = { source: string };
 
@@ -233,7 +237,7 @@ export async function listSessions(principal: Principal) {
 }
 
 export async function revokeSession(principal: Principal, input: unknown) {
-  const { sessionId } = z.object({ sessionId: idSchema }).parse(input);
+  const { sessionId } = identitySessionRevokeInput.parse(input);
   return prisma.$transaction(async (tx) => {
     await assertIdentityPrincipal(tx, principal, "account.self");
     const revoked = await tx.userSession.updateMany({ where: { id: sessionId, userId: principal.userId, revokedAt: null }, data: { revokedAt: new Date() } });
@@ -308,8 +312,11 @@ export async function assertManageableAccess(tx: Prisma.TransactionClient, actor
 }
 
 export async function createIdentityUser(principal: Principal, input: unknown) {
-  const data = z.object({ username: usernameSchema, displayName: z.string().trim().min(1).max(100), role: z.enum(["admin", "manager", "user"]).default("user") }).strict().parse(input);
+  const data = identityCreateUserInput.parse(input);
   return prisma.$transaction(async (tx) => {
+    // Share the access-administration lock with rename/update so the
+    // case-insensitive duplicate check cannot race another account writer.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(8110102)`;
     const current = await assertIdentityPrincipal(tx, principal, "users.manage", true);
     await assertManageableAccess(tx, current, {role:data.role,bundleIds:[`legacy-${data.role}`]});
     const duplicate = await tx.user.findFirst({ where: { username: { equals: data.username, mode: "insensitive" } }, select: { id: true } });
@@ -321,7 +328,7 @@ export async function createIdentityUser(principal: Principal, input: unknown) {
 }
 
 export async function updateIdentityUser(principal: Principal, input: unknown) {
-  const data = z.object({ id: idSchema, username: usernameSchema.optional(), displayName: z.string().trim().min(1).max(100).optional(), role: z.enum(["admin", "manager", "user"]).optional(), isActive: z.boolean().optional(), revokeSessions: z.boolean().optional(), bundleIds: z.array(idSchema).max(20).optional() }).strict().parse(input);
+  const data = identityUpdateUserInput.parse(input);
   return prisma.$transaction(async (tx) => {
     // Serializes access administration and prevents crossed actor/target locks.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(8110102)`;
@@ -361,7 +368,7 @@ export async function listRoleBundles(principal: Principal) {
 }
 
 export async function saveRoleBundle(principal: Principal, input: unknown) {
-  const data = z.object({ id: idSchema.optional(), name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).default(""), capabilities: z.array(z.enum(CAPABILITIES)).max(CAPABILITIES.length) }).parse(input);
+  const data = identitySaveBundleInput.parse(input);
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(8110102)`;
     const current = await assertIdentityPrincipal(tx, principal, "users.manage", true);

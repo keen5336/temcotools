@@ -57,11 +57,11 @@ async function linkIdentity(tx: Prisma.TransactionClient, principal: Principal, 
 }
 
 export async function listMarsSubmissionIntents(principal: Principal, raw: unknown = {}) {
-  const input = z.object({ unitId: marsId.optional(), limit: z.number().int().min(1).max(100).default(30), afterId: marsId.optional(), includeResolved: z.boolean().default(false) }).strict().parse(raw);
+  const input = marsSubmissionInputs.listMarsSubmissionIntents.parse(raw);
   return queryMars(principal, async tx => ({ intents: await tx.marsSubmissionIntent.findMany({ where: { unitId: input.unitId, ...(input.includeResolved ? {} : { state: { in: ["prepared","in_progress","unknown"] } }), ...(input.afterId ? { id: { gt: input.afterId } } : {}) }, include: { events: { orderBy: [{ createdAt: "asc" }, { id: "asc" }] } }, orderBy: { id: "asc" }, take: input.limit }), qualification: "Local intent and human evidence only; no qualified MARS creation adapter is configured." }));
 }
 export async function prepareMarsSubmissionIntent(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: marsOperation, unitId: marsId, authorizationId: marsId.optional(), authorizationExpiresAt: z.string().datetime({ offset: true }).optional(), evidence: marsEvidence }).strict().parse(raw);
+  const input = marsSubmissionInputs.prepareMarsSubmissionIntent.parse(raw);
   return commandMars(principal, input.operationId, "intent.prepare", input, async tx => {
     let authorizedByUserId: string, authorizationExpiresAt: Date;
     if (input.authorizationId) {
@@ -102,7 +102,7 @@ export async function cancelMarsSubmissionIntent(principal: Principal, raw: unkn
   return commandMars(principal, input.operationId, "intent.cancel", input, async tx => { const current = await lockIntent(tx, input.intentId, input.expectedRevision); if (current.state !== "prepared") throw new MarsWorkflowError("Only unstarted work may be cancelled. Reconcile uncertain or in-progress external results.", 409); const intent = await tx.marsSubmissionIntent.update({ where: { id: current.id }, data: { state: "cancelled", revision: { increment: 1 } } }); await event(tx, intent, principal, "unstarted_intent_cancelled", input.evidence); return { intent }; });
 }
 export async function reconcileMarsSubmissionIntent(principal: Principal, raw: unknown) {
-  const input = actionInput.extend({ outcome: z.enum(["linked","verified_not_submitted"]), requestNumber: marsId.optional() }).parse(raw);
+  const input = marsSubmissionInputs.reconcileMarsSubmissionIntent.parse(raw);
   return commandMars(principal, input.operationId, "intent.reconcile", input, async tx => {
     const current = await lockIntent(tx, input.intentId, input.expectedRevision);
     if (!["in_progress","unknown","prepared"].includes(current.state)) throw new MarsWorkflowError("This intent is already resolved; retain its prior receipt.", 409);
@@ -115,11 +115,11 @@ export async function reconcileMarsSubmissionIntent(principal: Principal, raw: u
   });
 }
 export async function linkMarsSubmission(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: marsOperation, unitId: marsId, requestNumber: marsId, authorizationId: marsId.optional(), evidence: marsEvidence }).strict().parse(raw);
+  const input = marsSubmissionInputs.linkMarsSubmission.parse(raw);
   return commandMars(principal, input.operationId, "submission.link", input, async tx => { await tx.$queryRaw`SELECT id FROM "WarehouseUnit" WHERE id=${input.unitId} FOR UPDATE`; if (!await tx.warehouseUnit.findUnique({ where: { id: input.unitId }, select: { id: true } })) throw new MarsWorkflowError("Exact physical unit not found.", 404); return linkIdentity(tx, principal, input); });
 }
 export async function getMarsLabelHandoff(principal: Principal, raw: unknown) {
-  const input = z.object({ unitId: marsId, requestNumber: marsId }).strict().parse(raw);
+  const input = marsSubmissionInputs.getMarsLabelHandoff.parse(raw);
   return queryMars(principal, async tx => {
     const links = await tx.warehouseIdentifier.findMany({ where: { unitId: input.unitId, kind: "submission", revokedAt: null } });
     if (links.length !== 1 || links[0].namespace !== "mars" || links[0].value !== input.requestNumber.trim().toUpperCase()) throw new MarsWorkflowError("The unit needs one current unambiguous submission link before label handoff. Review changed/historical submissions explicitly.", 409);
@@ -128,3 +128,14 @@ export async function getMarsLabelHandoff(principal: Principal, raw: unknown) {
     return { unitId: input.unitId, requestNumber: submission.requestNumber, labelUrl: `/tools/rtv-label#mars-unit=${encodeURIComponent(JSON.stringify({ unitId: input.unitId, requestNumber: submission.requestNumber }))}`, detailUrl: /^\d+$/.test(submission.requestNumber) ? `https://delivery-management.homedepot.com/mars/return-submissions/detail/${submission.requestNumber}` : null, printed: false, meaning: "Open existing signed-in label review. Printer selection and explicit print confirmation remain separate." };
   });
 }
+
+export const marsSubmissionInputs = {
+  startMarsSubmissionIntent: actionInput,
+  markMarsSubmissionUnknown: actionInput,
+  cancelMarsSubmissionIntent: actionInput,
+  listMarsSubmissionIntents: z.object({ unitId: marsId.optional(), limit: z.number().int().min(1).max(100).default(30), afterId: marsId.optional(), includeResolved: z.boolean().default(false) }).strict(),
+  prepareMarsSubmissionIntent: z.object({ operationId: marsOperation, unitId: marsId, authorizationId: marsId.optional(), authorizationExpiresAt: z.string().datetime({ offset: true }).optional(), evidence: marsEvidence }).strict(),
+  reconcileMarsSubmissionIntent: actionInput.extend({ outcome: z.enum(["linked","verified_not_submitted"]), requestNumber: marsId.optional() }),
+  linkMarsSubmission: z.object({ operationId: marsOperation, unitId: marsId, requestNumber: marsId, authorizationId: marsId.optional(), evidence: marsEvidence }).strict(),
+  getMarsLabelHandoff: z.object({ unitId: marsId, requestNumber: marsId }).strict(),
+} as const;

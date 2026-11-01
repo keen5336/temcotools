@@ -10,6 +10,14 @@ const id = z.string().min(1).max(100), name = z.string().trim().min(1).max(120);
 const version = z.string().datetime({ offset: true }).optional();
 const printerFields = { name, endpoint: z.string().trim().refine(validatePrinterEndpoint, "Use an HTTP(S) printer endpoint without embedded credentials or fragments."), contentType: z.enum(["text/plain", "application/octet-stream"]).default("text/plain") };
 const templateFields = { name, kind: z.enum(LABEL_TEMPLATE_KINDS), zpl: z.string().trim().min(1).max(128 * 1024).refine(value => value.includes("^XA") && value.includes("^XZ"), "A complete ZPL label is required.") };
+export const operatorLabelConfigurationInput = z.object({ kind: z.enum(LABEL_TEMPLATE_KINDS) });
+export const printerCreateInput = z.object(printerFields);
+export const printerUpdateInput = z.object({ ...printerFields, id, isActive: z.boolean().default(true), expectedUpdatedAt: version, updatedAt: version });
+export const printerEnabledInput = z.object({ id, enabled: z.boolean(), expectedUpdatedAt: version });
+export const templateCreateInput = z.object({ ...templateFields, isDefault: z.boolean().default(false) });
+export const templateUpdateInput = z.object({ ...templateFields, id, isActive: z.boolean().default(true), isDefault: z.boolean().default(false), expectedUpdatedAt: version, updatedAt: version });
+export const templateDefaultInput = z.object({ id, expectedUpdatedAt: version });
+export const templateEnabledInput = z.object({ id, enabled: z.boolean(), expectedUpdatedAt: version });
 function checkVersion(current: { updatedAt: Date }, expected?: string) { if (expected && current.updatedAt.getTime() !== Date.parse(expected)) throw new LabelError("Configuration changed. Reload before saving.", 409); }
 async function configurationAudit(tx: Prisma.TransactionClient, principal: Principal, action: string, resource: string) {
   await tx.identityAudit.create({ data: { action: `labels.configuration.${action}`, actorUserId: principal.userId, sessionId: principal.sessionId, reason: JSON.stringify({ resource, grantId: principal.grantId ?? null }) } });
@@ -35,7 +43,7 @@ export async function getManagedLabelConfiguration(principal: Principal) {
   });
 }
 export async function getOperatorLabelConfiguration(principal: Principal, input: unknown) {
-  const { kind } = z.object({ kind: z.enum(LABEL_TEMPLATE_KINDS) }).parse(input);
+  const { kind } = operatorLabelConfigurationInput.parse(input);
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.read"); await ensureBuiltInLabelTemplates(tx);
     const [printers, templates] = await Promise.all([tx.labelPrinter.findMany({ where: { isActive: true }, select: { id: true, name: true, endpoint: true, contentType: true }, orderBy: { name: "asc" } }), tx.labelTemplate.findMany({ where: { kind, isActive: true }, select: { id: true, name: true, zpl: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] })]);
@@ -43,22 +51,22 @@ export async function getOperatorLabelConfiguration(principal: Principal, input:
   });
 }
 export async function createPrinter(principal: Principal, input: unknown) {
-  const data = z.object(printerFields).parse(input);
+  const data = printerCreateInput.parse(input);
   return prisma.$transaction(async tx => { const current = await assertCurrentPrincipal(tx, principal, "labels.manage", true); const row = await tx.labelPrinter.create({ data: { ...data, createdByUserId: current.userId, updatedByUserId: current.userId } }); await configurationAudit(tx, current, "printer_created", row.id); return row; });
 }
 export async function updatePrinter(principal: Principal, input: unknown) {
-  const data = z.object({ ...printerFields, id, isActive: z.boolean().default(true), expectedUpdatedAt: version, updatedAt: version }).parse(input);
+  const data = printerUpdateInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.manage", true); await lockedPrinter(tx, data.id, data.expectedUpdatedAt ?? data.updatedAt);
     const row = await tx.labelPrinter.update({ where: { id: data.id }, data: { name: data.name, endpoint: data.endpoint, contentType: data.contentType, isActive: data.isActive, updatedByUserId: current.userId } }); await configurationAudit(tx, current, "printer_updated", row.id); return row;
   });
 }
 export async function setPrinterEnabled(principal: Principal, input: unknown) {
-  const data = z.object({ id, enabled: z.boolean(), expectedUpdatedAt: version }).parse(input);
+  const data = printerEnabledInput.parse(input);
   return prisma.$transaction(async tx => { const current = await assertCurrentPrincipal(tx, principal, "labels.manage", true); await lockedPrinter(tx, data.id, data.expectedUpdatedAt); const row = await tx.labelPrinter.update({ where: { id: data.id }, data: { isActive: data.enabled, updatedByUserId: current.userId } }); await configurationAudit(tx, current, data.enabled ? "printer_enabled" : "printer_disabled", row.id); return row; });
 }
 export async function createTemplate(principal: Principal, input: unknown) {
-  const data = z.object({ ...templateFields, isDefault: z.boolean().default(false) }).parse(input);
+  const data = templateCreateInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.manage", true); await lockKind(tx, data.kind);
     if (data.isDefault) await tx.labelTemplate.updateMany({ where: { kind: data.kind, isDefault: true }, data: { isDefault: false, updatedByUserId: current.userId } });
@@ -66,7 +74,7 @@ export async function createTemplate(principal: Principal, input: unknown) {
   });
 }
 export async function updateTemplate(principal: Principal, input: unknown) {
-  const data = z.object({ ...templateFields, id, isActive: z.boolean().default(true), isDefault: z.boolean().default(false), expectedUpdatedAt: version, updatedAt: version }).parse(input);
+  const data = templateUpdateInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     // Consistent kind-lock order prevents cross-workflow moves from deadlocking.
@@ -77,7 +85,7 @@ export async function updateTemplate(principal: Principal, input: unknown) {
   });
 }
 export async function setDefaultTemplate(principal: Principal, input: unknown) {
-  const data = z.object({ id, expectedUpdatedAt: version }).parse(input);
+  const data = templateDefaultInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     for (const kind of LABEL_TEMPLATE_KINDS) await lockKind(tx, kind);
@@ -88,7 +96,7 @@ export async function setDefaultTemplate(principal: Principal, input: unknown) {
   });
 }
 export async function setTemplateEnabled(principal: Principal, input: unknown) {
-  const data = z.object({ id, enabled: z.boolean(), expectedUpdatedAt: version }).parse(input);
+  const data = templateEnabledInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     for (const kind of LABEL_TEMPLATE_KINDS) await lockKind(tx, kind);

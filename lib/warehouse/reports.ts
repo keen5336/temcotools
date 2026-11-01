@@ -4,23 +4,28 @@ import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { importInventoryReport } from "@/lib/inventory-audit";
 import { WarehouseCommandError } from "@/lib/warehouse/units";
 
-const ReportInput = z.object({
+export const warehouseReportInput = z.object({
   filename: z.string().trim().min(1).max(255),
   rows: z.array(z.record(z.string().max(200), z.union([z.string().max(10_000), z.number().finite(), z.boolean(), z.null()]))).min(1).max(100_000),
   scope: z.string().trim().min(1).max(100).default("warehouse"),
   coverage: z.enum(["partial", "complete"]).default("partial"),
   sourceAsOf: z.string().max(100).nullable().optional(),
 });
+export const warehousePutAwayInput = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), scope: z.string().trim().max(100).optional(), importId: z.string().max(200).optional(), limit: z.number().int().min(1).max(1000).optional(), afterLpn: z.string().max(500).optional() });
+export const warehouseMembershipInput = z.object({ lpn: z.string().trim().min(1).max(500), scope: z.string().trim().max(100).optional() });
 
 export async function importSharedWarehouseReport(principal: Principal, raw: unknown) {
   assertCapability(principal, "inventory.write");
-  const parsed = ReportInput.safeParse(raw);
+  const parsed = warehouseReportInput.safeParse(raw);
   if (!parsed.success) throw new WarehouseCommandError("Provide a filename, valid WMS rows, scope and partial/complete coverage.");
   // The import implementation rechecks this version inside its own writer transaction.
   return importInventoryReport({ ...parsed.data, uploadedByName: principal.displayName, uploadedByUserId: principal.userId, actorPrincipal: principal });
 }
 
 function putAwayInput(raw: { date: string; scope?: string; importId?: string; limit?: number; afterLpn?: string }) {
+  const validated = warehousePutAwayInput.safeParse(raw);
+  if (!validated.success) throw new WarehouseCommandError("Provide a valid received date, source scope and bounded page input.");
+  raw = validated.data;
   const parsedDate = typeof raw.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(raw.date) ? new Date(`${raw.date}T00:00:00Z`) : null;
   if (!parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== raw.date) throw new WarehouseCommandError("Choose a valid received calendar date.");
   const scope = raw.scope?.trim() || "warehouse";
@@ -78,6 +83,9 @@ export async function exportWarehousePutAway(principal: Principal, raw: { date: 
 
 export async function getWarehouseImportMembership(principal: Principal, input: { lpn: string; scope?: string }) {
   assertCapability(principal, "inventory.read");
+  const validated = warehouseMembershipInput.safeParse(input);
+  if (!validated.success) throw new WarehouseCommandError("Provide an LPN and valid source scope.");
+  input = validated.data;
   const lpn = input.lpn.trim().toUpperCase();
   const scope = input.scope?.trim() || "warehouse";
   const batch = await prisma.inventoryAuditImport.findFirst({ where: { scope }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });

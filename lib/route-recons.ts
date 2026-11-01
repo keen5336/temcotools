@@ -11,6 +11,8 @@ import { fingerprint } from "@/lib/labels/model";
 
 export class RouteReconValidationError extends RetainedListError {}
 const idSchema = z.string().min(1).max(200);
+export const routeReconMetadataInput = z.object({ name: z.string().trim().min(1).max(120), filename: z.string().trim().min(1).max(240).refine(value => !/[/\\\x00-\x1f\x7f]/.test(value), "Use a plain source filename."), operationId: z.string().min(1).max(200).optional().describe("Stable caller operation ID. If omitted, identical current-person name/filename/content is deduplicated.") });
+export const routeReconPrintableOptionsInput = z.object({ routeNumber: z.string().max(2000).nullable().optional().describe("Omit for all routes; null selects unassigned/no-route items.") });
 const summarySelect = { id: true, name: true, sourceFilename: true, routeCount: true, createdAt: true, updatedAt: true, archivedAt: true, createdByUser: { select: { displayName: true } }, _count: { select: { items: true } } } satisfies Prisma.RouteReconSelect;
 const detailSelect = { id: true, name: true, sourceFilename: true, routeCount: true, createdAt: true, updatedAt: true, archivedAt: true, createdByUser: { select: { displayName: true } }, items: { orderBy: { rowNumber: "asc" }, select: { id: true, rowNumber: true, routeNumber: true, contact: true, orderNumber: true, lpn: true, serialNumber: true, trackingNumber: true, partNumber: true, description: true } } } satisfies Prisma.RouteReconSelect;
 async function parseBoundedRecon(fileBuffer: PickWaveWorkbookBuffer) {
@@ -26,7 +28,7 @@ export async function previewRouteRecon(fileBuffer: PickWaveWorkbookBuffer, prin
 }
 export async function createRouteRecon(options: { name: string; filename: string; fileBuffer: PickWaveWorkbookBuffer; userId?: string; operationId?: string }, principal?: Principal) {
   const actor = await currentRetainedPrincipal(principal);
-  const input = z.object({ name: z.string().trim().min(1).max(120), filename: z.string().trim().min(1).max(240).refine(value => !/[/\\\x00-\x1f\x7f]/.test(value), "Use a plain source filename."), operationId: z.string().min(1).max(200).optional() }).parse(options);
+  const input = routeReconMetadataInput.parse(options);
   await prisma.$transaction(tx => assertCurrentPrincipal(tx, actor, "workflow.execute"));
   const parsed = await parseBoundedRecon(options.fileBuffer), routeCount = countRoutes(parsed.items).size;
   const fileHash = createHash("sha256").update(Buffer.from(options.fileBuffer as unknown as Uint8Array)).digest("hex");
@@ -68,7 +70,7 @@ export async function deleteRouteRecon(id: string, principal?: Principal) {
 }
 export async function getRouteReconPrintableData(id: string, input: { routeNumber?: string | null } = {}, principal?: Principal) {
   const actor = await currentRetainedPrincipal(principal), report = await getRouteRecon(id, actor); if (!report) throw new RouteReconValidationError("Route Recon not found.", 404);
-  const route = z.object({ routeNumber: z.string().max(2000).nullable().optional() }).parse(input).routeNumber;
+  const route = routeReconPrintableOptionsInput.parse(input).routeNumber;
   const requested = route === undefined ? undefined : (route?.trim() || null)?.toLocaleLowerCase() ?? null;
   if (requested && requested.length > 2000) throw new RouteReconValidationError("Route selection is too long.");
   const items = requested === undefined ? report.items : report.items.filter(item => ((item.routeNumber?.trim() || null)?.toLocaleLowerCase() ?? null) === requested);

@@ -9,17 +9,17 @@ export class PayloadError extends Error {
   constructor(message: string, readonly status = 400) { super(message); this.name = "PayloadError"; }
 }
 
-const draftSchema = z.object({
+export const payloadDraftInput = z.object({
   name: z.string().trim().min(1).max(100),
   purpose: z.enum(PAYLOAD_PURPOSES),
-  targetOrigins: z.array(z.string().max(300)).min(1).max(8),
-  source: z.string().min(1),
+  targetOrigins: z.array(z.string().max(300).describe("Exact approved HTTPS origin without paths, queries, fragments or wildcards; HTTP loopback is development-only.")).min(1).max(8),
+  source: z.string().min(1).max(MAX_PAYLOAD_BYTES).describe("Trusted integration source, at most 128 KiB UTF-8; never include credentials, customer data or private notes. Validation compiles without executing."),
   protocolVersion: z.literal(1).default(1),
   operationNames: z.array(z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/)).max(32).default([]),
 });
-export type PayloadDraft = z.infer<typeof draftSchema>;
+export type PayloadDraft = z.infer<typeof payloadDraftInput>;
 export function validatePayloadDraft(input: unknown): PayloadDraft {
-  const parsed = draftSchema.safeParse(input);
+  const parsed = payloadDraftInput.safeParse(input);
   if (!parsed.success) throw new PayloadError("Enter a name, known purpose, exact target origins and valid source settings.");
   const data = parsed.data;
   if (Buffer.byteLength(data.source, "utf8") > MAX_PAYLOAD_BYTES) throw new PayloadError("Payload source must be at most 128 KiB.");

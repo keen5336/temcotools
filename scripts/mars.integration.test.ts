@@ -9,7 +9,9 @@ import { maintenanceClient, maintenanceTarget } from "./v2-preflight-support";
 
 const testUrl = process.env.MARS_TEST_DATABASE_URL;
 test("retained MARS commands, immutable source history and exact-unit human submission custody", { skip: !testUrl }, async suite => {
-  const target = maintenanceTarget("temcotools_v2_mars_test", false, testUrl);
+  const databaseName = new URL(testUrl!).pathname.slice(1);
+  assert.match(databaseName, /^temcotools_v2_mars(?:_[a-z0-9]+)*_test$/, "Use an explicitly named task-owned synthetic MARS database.");
+  const target = maintenanceTarget(databaseName, false, testUrl);
   process.env.DATABASE_URL = target.url; process.env.SESSION_SECRET = "synthetic-mars-test-current-session-secret-2026"; process.env.MFA_ENCRYPTION_KEY = Buffer.alloc(32, 0x71).toString("base64url");
   const prisma = maintenanceClient(target);
   assert.equal(await prisma.user.count(), 0, "Use a fresh dedicated synthetic MARS database; fixtures and immutable evidence are retained.");

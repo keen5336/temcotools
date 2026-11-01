@@ -8,8 +8,12 @@ import { LabelError } from "./model";
 
 export const hashDeviceToken = (value: string) => createHash("sha256").update(value).digest("hex");
 const deviceFields = { id: true, userId: true, name: true, mode: true, printerIds: true, lastSeenAt: true, leaseExpiresAt: true, revokedAt: true } as const;
+const privateDeviceToken = z.string().min(30).max(100).meta({ writeOnly: true, description: "Private credential held by the authorized connected device. A server-side MCP client does not gain LAN hardware by registering a name." });
+export const printingDeviceAuthorityInput = z.object({ deviceId: z.string().min(1).max(100), deviceToken: privateDeviceToken });
+export const printingDeviceRegisterInput = z.object({ deviceId: z.string().min(16).max(100), name: z.string().trim().min(1).max(80), mode: z.enum(["direct", "relay"]), printerIds: z.array(z.string().min(1).max(100)).min(1).max(40), deviceToken: z.string().max(100).optional().meta({ writeOnly: true, description: "Existing device credential for renewing that same session-bound device; omit for a fresh device ID." }) });
+export const printingDeviceRevokeInput = z.object({ deviceId: z.string().min(1).max(100) });
 export async function registerPrintingDevice(principal: Principal, input: unknown) {
-  const data = z.object({ deviceId: z.string().min(16).max(100), name: z.string().trim().min(1).max(80), mode: z.enum(["direct", "relay"]), printerIds: z.array(z.string().min(1).max(100)).min(1).max(40), deviceToken: z.string().max(100).optional() }).parse(input);
+  const data = printingDeviceRegisterInput.parse(input);
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.print");
     const printers = await tx.labelPrinter.findMany({ where: { id: { in: data.printerIds }, isActive: true }, select: { id: true } });
@@ -26,6 +30,7 @@ export async function listPrintingDevices(principal: Principal) {
   return prisma.$transaction(async tx => { await assertCurrentPrincipal(tx, principal, "labels.read"); return tx.printingDevice.findMany({ where: { revokedAt: null, leaseExpiresAt: { gt: new Date() }, OR: [{ userId: principal.userId, sessionId: principal.sessionId }, { mode: "relay" }] }, select: deviceFields, orderBy: { name: "asc" } }); });
 }
 export async function revokePrintingDevice(principal: Principal, deviceId: string) {
+  printingDeviceRevokeInput.parse({ deviceId });
   return prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, principal, "labels.print");
     const result = await tx.printingDevice.updateMany({ where: { id: deviceId, userId: principal.userId, sessionId: principal.sessionId }, data: { revokedAt: new Date() } });

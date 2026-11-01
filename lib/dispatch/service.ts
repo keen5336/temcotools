@@ -34,13 +34,15 @@ async function currentSnapshot(tx: Prisma.TransactionClient, snapshotId: string,
   return snapshot;
 }
 
+export const getDispatchAdapterStatusInputSchema = z.object({}).strict();
 export async function getDispatchAdapterStatus(principal: Principal) {
   assertCapability(principal, "workflow.read");
   return { qualifiedDmpAdapterEnabled: false, officialFinalsQualified: false, supportedSources: ["manual_reviewed", "workbook_fallback"], reason: dispatchSourceNotice };
 }
 
+export const createDispatchSnapshotInputSchema = z.object({ operationId: dispatchOperation, day: dispatchDay, scope: z.string().trim().min(1).max(100), sourceKind: z.enum(["manual_reviewed", "workbook_fallback"]).default("manual_reviewed"), sourceAsOf: dispatchStamp, sourceRef: dispatchReason, coverage: z.enum(["complete", "partial"]), note: dispatchReason, lines: z.array(dispatchLine).max(500) }).strict();
 export async function createDispatchSnapshot(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, day: dispatchDay, scope: z.string().trim().min(1).max(100), sourceKind: z.enum(["manual_reviewed", "workbook_fallback"]).default("manual_reviewed"), sourceAsOf: dispatchStamp, sourceRef: dispatchReason, coverage: z.enum(["complete", "partial"]), note: dispatchReason, lines: z.array(dispatchLine).max(500) }).strict().parse(raw);
+  const input = createDispatchSnapshotInputSchema.parse(raw);
   if (Date.parse(input.sourceAsOf) > Date.now() + 300_000) throw new DispatchError("Source-as-of cannot be in the future.");
   const slots = expandDispatchLines(input.lines);
   return dispatchCommand(principal, input.operationId, "create_snapshot", input, "office.decide", async (tx) => {
@@ -55,9 +57,10 @@ export async function createDispatchSnapshot(principal: Principal, raw: unknown)
   });
 }
 
+export const createDispatchWorkbookSnapshotInputSchema = z.object({ operationId: dispatchOperation, day: dispatchDay, scope: z.string().trim().min(1).max(100), sourceAsOf: dispatchStamp, sourceRef: dispatchReason, coverage: z.enum(["complete", "partial"]), note: dispatchReason, filename: z.string().trim().min(1).max(200), workbookBase64: z.string().min(1).max(5_600_000), routeLanes: z.array(z.object({ route: z.string().trim().min(1).max(100), lane: z.string().trim().min(1).max(100) }).strict()).min(1).max(500) }).strict();
 export async function createDispatchWorkbookSnapshot(principal: Principal, raw: unknown) {
   assertCapability(principal, "office.decide");
-  const input = z.object({ operationId: dispatchOperation, day: dispatchDay, scope: z.string().trim().min(1).max(100), sourceAsOf: dispatchStamp, sourceRef: dispatchReason, coverage: z.enum(["complete", "partial"]), note: dispatchReason, filename: z.string().trim().min(1).max(200), workbookBase64: z.string().min(1).max(5_600_000), routeLanes: z.array(z.object({ route: z.string().trim().min(1).max(100), lane: z.string().trim().min(1).max(100) }).strict()).min(1).max(500) }).strict().parse(raw);
+  const input = createDispatchWorkbookSnapshotInputSchema.parse(raw);
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(input.workbookBase64)) throw new DispatchError("Workbook must be base64-encoded XLSX data.");
   const bytes = Buffer.from(input.workbookBase64, "base64");
   if (bytes.length > 4 * 1024 * 1024) throw new DispatchError("Dispatch workbooks are limited to 4 MiB.", 413);
@@ -93,9 +96,10 @@ async function matchSlot(tx: Prisma.TransactionClient, slot: DispatchSlot, snaps
   return { state: "ready" as const, candidateUnitIds: intersection, why: "One exact unit satisfies the supplied identity evidence; allocation is a plan, not physical completion." };
 }
 
+export const reconcileDispatchRequirementsInputSchema = z.object({ snapshotId: dispatchId }).strict();
 export async function reconcileDispatchRequirements(principal: Principal, raw: unknown) {
   assertCapability(principal, "workflow.read");
-  const { snapshotId } = z.object({ snapshotId: dispatchId }).strict().parse(raw);
+  const { snapshotId } = reconcileDispatchRequirementsInputSchema.parse(raw);
   return prisma.$transaction(async (tx) => {
     const snapshot = await tx.dispatchSnapshot.findUnique({ where: { id: snapshotId }, include: { board: true, allocations: { where: { releasedAt: null }, include: { unit: { select: { inventoryRows: { select: { lpn: true, description: true } } } } } } } });
     if (!snapshot) throw new DispatchError("Dispatch snapshot not found.", 404);
@@ -108,8 +112,9 @@ export async function reconcileDispatchRequirements(principal: Principal, raw: u
   }, { isolationLevel: "RepeatableRead", timeout: 60_000 });
 }
 
+export const allocateDispatchUnitInputSchema = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId, slotKey: z.string().min(1).max(200), unitId: dispatchId.optional(), evidence: dispatchReason }).strict();
 export async function allocateDispatchUnit(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId, slotKey: z.string().min(1).max(200), unitId: dispatchId.optional(), evidence: dispatchReason }).strict().parse(raw);
+  const input = allocateDispatchUnitInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "allocate", input, "dispatch.allocate", async (tx) => {
     const snapshot = await currentSnapshot(tx, input.snapshotId, input.expectedHeadId);
     const slot = slotsOf(snapshot.slots).find((item) => item.slotKey === input.slotKey);
@@ -128,8 +133,9 @@ export async function allocateDispatchUnit(principal: Principal, raw: unknown) {
   });
 }
 
+export const releaseDispatchAllocationInputSchema = z.object({ operationId: dispatchOperation, allocationId: dispatchId, expectedHeadId: dispatchId, reason: dispatchReason }).strict();
 export async function releaseDispatchAllocation(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, allocationId: dispatchId, expectedHeadId: dispatchId, reason: dispatchReason }).strict().parse(raw);
+  const input = releaseDispatchAllocationInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "release_allocation", input, "dispatch.allocate", async (tx) => {
     const allocation = await tx.dispatchAllocation.findUnique({ where: { id: input.allocationId } });
     if (!allocation) throw new DispatchError("Allocation not found.", 404);
@@ -177,8 +183,9 @@ async function amendLane(tx: Prisma.TransactionClient, principal: Principal, ses
   await tx.dispatchFinalsSession.update({ where: { id: sessionId }, data: { carriedSignoffs: asJson(carried), laneClearances: asJson(clearances) } });
 }
 
+export const approveDispatchSnapshotInputSchema = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId.nullable(), evidence: dispatchReason }).strict();
 export async function approveDispatchSnapshot(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId.nullable(), evidence: dispatchReason }).strict().parse(raw);
+  const input = approveDispatchSnapshotInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "approve_snapshot", input, "office.decide", async (tx) => {
     const initial = await tx.dispatchSnapshot.findUnique({ where: { id: input.snapshotId }, select: { boardId: true } });
     if (!initial) throw new DispatchError("Snapshot not found.", 404);
@@ -212,7 +219,8 @@ export async function approveDispatchSnapshot(principal: Principal, raw: unknown
       const carried: Record<string, Prisma.JsonValue> = {};
       for (const lane of [...new Set(nextSlots.map((slot) => slot.lane))]) {
         if ([...oldSlots, ...nextSlots].some((slot) => slot.lane === lane && changed.has(slot.slotKey))) continue;
-        if (await tx.dispatchAmendment.count({ where: { sessionId: oldSession.id, lane, resolvedAt: null } })) continue;
+        const priorScope = { boardId: snapshot.boardId, snapshot: { version: { lte: previous!.version } } };
+        if (await tx.dispatchAmendment.count({ where: { session: priorScope, lane, resolvedAt: null } }) || await tx.dispatchFinalsScan.count({ where: { session: priorScope, actualLane: lane, reviewStatus: "open" } })) continue;
         const signature = await tx.dispatchLaneSignoff.findFirst({ where: { sessionId: oldSession.id, lane }, orderBy: { version: "desc" } });
         const priorCarry = objectJson(oldSession.carriedSignoffs)[lane];
         const currentCredits = await tx.dispatchFinalsCredit.count({ where: { sessionId: session.id, lane, status: "confirmed" } });
@@ -231,8 +239,9 @@ export async function approveDispatchSnapshot(principal: Principal, raw: unknown
   });
 }
 
+export const generateDispatchPickWaveInputSchema = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId }).strict();
 export async function generateDispatchPickWave(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId }).strict().parse(raw);
+  const input = generateDispatchPickWaveInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "generate_pick_wave", input, "dispatch.allocate", async (tx) => {
     const snapshot = await currentSnapshot(tx, input.snapshotId, input.expectedHeadId); const slots = slotsOf(snapshot.slots);
     const allocations = await tx.dispatchAllocation.findMany({ where: { snapshotId: snapshot.id, releasedAt: null }, include: { waveItem: true, unit: { include: { identifiers: { where: { revokedAt: null }, orderBy: { id: "asc" } }, inventoryRows: { orderBy: { lpn: "asc" } } } } }, orderBy: { slotKey: "asc" } });
@@ -266,8 +275,9 @@ export async function resolveDispatchPickItemInTransaction(tx: Prisma.Transactio
   return { boundWave: true, itemId: binding.pickWaveItemId, unitId: identity.unitId, ambiguous: false, reason: "Exact physical-unit allocation binding." };
 }
 
+export const createFinalsSessionInputSchema = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId }).strict();
 export async function createFinalsSession(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, snapshotId: dispatchId, expectedHeadId: dispatchId }).strict().parse(raw);
+  const input = createFinalsSessionInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "create_finals_session", input, "workflow.execute", async (tx) => {
     const snapshot = await currentSnapshot(tx, input.snapshotId, input.expectedHeadId); const session = await ensureFinalsSession(tx, principal, snapshot);
     return { sessionId: session.id, snapshotId: snapshot.id, day: snapshot.board.day, scope: snapshot.board.scope, sourceAsOf: snapshot.sourceAsOf.toISOString(), sourceNotice: dispatchSourceNotice };
@@ -281,8 +291,9 @@ async function lockedFinalsSession(tx: Prisma.TransactionClient, sessionId: stri
   return tx.dispatchFinalsSession.findUniqueOrThrow({ where: { id: sessionId }, include: { snapshot: true, board: true } });
 }
 
+export const recordFinalsScanInputSchema = z.object({ sessionId: dispatchId, eventId: z.string().min(1).max(100), lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), rawIdentifier: z.string().min(1).max(500), confirmPlacement: z.boolean(), capturedAt: dispatchStamp, capturedByUserId: dispatchId.optional(), captureMethod: z.enum(["scanner", "manual", "ocr"]).default("manual"), deviceId: z.string().max(200).optional(), identifierType: z.enum(["auto", "lpn", "msn", "serial", "submission"]).default("auto"), namespace: z.string().max(100).optional() }).strict();
 export async function recordFinalsScan(principal: Principal, raw: unknown) {
-  const input = z.object({ sessionId: dispatchId, eventId: z.string().min(1).max(100), lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), rawIdentifier: z.string().min(1).max(500), confirmPlacement: z.boolean(), capturedAt: dispatchStamp, capturedByUserId: dispatchId.optional(), captureMethod: z.enum(["scanner", "manual", "ocr"]).default("manual"), deviceId: z.string().max(200).optional(), identifierType: z.enum(["auto", "lpn", "msn", "serial", "submission"]).default("auto"), namespace: z.string().max(100).optional() }).strict().parse(raw);
+  const input = recordFinalsScanInputSchema.parse(raw);
   const receipt = await dispatchCommand(principal, `finals:${dispatchHash([input.sessionId, input.eventId])}`, "finals_scan", input, "workflow.execute", async (tx) => {
     const session = await lockedFinalsSession(tx, input.sessionId); const slots = slotsOf(session.snapshot.slots);
     const physical = await recordWorkflowObservation(tx, principal, { eventId: `finals:${dispatchHash([input.sessionId, input.eventId])}`, rawIdentifier: input.rawIdentifier, identifierType: input.identifierType, namespace: input.namespace, type: input.confirmPlacement ? "placement" : "presence", location: input.lane, capturedAt: input.capturedAt, capturedByUserId: input.capturedByUserId, captureMethod: input.captureMethod, deviceId: input.deviceId });
@@ -340,8 +351,8 @@ export async function recordFinalsScan(principal: Principal, raw: unknown) {
       changed = true;
     }
     if (["confirmed", "duplicate"].includes(outcome) && unitId) {
-      const redirects = await tx.dispatchFinalsScan.findMany({ where: { sessionId: session.id, unitId, reviewStatus: "open", outcome: "wrong_lane", expectedLane: input.lane, capturedAt: { lte: new Date(input.capturedAt) } }, select: { id: true, actualLane: true } });
-      await tx.dispatchFinalsScan.updateMany({ where: { id: { in: redirects.map((item) => item.id) } }, data: { reviewStatus: "resolved", reviewedAt: new Date(), reviewedByUserId: principal.userId, reviewReason: "New destination scan physically confirms the exact unit in its required lane.", resolvedByScanId: scan.id } });
+      const redirects = await tx.dispatchFinalsScan.findMany({ where: { session: { boardId: session.boardId, snapshot: { version: { lte: session.snapshot.version } } }, unitId, reviewStatus: "open", outcome: "wrong_lane", capturedAt: { lte: new Date(input.capturedAt) } }, select: { id: true, actualLane: true } });
+      await tx.dispatchFinalsScan.updateMany({ where: { id: { in: redirects.map((item) => item.id) } }, data: { reviewStatus: "resolved", reviewedAt: new Date(), reviewedByUserId: principal.userId, reviewReason: `New destination scan confirms the exact unit in current demand v${session.snapshot.version}, lane ${input.lane}. Prior observed/expected lanes remain original evidence.`, resolvedByScanId: scan.id } });
       if (redirects.length) changed = true;
     }
     if (!resolved) await amendLane(tx, principal, session.id, input.lane, "A later exception requires review before this lane remains signed off.", allocation ? [allocation.slotKey] : []);
@@ -359,43 +370,76 @@ export async function recordFinalsScan(principal: Principal, raw: unknown) {
   return { ...receipt, dispatchReview };
 }
 
+export const reviewFinalsExceptionInputSchema = z.object({ operationId: dispatchOperation, scanId: dispatchId, sessionId: dispatchId.describe("Current verification session; supply it to review a capture retained from an earlier demand version.").optional(), expectedSessionRevision: z.number().int().positive(), reason: dispatchReason }).strict();
 export async function reviewFinalsException(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, scanId: dispatchId, expectedSessionRevision: z.number().int().positive(), reason: dispatchReason }).strict().parse(raw);
+  const input = reviewFinalsExceptionInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "review_finals_exception", input, "dispatch.signoff", async (tx) => {
     const scan = await tx.dispatchFinalsScan.findUnique({ where: { id: input.scanId } });
     if (!scan) throw new DispatchError("Scan not found.", 404);
-    const session = await lockedFinalsSession(tx, scan.sessionId);
+    const session = await lockedFinalsSession(tx, input.sessionId ?? scan.sessionId);
+    const origin = await tx.dispatchFinalsSession.findUniqueOrThrow({ where: { id: scan.sessionId }, select: { boardId: true, snapshotId: true, snapshot: { select: { version: true } } } });
+    if (origin.boardId !== session.boardId || origin.snapshot.version > session.snapshot.version) throw new DispatchError("Review this capture in the current verification session for its own dispatch day/scope.", 409);
     if (session.board.headSnapshotId !== session.snapshotId || session.revision !== input.expectedSessionRevision) throw new DispatchError("Verification changed. Reload before reviewing the exception.", 409);
     if (["wrong_lane", "ambiguous", "unidentified", "ambiguous_requirement", "allocation_required", "unknown_lane", "office_conflict"].includes(scan.outcome)) {
       const correction = await tx.warehouseObservationCorrection.findFirst({ where: { observationId: scan.physicalObservationId }, orderBy: { revision: "desc" } });
+      const originalObservation = await tx.warehousePhysicalObservation.findUniqueOrThrow({ where: { id: scan.physicalObservationId }, select: { unitId: true } });
       const identity = await resolveWarehouseIdentifierInTransaction(tx, { value: scan.rawIdentifier, kind: "auto" });
-      const unitId = correction ? correction.unitId : identity.resolution === "resolved" ? identity.unitId : null;
+      // Revoking/reassigning an alias does not rewrite which appliance this
+      // original observation identified. Only an explicit observation correction
+      // changes that association; fresh lookup can resolve formerly unknown scans.
+      const unitId = correction ? correction.unitId : originalObservation.unitId ?? (identity.resolution === "resolved" ? identity.unitId : null);
+      if (unitId && scan.sessionId !== session.id && scan.outcome === "wrong_lane") {
+        const oldAllocation = await tx.dispatchAllocation.findFirst({ where: { snapshotId: origin.snapshotId, unitId }, orderBy: { createdAt: "desc" } });
+        const currentSlots = slotsOf(session.snapshot.slots);
+        const currentAllocations = await tx.dispatchAllocation.findMany({ where: { snapshotId: session.snapshotId, releasedAt: null }, select: { slotKey: true, unitId: true } });
+        const aliases = await tx.warehouseIdentifier.findMany({ where: { unitId, revokedAt: null }, select: { kind: true, namespace: true, value: true } });
+        const mayStillBeRequired = currentSlots.some((slot) => {
+          const allocated = currentAllocations.find((item) => item.slotKey === slot.slotKey);
+          if (allocated) return allocated.unitId === unitId;
+          if (slot.expectedUnit.unitId) return slot.expectedUnit.unitId === unitId;
+          if (!slot.expectedUnit.identifiers.length) return true;
+          return slot.expectedUnit.identifiers.every((reference) => aliases.some((alias) => alias.kind === reference.kind && alias.value === reference.value && (!reference.namespace || alias.namespace === reference.namespace)));
+        });
+        if (oldAllocation && !currentSlots.some((slot) => slot.slotKey === oldAllocation.slotKey) && !mayStillBeRequired) {
+          const observations = await tx.$queryRaw<{ id: string; type: string; location: string | null; capturedAt: Date }[]>`WITH effective AS (SELECT o.id,o.type,o.location,o."capturedAt" FROM "WarehousePhysicalObservation" o LEFT JOIN LATERAL (SELECT id,"unitId" FROM "WarehouseObservationCorrection" WHERE "observationId"=o.id ORDER BY revision DESC LIMIT 1) c ON true WHERE CASE WHEN c.id IS NOT NULL THEN c."unitId" ELSE o."unitId" END=${unitId}) SELECT * FROM effective WHERE "capturedAt"=(SELECT MAX("capturedAt") FROM effective) ORDER BY id DESC`;
+          const latest = observations[0];
+          const conflict = latest && observations.some((observation) => observation.type !== latest.type || observation.location !== latest.location);
+          if (latest && !conflict && latest.capturedAt > scan.capturedAt && (latest.type === "departure" || (latest.type === "placement" && latest.location && latest.location.toUpperCase() !== scan.actualLane.toUpperCase()))) {
+            const updated = await tx.dispatchFinalsScan.update({ where: { id: scan.id }, data: { reviewStatus: "resolved", reviewedByUserId: principal.userId, reviewedAt: new Date(), reviewReason: `${input.reason} Current demand removed this unit requirement; later exact-unit ${latest.type} evidence resolves the prior lane issue without fulfilling any delivery quantity.` } });
+            await tx.dispatchFinalsSession.update({ where: { id: session.id }, data: { revision: { increment: 1 } } });
+            await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "exception_resolved_after_requirement_removed", note: input.reason, payload: { scanId: scan.id, originSessionId: scan.sessionId, originSnapshotVersion: origin.snapshot.version, removedSlotKey: oldAllocation.slotKey, unitId, resolutionObservationId: latest.id, type: latest.type, location: latest.location, capturedAt: latest.capturedAt.toISOString(), fulfillmentAdded: false } });
+            return { scan: dispatchPlain(updated), fulfillmentAdded: false, resolutionObservation: { observationId: latest.id, type: latest.type, location: latest.location, capturedAt: latest.capturedAt.toISOString() } };
+          }
+        }
+      }
       const credit = unitId ? await tx.dispatchFinalsCredit.findFirst({ where: { sessionId: session.id, unitId, status: "confirmed" } }) : null;
       const proof = credit ? await tx.dispatchFinalsScan.findFirst({ where: { sessionId: session.id, unitId, actualLane: credit.lane, outcome: { in: ["confirmed", "duplicate"] }, capturedAt: { gte: scan.capturedAt } }, orderBy: { capturedAt: "desc" } }) : null;
       if (!credit || !proof || !await creditStillSupported(tx, credit, slotsOf(session.snapshot.slots).map((slot) => slot.lane))) throw new DispatchError("Resolve identity/allocation and obtain a new exact destination confirmation first. A review note cannot manufacture fulfillment.", 409);
       if ((await currentOfficeDispatchRestrictions(tx, credit.unitId)).length) throw new DispatchError("Resolve current exact-unit office handling before resolving this exception.", 409);
       const updated = await tx.dispatchFinalsScan.update({ where: { id: scan.id }, data: { reviewStatus: "resolved", reviewedByUserId: principal.userId, reviewedAt: new Date(), reviewReason: input.reason, resolvedByScanId: proof.id } });
       await tx.dispatchFinalsSession.update({ where: { id: session.id }, data: { revision: { increment: 1 } } });
-      await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "exception_resolved_by_physical_proof", note: input.reason, payload: { scanId: scan.id, destinationScanId: proof.id, unitId } });
+      await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "exception_resolved_by_physical_proof", note: input.reason, payload: { scanId: scan.id, originSessionId: scan.sessionId, originSnapshotVersion: origin.snapshot.version, destinationScanId: proof.id, unitId } });
       return { scan: dispatchPlain(updated), fulfillmentAdded: false };
     }
     const updated = await tx.dispatchFinalsScan.update({ where: { id: scan.id }, data: { reviewStatus: "accepted", reviewedByUserId: principal.userId, reviewedAt: new Date(), reviewReason: input.reason } });
     await tx.dispatchFinalsSession.update({ where: { id: session.id }, data: { revision: { increment: 1 } } });
-    await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "exception_accepted", note: input.reason, payload: { scanId: scan.id, outcome: scan.outcome } });
+    await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "exception_accepted", note: input.reason, payload: { scanId: scan.id, originSessionId: scan.sessionId, originSnapshotVersion: origin.snapshot.version, outcome: scan.outcome } });
     return { scan: dispatchPlain(updated), fulfillmentAdded: false };
   }, true);
 }
 
+export const confirmDispatchLaneEmptyInputSchema = z.object({ operationId: dispatchOperation, sessionId: dispatchId, expectedHeadId: dispatchId, lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), evidence: dispatchReason }).strict();
 export async function confirmDispatchLaneEmpty(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, sessionId: dispatchId, expectedHeadId: dispatchId, lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), evidence: dispatchReason }).strict().parse(raw);
+  const input = confirmDispatchLaneEmptyInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "lane_empty", input, "workflow.execute", async (tx) => {
     const session = await lockedFinalsSession(tx, input.sessionId);
     if (session.board.headSnapshotId !== input.expectedHeadId || session.snapshotId !== input.expectedHeadId) throw new DispatchError("Demand changed. Refresh before confirming the lane.", 409);
     if (slotsOf(session.snapshot.slots).some((slot) => slot.lane === input.lane)) throw new DispatchError("This lane has required units; scan/confirm them instead of declaring it empty.");
-    if (!await tx.dispatchAmendment.count({ where: { sessionId: session.id, lane: input.lane } })) throw new DispatchError("This lane is outside this dispatch verification scope.");
+    const inheritedScope = { boardId: session.boardId, snapshot: { version: { lte: session.snapshot.version } } };
+    if (!await tx.dispatchAmendment.count({ where: { session: inheritedScope, lane: input.lane } }) && !await tx.dispatchFinalsScan.count({ where: { session: inheritedScope, actualLane: input.lane, reviewStatus: { in: ["open", "accepted"] } } })) throw new DispatchError("This lane is outside this dispatch verification scope.");
     const clearance = { userId: principal.userId, confirmedAt: new Date().toISOString(), evidence: input.evidence, meaning: "Human-confirmed empty lane; no unit departure/destination is inferred." };
     await tx.dispatchFinalsSession.update({ where: { id: session.id }, data: { laneClearances: asJson({ ...objectJson(session.laneClearances), [input.lane]: clearance }), revision: { increment: 1 } } });
-    await tx.dispatchFinalsScan.updateMany({ where: { sessionId: session.id, actualLane: input.lane, reviewStatus: "open" }, data: { reviewStatus: "resolved", reviewedAt: new Date(), reviewedByUserId: principal.userId, reviewReason: `Lane explicitly inspected empty: ${input.evidence}` } });
+    await tx.dispatchFinalsScan.updateMany({ where: { session: inheritedScope, actualLane: input.lane, reviewStatus: "open" }, data: { reviewStatus: "resolved", reviewedAt: new Date(), reviewedByUserId: principal.userId, reviewReason: `Lane explicitly inspected empty in current demand v${session.snapshot.version}: ${input.evidence}` } });
     await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "lane_empty_confirmed", note: input.evidence, payload: { lane: input.lane, clearance } });
     return { lane: input.lane, clearance, destinationRequirementsFulfilled: false };
   });
@@ -405,8 +449,10 @@ async function finalsView(tx: Prisma.TransactionClient, sessionId: string) {
   const session = await tx.dispatchFinalsSession.findUnique({ where: { id: sessionId }, include: { board: true, snapshot: { include: { allocations: { where: { releasedAt: null } } } }, credits: { where: { status: "confirmed" } }, signoffs: { orderBy: [{ lane: "asc" }, { version: "desc" }] }, amendments: { orderBy: { createdAt: "desc" } } } });
   if (!session) throw new DispatchError("Lane verification session not found.", 404);
   const slots = slotsOf(session.snapshot.slots);
-  const exceptions = await tx.dispatchFinalsScan.findMany({ where: { sessionId, reviewStatus: { in: ["open", "accepted"] } }, orderBy: [{ receivedAt: "desc" }, { id: "desc" }] });
-  const lanes = [...new Set([...slots.map((slot) => slot.lane), ...session.amendments.map((item) => item.lane), ...exceptions.map((item) => item.actualLane)])].sort();
+  const inheritedScope = { boardId: session.boardId, snapshot: { version: { lte: session.snapshot.version } } };
+  const exceptions = (await tx.dispatchFinalsScan.findMany({ where: { session: inheritedScope, reviewStatus: { in: ["open", "accepted"] } }, include: { session: { select: { snapshot: { select: { version: true } } } } }, orderBy: [{ receivedAt: "desc" }, { id: "desc" }] })).map(({ session: origin, ...scan }) => ({ ...scan, originSessionId: scan.sessionId, originSnapshotVersion: origin.snapshot.version, carriedFromPriorVersion: scan.sessionId !== sessionId }));
+  const inheritedAmendments = await tx.dispatchAmendment.findMany({ where: { session: inheritedScope, resolvedAt: null }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
+  const lanes = [...new Set([...slots.map((slot) => slot.lane), ...session.amendments.map((item) => item.lane), ...inheritedAmendments.map((item) => item.lane), ...exceptions.map((item) => item.actualLane), ...Object.keys(objectJson(session.laneClearances)), ...session.signoffs.map((item) => item.lane)])].sort();
   const credits: (typeof session.credits[number] & { physicallySupported: boolean })[] = [];
   for (const credit of session.credits) credits.push({ ...credit, physicallySupported: await creditStillSupported(tx, credit, lanes) });
   const officeConflicts = (await tx.officeDisposition.findMany({ where: { unitId: { in: session.snapshot.allocations.map((item) => item.unitId) }, status: { in: ["active", "triggered", "executed"] }, revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }], kind: { in: ["hold", "customer_property", "rtv", "conditional_rtv"] } }, select: { id: true, unitId: true, kind: true, status: true, instruction: true } })).filter((item) => item.kind !== "conditional_rtv" || ["triggered", "executed"].includes(item.status));
@@ -423,19 +469,20 @@ async function finalsView(tx: Prisma.TransactionClient, sessionId: string) {
         return { ...slot, allocation: allocation ? dispatchPlain(allocation) : null, confirmation: credit && !officeBlocked ? dispatchPlain(credit) : null, physicalConfirmation: credit ? dispatchPlain(credit) : null, officeBlocked };
       });
       const openExceptions = exceptions.filter((item) => item.actualLane === lane && item.reviewStatus === "open");
-      const unresolvedAmendments = session.amendments.filter((item) => item.lane === lane && !item.resolvedAt);
+      const unresolvedAmendments = inheritedAmendments.filter((item) => item.lane === lane);
       const latestSignoff = session.signoffs.find((item) => item.lane === lane) ?? null;
       const conflicts = officeConflicts.filter((item) => required.some((slot) => slot.allocation?.unitId === item.unitId));
       const complete = required.every((slot) => slot.confirmation) && (required.length > 0 || Boolean(clearances[lane]));
       return { lane, required, requiredCount: required.length, confirmedCount: required.filter((slot) => slot.confirmation).length, complete, officeConflicts: conflicts, openExceptions: dispatchPlain(openExceptions), acceptedExceptions: dispatchPlain(exceptions.filter((item) => item.actualLane === lane && item.reviewStatus === "accepted")), amendments: dispatchPlain(unresolvedAmendments), latestSignoff: dispatchPlain(latestSignoff), carriedSignoff: carried[lane] ?? null, emptyClearance: clearances[lane] ?? null, needsRecheck: !complete || conflicts.length > 0 || openExceptions.length > 0 || unresolvedAmendments.length > 0 || (!latestSignoff && !carried[lane]), invalidatedPhysicalProofs: credits.filter((item) => item.lane === lane && !item.physicallySupported).map((item) => item.id) };
     }),
-    signoffs: dispatchPlain(session.signoffs), amendments: dispatchPlain(session.amendments), sourceNotice: dispatchSourceNotice,
+    signoffs: dispatchPlain(session.signoffs), amendments: dispatchPlain([...new Map([...session.amendments, ...inheritedAmendments].map((item) => [item.id, item])).values()]), sourceNotice: dispatchSourceNotice,
   };
 }
 
+export const getFinalsSessionInputSchema = z.object({ sessionId: dispatchId }).strict();
 export async function getFinalsSession(principal: Principal, raw: unknown) {
   assertCapability(principal, "workflow.read");
-  const { sessionId } = z.object({ sessionId: dispatchId }).strict().parse(raw);
+  const { sessionId } = getFinalsSessionInputSchema.parse(raw);
   return prisma.$transaction((tx) => finalsView(tx, sessionId), { isolationLevel: "RepeatableRead", timeout: 60_000 });
 }
 
@@ -453,8 +500,9 @@ export async function getDispatchDashboardInTransaction(tx: Prisma.TransactionCl
   return { scopes: results, hasMore: boards.length > 5, sourceNotice: dispatchSourceNotice };
 }
 
+export const signOffDispatchLaneInputSchema = z.object({ operationId: dispatchOperation, sessionId: dispatchId, lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), expectedSessionRevision: z.number().int().positive(), evidence: dispatchReason }).strict();
 export async function signOffDispatchLane(principal: Principal, raw: unknown) {
-  const input = z.object({ operationId: dispatchOperation, sessionId: dispatchId, lane: z.string().trim().min(1).max(100).transform((value) => value.toUpperCase()), expectedSessionRevision: z.number().int().positive(), evidence: dispatchReason }).strict().parse(raw);
+  const input = signOffDispatchLaneInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "signoff_lane", input, "dispatch.signoff", async (tx) => {
     const session = await lockedFinalsSession(tx, input.sessionId);
     if (session.board.headSnapshotId !== session.snapshotId || session.revision !== input.expectedSessionRevision) throw new DispatchError("Demand or verification changed. Refresh before signing this lane.", 409);
@@ -466,7 +514,7 @@ export async function signOffDispatchLane(principal: Principal, raw: unknown) {
     const previous = await tx.dispatchLaneSignoff.findFirst({ where: { sessionId: session.id, lane: input.lane }, orderBy: { version: "desc" } });
     const payload = { snapshotId: session.snapshotId, snapshotVersion: session.snapshot.version, sourceKind: session.snapshot.sourceKind, sourceAsOf: session.snapshot.sourceAsOf.toISOString(), sourceRef: session.snapshot.sourceRef, sessionRevision: session.revision, lane: input.lane, requirements: lane.required, acceptedExceptions: lane.acceptedExceptions, emptyClearance: lane.emptyClearance, evidence: input.evidence, sourceNotice: dispatchSourceNotice };
     const signature = await tx.dispatchLaneSignoff.create({ data: { sessionId: session.id, lane: input.lane, version: (previous?.version ?? 0) + 1, snapshotId: session.snapshotId, sourceAsOf: session.snapshot.sourceAsOf, payload: asJson(payload), payloadHash: dispatchHash(payload), signedByUserId: principal.userId } });
-    await tx.dispatchAmendment.updateMany({ where: { sessionId: session.id, lane: input.lane, resolvedAt: null }, data: { resolvedAt: signature.signedAt, resolvedBySignoffId: signature.id } });
+    await tx.dispatchAmendment.updateMany({ where: { session: { boardId: session.boardId, snapshot: { version: { lte: session.snapshot.version } } }, lane: input.lane, resolvedAt: null }, data: { resolvedAt: signature.signedAt, resolvedBySignoffId: signature.id } });
     const carried = objectJson(session.carriedSignoffs); delete carried[input.lane];
     await tx.dispatchFinalsSession.update({ where: { id: session.id }, data: { revision: { increment: 1 }, carriedSignoffs: asJson(carried) } });
     await dispatchEvent(tx, principal, { boardId: session.boardId, snapshotId: session.snapshotId, sessionId: session.id, action: "lane_signed", note: input.evidence, payload: { signoffId: signature.id, lane: input.lane, version: signature.version, payloadHash: signature.payloadHash } });
@@ -474,31 +522,35 @@ export async function signOffDispatchLane(principal: Principal, raw: unknown) {
   }, true);
 }
 
+export const listDispatchBoardsInputSchema = z.object({ day: dispatchDay.optional(), afterId: dispatchId.optional(), limit: z.number().int().min(1).max(100).default(30) }).strict();
 export async function listDispatchBoards(principal: Principal, raw: unknown = {}) {
   assertCapability(principal, "workflow.read");
-  const input = z.object({ day: dispatchDay.optional(), afterId: dispatchId.optional(), limit: z.number().int().min(1).max(100).default(30) }).strict().parse(raw);
+  const input = listDispatchBoardsInputSchema.parse(raw);
   const boards = await prisma.dispatchBoard.findMany({ where: { ...(input.day ? { day: input.day } : {}), ...(input.afterId ? { id: { gt: input.afterId } } : {}) }, include: { headSnapshot: { include: { finalsSession: { select: { id: true } } } }, _count: { select: { snapshots: true } } }, orderBy: { id: "asc" }, take: input.limit + 1 });
   return { boards: dispatchPlain(boards.slice(0, input.limit)), nextAfterId: boards.length > input.limit ? boards[input.limit - 1].id : null, sourceNotice: dispatchSourceNotice };
 }
 
+export const getDispatchBoardInputSchema = z.object({ boardId: dispatchId }).strict();
 export async function getDispatchBoard(principal: Principal, raw: unknown) {
   assertCapability(principal, "workflow.read");
-  const input = z.object({ boardId: dispatchId }).strict().parse(raw);
+  const input = getDispatchBoardInputSchema.parse(raw);
   const board = await prisma.dispatchBoard.findUnique({ where: { id: input.boardId }, include: { snapshots: { orderBy: { version: "desc" }, select: { id: true, version: true, status: true, baseHeadId: true, coverage: true, sourceAsOf: true, sourceKind: true, sourceRef: true, note: true, createdAt: true, approvedAt: true, finalsSession: { select: { id: true } } } } } });
   if (!board) throw new DispatchError("Dispatch board not found.", 404);
   return { board: dispatchPlain(board), sourceNotice: dispatchSourceNotice };
 }
 
+export const getFinalsScanHistoryInputSchema = z.object({ sessionId: dispatchId, afterId: dispatchId.optional(), limit: z.number().int().min(1).max(200).default(50) }).strict();
 export async function getFinalsScanHistory(principal: Principal, raw: unknown) {
   assertCapability(principal, "workflow.read");
-  const input = z.object({ sessionId: dispatchId, afterId: dispatchId.optional(), limit: z.number().int().min(1).max(200).default(50) }).strict().parse(raw);
+  const input = getFinalsScanHistoryInputSchema.parse(raw);
   const scans = await prisma.dispatchFinalsScan.findMany({ where: { sessionId: input.sessionId, ...(input.afterId ? { id: { gt: input.afterId } } : {}) }, orderBy: { id: "asc" }, take: input.limit + 1 });
   return { scans: dispatchPlain(scans.slice(0, input.limit)), nextAfterId: scans.length > input.limit ? scans[input.limit - 1].id : null };
 }
 
 // Derived follow-up only. It never authorizes movement, allocates stock or sends upstream requests.
+export const reviewDispatchObservationInputSchema = z.object({ observationId: dispatchId }).strict();
 export async function reviewDispatchObservation(principal: Principal, raw: unknown) {
-  const input = z.object({ observationId: dispatchId }).strict().parse(raw);
+  const input = reviewDispatchObservationInputSchema.parse(raw);
   const capability = principal.capabilities.includes("inventory.write") ? "inventory.write" : "workflow.execute";
   return prisma.$transaction(async (tx) => {
     await assertCurrentPrincipal(tx, principal, capability);

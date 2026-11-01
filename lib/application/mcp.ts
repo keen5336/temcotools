@@ -4,7 +4,7 @@ import { AuthorizationError, type Principal } from "@/lib/auth/principal";
 import { GrantError } from "./grants";
 import { getMarsStatusRules, getMarsUnit, getMarsWorkflowSummary, searchMarsUnits } from "./mars-queries";
 import { MARS_OPERATIONAL_BUCKETS } from "@/lib/mars/classification";
-import { lookupWarehouseInventory } from "@/lib/warehouse-lookup";
+import { lookupWarehouseInventory, warehouseLookupInput } from "@/lib/warehouse-lookup";
 import { executeApplicationAction, listApplicationActions } from "./actions";
 
 export function createApplicationMcpServer(authenticate: () => Promise<Principal>) {
@@ -28,7 +28,7 @@ export function createApplicationMcpServer(authenticate: () => Promise<Principal
   server.registerTool("application_action", { title: "Run a shared application action", description: "Use a name from application_actions. The same validation, current authority and domain receipts apply as in the UI. Hardware and human authenticator steps still require their real device/user.", inputSchema: { action: z.string().min(1).max(100), input: z.record(z.string(), z.unknown()).default({}) } }, input => execute(principal => executeApplicationAction(principal, input.action, input.input)));
   server.registerTool("warehouse_lookup", {
     title: "Find warehouse inventory", description: "Look up one exact WMS LPN or list order candidates. A report row does not prove physical stock.",
-    inputSchema: { kind: z.enum(["lpn", "order"]), value: z.string().trim().min(1).max(500), limit: z.number().int().min(1).max(50).optional() },
+    inputSchema: warehouseLookupInput.shape,
   }, input => execute(principal => lookupWarehouseInventory(principal, input)));
   server.registerTool("mars_workflow_summary", { title: "MARS workflow summary", description: "Imported MARS workflow counts; current user authorization required.", inputSchema: {} }, () => execute(getMarsWorkflowSummary));
   server.registerTool("mars_search_units", {

@@ -1,11 +1,13 @@
 import JSZip from "jszip";
 import type { Readable } from "node:stream";
+import { z } from "zod";
 
 export const MAX_RETAINED_WORKBOOK_BYTES = 16 * 1024 * 1024;
 export const MAX_RETAINED_WORKBOOK_ROWS = 20_000;
+export const retainedWorkbookBase64Input = z.string().min(1).max(Math.ceil(MAX_RETAINED_WORKBOOK_BYTES / 3) * 4).describe("Canonical base64 XLSX content, at most 16 MiB decoded; ZIP expansion, row and cell limits also apply before parsing.");
 export class RetainedWorkbookError extends Error { constructor(message: string, public status = 400) { super(message); } }
 export function decodeRetainedWorkbookBase64(input: unknown): Buffer {
-  if (typeof input !== "string" || !input.length || input.length > Math.ceil(MAX_RETAINED_WORKBOOK_BYTES / 3) * 4 || input.length % 4 || /[^A-Za-z0-9+/=]/.test(input)) throw new RetainedWorkbookError("Provide a base64 XLSX workbook within the 16 MiB limit.", 413);
+  if (!retainedWorkbookBase64Input.safeParse(input).success || typeof input !== "string" || input.length % 4 || /[^A-Za-z0-9+/=]/.test(input)) throw new RetainedWorkbookError("Provide a base64 XLSX workbook within the 16 MiB limit.", 413);
   const bytes = Buffer.from(input, "base64");
   if (!bytes.length || bytes.length > MAX_RETAINED_WORKBOOK_BYTES || bytes.toString("base64") !== input) throw new RetainedWorkbookError("The workbook base64 content is invalid or too large.", 413);
   return bytes;

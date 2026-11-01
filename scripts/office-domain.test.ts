@@ -86,6 +86,8 @@ test("durable office decisions preserve exact-unit exchange, custody and authori
       await office.recordOfficeDispositionExecution(principal, { operationId: `${prefix}-right-execution`, dispositionId: rtvId, observationId: aPlacement.observation.observationId, evidence: "Synthetic operator confirms actual original A placement at RTV." });
       assert.equal((await prisma.officeDisposition.findUniqueOrThrow({ where: { id: rtvId } })).status, "executed");
       assert.equal(await prisma.officeDispositionExecution.count({ where: { dispositionId: rtvId } }), 1);
+      const afterPlacement = await office.getExpectedReturnWorklist(principal, { unitIds: [a.id] });
+      assert.ok(afterPlacement.items.some((item) => item.unitId === a.id && item.kind === "checked_in_rtv_without_submission"), "An executed RTV placement remains unfinished submission work; it must not disappear before a submission exists.");
     });
     await t.test("all five return gaps carry provenance; reschedule B without MARS is not forced into RTV", async () => {
       await office.createOfficeReturnExpectation(principal, { operationId: `${prefix}-c-return`, unitId: c.id, activatedAt: stamp(-day), expectedAt: stamp(-60 * 60_000), sourceAsOf: stamp(0), sourceRef: "Synthetic office return instruction", evidence: "Synthetic C expected back from a reviewed route outcome, not checked in." });
