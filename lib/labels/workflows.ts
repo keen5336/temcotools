@@ -97,18 +97,19 @@ export function previewLabelDraft(principal: Principal, input: unknown) {
   return { ...renderLabelVersion({ id: "draft-preview", ...draft }, fields), widthMm: draft.widthMm, heightMm: draft.heightMm, dpi: draft.dpi, limitation: "Content and ZPL preview only; actual printer raster/media qualification is separate." };
 }
 export async function evaluateLabel(principal: Principal, input: { purpose: LabelDraft["purpose"]; unitId: string; fields: unknown }) {
-  assertCapability(principal, "labels.read");
+  return prisma.$transaction(async tx => {
+  const current = await assertCurrentPrincipal(tx, principal, "labels.read"); assertCapability(current, "inventory.read");
   const purpose = purposeSchema.parse(input.purpose), unitId = z.string().min(1).max(100).parse(input.unitId);
   const [unit, workflow, observations, issued] = await Promise.all([
-    prisma.warehouseUnit.findUnique({ where: { id: unitId }, select: { id: true } }),
-    prisma.labelWorkflow.findUnique({ where: { purpose }, include: { publishedVersion: true } }),
-    prisma.$queryRaw<{ id: string; type: string; location: string | null; capturedAt: Date; receivedAt: Date; userId: string }[]>`
+    tx.warehouseUnit.findUnique({ where: { id: unitId }, select: { id: true } }),
+    tx.labelWorkflow.findUnique({ where: { purpose }, include: { publishedVersion: true } }),
+    tx.$queryRaw<{ id: string; type: string; location: string | null; capturedAt: Date; receivedAt: Date; userId: string }[]>`
       WITH effective AS (
         SELECT o.id,o.type,o.location,o."capturedAt",o."receivedAt",o."userId" FROM "WarehousePhysicalObservation" o
         LEFT JOIN LATERAL (SELECT id,"unitId" FROM "WarehouseObservationCorrection" WHERE "observationId"=o.id ORDER BY revision DESC LIMIT 1) c ON true
         WHERE CASE WHEN c.id IS NOT NULL THEN c."unitId" ELSE o."unitId" END=${unitId}
       ) SELECT * FROM effective WHERE "capturedAt"=(SELECT max("capturedAt") FROM effective) ORDER BY "receivedAt" DESC,id DESC`,
-    prisma.labelIssuance.findMany({ where: { unitId, purpose }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, contentFingerprint: true, state: true, createdAt: true, dispatchedAt: true, appliedAt: true, physicallyConfirmedAt: true } }),
+    tx.labelIssuance.findMany({ where: { unitId, purpose }, orderBy: { createdAt: "desc" }, take: 20, select: { id: true, contentFingerprint: true, state: true, createdAt: true, dispatchedAt: true, appliedAt: true, physicallyConfirmedAt: true } }),
   ]);
   if (!unit) throw new LabelError("Physical unit not found.", 404);
   const latest = observations[0];
@@ -117,8 +118,9 @@ export async function evaluateLabel(principal: Principal, input: { purpose: Labe
   if (!workflow?.enabled || !workflow.publishedVersion) return { available: false, reason: "No enabled published label workflow.", lastObserved: observed, issued };
   const rendered = renderLabelVersion(workflow.publishedVersion, { ...(input.fields && typeof input.fields === "object" ? input.fields : {}), unitId });
   const [same, unresolved] = await Promise.all([
-    prisma.labelIssuance.findFirst({ where: { unitId, purpose, contentFingerprint: rendered.contentFingerprint, state: { notIn: ["cancelled", "not_sent", "verified_not_printed"] } }, select: { id: true }, orderBy: { createdAt: "desc" } }),
-    prisma.labelIssuance.findFirst({ where: { unitId, purpose, state: { in: ["dispatching", "unknown"] } }, select: { id: true }, orderBy: { createdAt: "desc" } }),
+    tx.labelIssuance.findFirst({ where: { unitId, purpose, contentFingerprint: rendered.contentFingerprint, state: { notIn: ["cancelled", "not_sent", "verified_not_printed"] } }, select: { id: true }, orderBy: { createdAt: "desc" } }),
+    tx.labelIssuance.findFirst({ where: { unitId, purpose, state: { in: ["dispatching", "unknown"] } }, select: { id: true }, orderBy: { createdAt: "desc" } }),
   ]);
   return { available: true, versionId: workflow.publishedVersion.id, contentFingerprint: rendered.contentFingerprint, due: !same, blockedByUnknownIssuanceId: unresolved?.id ?? null, decision: rendered.decision, lastObserved: observed, lastIssued: issued[0] ?? null, issued };
+  });
 }

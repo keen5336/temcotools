@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { dmpConfig } from "@/lib/api-relay/config";
 import { MAX_CONCURRENT, MAX_RESPONSE_BYTES } from "@/scripts/api-relay/protocol.mjs";
 import { builtinDmpGrant } from "@/lib/api-relay/payload-policy";
+import { MARS_LABEL_HELPER_SCRIPT } from "@/lib/mars-label-bookmarklet";
 
 // Preserve the existing loader's source construction. No credential or named
 // upstream operation is embedded into the bookmarklet/executor.
@@ -16,4 +17,8 @@ export function builtinDmpSource(appOrigin: string) {
   const protocol = readFileSync(join(process.cwd(), "scripts/api-relay/protocol.mjs"), "utf8").replace(/^export /gm, "");
   const executor = readFileSync(join(process.cwd(), "scripts/api-relay/executor.mjs"), "utf8").replace(/^export /gm, "");
   return { source: `(()=>{${protocol}\n${executor}\nstartDmpRelay(${JSON.stringify(options)});})();`, targetOrigins: config.origins };
+}
+export function builtinMarsLabelSource(appOrigin: string) {
+  const origin = new URL(appOrigin).origin;
+  return { source: `${MARS_LABEL_HELPER_SCRIPT}(${JSON.stringify({ reviewPage: `${origin}/tools/rtv-label` })});`, targetOrigins: ["https://delivery-management.homedepot.com"] };
 }

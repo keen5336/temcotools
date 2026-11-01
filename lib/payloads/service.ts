@@ -5,6 +5,7 @@ import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { dmpConfig } from "@/lib/api-relay/config";
 import { PayloadError, payloadContentHash, payloadIdSchema, sourceChanges, validatePayloadDraft, type PayloadDraft, type PublishedPayloadVersion } from "./model";
 import { payloadPreviewDocument } from "./types";
+import { MARS_LABEL_PAYLOAD_ID } from "@/lib/mars-label-bookmarklet";
 
 const versionSummary = { id: true, version: true, contentHash: true, publishedAt: true, publishedByUserId: true, note: true } as const;
 function admin(principal: Principal, recent = false) {
@@ -19,6 +20,7 @@ async function currentAdmin(tx: Prisma.TransactionClient, principal: Principal, 
 }
 function contract(payloadId: string, draft: PayloadDraft) {
   if (payloadId === "dmp-relay" && draft.purpose !== "dmp_relay") throw new PayloadError("The default DMP loader must keep its DMP relay purpose.");
+  if (payloadId === MARS_LABEL_PAYLOAD_ID && draft.purpose !== "mars_label_helper") throw new PayloadError("The default MARS detail loader must keep its MARS helper purpose.");
   if (draft.purpose === "mars_label_helper" && draft.operationNames.length) throw new PayloadError("MARS label helpers do not grant upstream mutation operations.");
   if (draft.purpose === "dmp_relay") {
     const known = dmpConfig().operations;
@@ -38,6 +40,12 @@ async function lockPayload(tx: Prisma.TransactionClient, payloadId: string, expe
 export async function listPayloads(principal: Principal) {
   admin(principal);
   return prisma.payload.findMany({ select: { id: true, name: true, purpose: true, targetOrigins: true, enabled: true, revision: true, publishedVersionId: true, updatedAt: true, updatedByUserId: true }, orderBy: { name: "asc" } });
+}
+export async function getBuiltinPayloadSources(principal: Principal, fallbackOrigin?: string) {
+  await prisma.$transaction(tx => currentAdmin(tx, principal));
+  const origin = new URL(process.env.NEXT_PUBLIC_APP_URL || process.env.API_RELAY_PUBLIC_ORIGIN || fallbackOrigin || "http://localhost:3000").origin;
+  const { builtinDmpSource, builtinMarsLabelSource } = await import("./builtin");
+  return { builtinDmp: builtinDmpSource(origin), builtinMarsLabel: builtinMarsLabelSource(origin) };
 }
 export async function getPayload(principal: Principal, payloadId: string) {
   admin(principal);

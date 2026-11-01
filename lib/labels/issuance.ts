@@ -7,6 +7,7 @@ import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { currentPrintingDevice, hashDeviceToken } from "./devices";
 import { fingerprint, LabelError, renderLabelVersion, matchesApprovedLegacyTemplate } from "./model";
 import { LABEL_PURPOSES, type LabelDispatchClaim } from "./types";
+import { assertUnitContextScopes, deriveUnitLabelContext, unitLabelDispatchDay, validateAutomaticUnitLabelObservation } from "./unit-context";
 
 const idSchema = z.string().min(1).max(100);
 const prepareSchema = z.object({ operationId: z.string().min(16).max(100), unitId: idSchema.optional(), purpose: z.enum(LABEL_PURPOSES), printerId: idSchema, versionId: idSchema.optional(), fields: z.record(z.string(), z.string().max(2000)).default({}), legacyZpl: z.string().min(1).max(128 * 1024).optional(), mode: z.enum(["direct", "relay"]), deviceId: idSchema.optional(), automatic: z.boolean().default(false), reprintOf: idSchema.optional(), reason: z.string().trim().min(3).max(500).optional() });
@@ -20,10 +21,11 @@ async function lockIssuance(tx: Prisma.TransactionClient, issuanceId: string) {
   if (!row) throw new LabelError("Label issuance not found.", 404);
   return row;
 }
-function receipt(row: LabelIssuance) {
+export function labelIssuanceReceipt(row: LabelIssuance) {
   const selected = Object.fromEntries(Object.keys(receiptFields).map(key => [key, row[key as keyof LabelIssuance]])) as Pick<LabelIssuance, keyof typeof receiptFields>;
   return { ...selected, physicalOutput: row.appliedAt ? "applied_confirmed" : row.physicallyConfirmedAt ? "print_confirmed" : "unconfirmed" };
 }
+const receipt = labelIssuanceReceipt;
 async function currentRequester(tx: Prisma.TransactionClient, row: LabelIssuance) {
   const source = row.actorGrantId?.startsWith("oauth:") ? "oauth_grant" : row.actorGrantId ? "app_grant" : "session";
   if (row.actorAuthSource !== source) throw new AuthorizationError("Unsupported requesting authority. No print was dispatched.");
@@ -32,12 +34,17 @@ async function currentRequester(tx: Prisma.TransactionClient, row: LabelIssuance
 }
 const actorAuthSource = (principal: Principal) => principal.grantId?.startsWith("oauth:") ? "oauth_grant" : principal.grantId ? "app_grant" : "session";
 function canRead(principal: Principal, row: LabelIssuance) {
-  if (row.actorUserId === principal.userId) assertCapability(principal, "labels.print");
-  else assertCapability(principal, "labels.read");
+  if (principal.capabilities.includes("labels.read")) return;
+  if (row.actorUserId !== principal.userId) throw new AuthorizationError("Label read permission is required for another person's receipt.");
+  assertCapability(principal, "labels.print");
 }
 export async function prepareLabelIssuance(principal: Principal, input: unknown) {
+  return prisma.$transaction(tx => prepareLabelIssuanceInTransaction(tx, principal, input));
+}
+// Trusted application orchestration only; HTTP/MCP bodies cannot supply a DB
+// transaction or bypass the current actor and native issuance validation.
+export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionClient, principal: Principal, input: unknown) {
   const data = prepareSchema.parse(input), inputFingerprint = fingerprint(data);
-  return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`label-operation:${principal.userId}:${data.operationId}`}, 811))`;
     const existing = await tx.labelIssuance.findUnique({ where: { actorUserId_operationId: { actorUserId: principal.userId, operationId: data.operationId } } });
@@ -92,7 +99,6 @@ export async function prepareLabelIssuance(principal: Principal, input: unknown)
     await currentRequester(tx, issuance);
     await event(tx, issuance, principal.userId, data.reprintOf ? "reprint_prepared" : "prepared", data.reason ?? "Authorized label intent; no physical send yet.");
     return { created: true, issuance: receipt(issuance) };
-  });
 }
 export async function claimLabelDispatch(principal: Principal, input: unknown): Promise<LabelDispatchClaim | { dispatch: false; issuance: ReturnType<typeof receipt> }> {
   const data = z.object({ issuanceId: idSchema, deviceId: idSchema, deviceToken: z.string().min(30).max(100) }).parse(input);
@@ -101,7 +107,8 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
     const row = await lockIssuance(tx, data.issuanceId);
     if (row.deviceId !== device.id || row.mode !== device.mode || !device.printerIds.includes(row.printerId)) throw new AuthorizationError("This issuance is assigned to a different printing device.");
     if (row.state !== "queued") return { dispatch: false, issuance: receipt(row) };
-    try { await currentRequester(tx, row); }
+    let requester: Principal;
+    try { requester = await currentRequester(tx, row); }
     catch (error) {
       if (!(error instanceof AuthorizationError)) throw error;
       const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });
@@ -122,6 +129,26 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
       if (!matchesApprovedLegacyTemplate(row.renderedZpl, templates)) {
         const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });
         await event(tx, cancelled, principal.userId, "legacy_template_changed_before_dispatch", "The approved legacy template changed or was disabled before a device claim was issued.", device.id);
+        return { dispatch: false, issuance: receipt(cancelled) };
+      }
+    }
+    const contextBinding = await tx.labelIssuanceEvent.findFirst({ where: { issuanceId: row.id, action: "unit_context_bound" }, orderBy: { createdAt: "asc" } });
+    if (contextBinding) {
+      try {
+        assertUnitContextScopes(requester);
+        const binding = z.object({ unitId: z.string(), dispatchDay: z.string().optional(), wmsScope: z.string(), observationId: z.string().optional(), pickWaveItemId: z.string().optional() }).parse(JSON.parse(contextBinding.note));
+        if (binding.unitId !== row.unitId || !row.workflowVersionId) throw new LabelError("The label's stored unit binding is invalid.", 409);
+        const dispatchDay = await unitLabelDispatchDay(tx, binding);
+        const context = await deriveUnitLabelContext(tx, { unitId: binding.unitId, dispatchDay, wmsScope: binding.wmsScope });
+        const version = await tx.labelWorkflowVersion.findUnique({ where: { id: row.workflowVersionId } });
+        if (!version) throw new LabelError("The label version is unavailable.", 409);
+        const rendered = renderLabelVersion(version, context.fields);
+        if (rendered.contentFingerprint !== row.contentFingerprint || (row.automatic && !rendered.decision.automaticAllowed)) throw new LabelError("Relevant unit context or label rule changed before dispatch.", 409);
+        if (row.automatic) await validateAutomaticUnitLabelObservation(tx, row.actorUserId, context, binding.observationId);
+      } catch (error) {
+        if (!(error instanceof LabelError || error instanceof AuthorizationError || error instanceof z.ZodError || error instanceof SyntaxError)) throw error;
+        const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });
+        await event(tx, cancelled, principal.userId, "unit_context_changed_before_dispatch", "The current unit context no longer supports this queued snapshot. Re-evaluate current instructions; no print claim was issued.", device.id);
         return { dispatch: false, issuance: receipt(cancelled) };
       }
     }
@@ -181,14 +208,15 @@ export async function reconcileLabelIssuance(principal: Principal, input: unknow
   });
 }
 export async function getLabelIssuance(principal: Principal, issuanceId: string) {
-  const row = await prisma.labelIssuance.findUnique({ where: { id: idSchema.parse(issuanceId) }, include: { events: { orderBy: { createdAt: "asc" } } } });
-  if (!row) throw new LabelError("Label issuance not found.", 404);
-  canRead(principal, row);
-  return { ...receipt(row), events: row.events };
+  return prisma.$transaction(async tx => {
+    const current = await assertCurrentPrincipal(tx, principal);
+    const row = await tx.labelIssuance.findUnique({ where: { id: idSchema.parse(issuanceId) }, include: { events: { orderBy: { createdAt: "asc" } } } });
+    if (!row) throw new LabelError("Label issuance not found.", 404);
+    canRead(current, row); return { ...receipt(row), events: row.events };
+  });
 }
 export async function listLabelIssuances(principal: Principal, unitId?: string) {
-  assertCapability(principal, "labels.read");
-  return prisma.labelIssuance.findMany({ where: unitId ? { unitId: idSchema.parse(unitId) } : {}, select: receiptFields, orderBy: { createdAt: "desc" }, take: 100 });
+  return prisma.$transaction(async tx => { await assertCurrentPrincipal(tx, principal, "labels.read"); return tx.labelIssuance.findMany({ where: unitId ? { unitId: idSchema.parse(unitId) } : {}, select: receiptFields, orderBy: { createdAt: "desc" }, take: 100 }); });
 }
 export async function listPendingLabelDispatches(principal: Principal, input: unknown) {
   const data = z.object({ deviceId: idSchema, deviceToken: z.string().min(30).max(100) }).parse(input);

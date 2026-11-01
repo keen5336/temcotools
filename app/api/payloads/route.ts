@@ -1,6 +1,5 @@
 import { getCurrentPrincipal } from "@/lib/auth";
-import { createPayload, listPayloads, previewPayloadDraft } from "@/lib/payloads/service";
-import { builtinDmpSource } from "@/lib/payloads/builtin";
+import { createPayload, getBuiltinPayloadSources, listPayloads, previewPayloadDraft } from "@/lib/payloads/service";
 import { buildPayloadBookmarklet } from "@/lib/payloads/model";
 import { payloadReply, payloadFailure, readPayloadBody } from "@/lib/payloads/http";
 
@@ -12,7 +11,7 @@ export async function GET(request: Request) {
     const payloads = await listPayloads(principal);
     const url = new URL(request.url);
     const origin = new URL(process.env.NEXT_PUBLIC_APP_URL || url.origin).origin;
-    return payloadReply({ payloads: payloads.map(payload => ({ ...payload, loaderUrl: `${origin}/api/payloads/${payload.id}/loader`, bookmarklet: buildPayloadBookmarklet(`${origin}/api/payloads/${payload.id}/loader`) })), builtinDmp: builtinDmpSource(origin) });
+    return payloadReply({ payloads: payloads.map(payload => ({ ...payload, loaderUrl: `${origin}/api/payloads/${payload.id}/loader`, bookmarklet: buildPayloadBookmarklet(`${origin}/api/payloads/${payload.id}/loader`) })), ...await getBuiltinPayloadSources(principal, origin) });
   } catch (error) { return payloadFailure(error); }
 }
 export async function POST(request: Request) {

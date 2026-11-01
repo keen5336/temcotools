@@ -120,6 +120,12 @@ async function deliverLabelIssuance(printer: OperatorPrinter, issuance: { id: st
   });
 }
 
+export async function sendUnitLabel(printer: OperatorPrinter, input: { unitId: string; purpose: Exclude<LabelPurpose, "legacy_manual">; dispatchDay?: string; wmsScope?: string; operationId?: string; automatic?: boolean; observationId?: string; pickWaveItemId?: string }, relay: boolean) {
+  const device = relay ? null : await registerBrowserPrintingDevice([printer.id], "direct", "Direct browser printer");
+  const prepared = await labelRequest("/api/labels/units", { ...input, operationId: input.operationId ?? crypto.randomUUID(), printerId: printer.id, mode: relay ? "relay" : "direct", deviceId: device?.device.id, automatic: input.automatic ?? false });
+  return deliverLabelIssuance(printer, prepared.issuance, relay, device);
+}
+
 export async function startBrowserPrintingDevice(printerIds: string[], onStatus: (status: string) => void) {
   let stopped = false, busy = false, lastRenewed = Date.now();
   let device = await registerBrowserPrintingDevice(printerIds, "direct", "Connected browser printer");
