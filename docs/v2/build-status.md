@@ -8,12 +8,12 @@ Work only on `v2` in `/Volumes/MacDev/ProjectArchive/Development/worktrees/t3cod
 
 A subsequent A14/A18 audit found that phone administration was implemented/native-tested but absent from the browser receipts. The earlier conclusion that no independent package remained was premature. Work continues against the fixed running3e4cae7 release; later working changes are not yet advertised as an integrated PASS.
 
-The real390px admin run exercised password/MFA, payload lifecycle/loader, user/bundle/recovery and label configuration/publication. It exposed727px payload overflow. Source review additionally found a generic identified-unit label path accepting synthetic preview fields, stale full user edits restoring removed access, and several admin read/preview response races. These are being corrected at shared server and UI seams with focused native/browser acceptance; no production or physical effect occurred.
+The real390px admin run exercised password/MFA, payload lifecycle/loader, user/bundle/recovery and label configuration/publication. It exposed727px payload overflow. Source review additionally found a generic identified-unit label path accepting synthetic preview fields, stale full user/bundle edits restoring removed access, and several admin read/preview response races. The corrections are published at **`58ae39a43b79370561f9fbf4f89f5dd8fc0032d2`**; exact frozen host build95 routes PASS `20261101-013322-build-41651.json`. Native identity13 PASS `20261101-012456-build-39996.json`, operational-label7 PASS `20261101-010507-build-36374.json`, SDK discovery/native CAS2 PASS `20261101-013159-build-41248.json`, final integrated TSC/lint PASS `20261101-013210-build-41294/41295.json`. Phone response-reordering/width acceptance is running against that frozen build; it is not yet an integrated browser PASS or the running preview. No production or physical effect occurred.
 
-- Main owns payload-editor scope/preview/save guards, phone wrapping and final integration.
+- Main owns final integration and the immutable58ae39a release; user updates require `expectedAuthVersion`, existing custom bundles require their current fingerprint, and actual operational labels derive identified-unit fields on the server. Unknown effects and explicit snapshot reprints retain their separate semantics.
 - `/root/payload_manager` solely owns `scripts/admin-mobile.integration.test.ts`, using fresh synthetic `temcotools_v2_admin_mobile_test`, actual password/TOTP/HTTP and one ephemeral Next server; no live printing/upstream work.
-- `/root/access_foundation` owns required target `expectedAuthVersion` CAS and user/session/MFA UI races/layout, with native identity acceptance. No migration is required.
-- `/root/inventory_lookup` owns authoritative generic operational-label derivation/claim binding, label UI/config races and the canonical evaluation API/page guard, with native A/B/unknown/reprint acceptance.
+- `/root/access_foundation` is implementing a required per-document session binding: an old tab must not execute as a different person after another tab switches the shared cookie. Current native/server authority and bearer MCP remain authoritative. This subsequent package is not in58ae39a.
+- `/root/inventory_lookup` is finishing mobile connected-client setup against the implemented OAuth/shared grant actions; configured endpoints and actual reachability/owner enrollment will remain distinct. This subsequent package is not in58ae39a.
 
 The runtime checkpoint below remains available and unchanged while these fixes are integrated. The external qualification gates still apply; they do not justify stopping this newly identified independent work.
 
@@ -61,11 +61,10 @@ Next16.4.3/security updates removed high/critical dependency advisories. Product
 ## Active work and next action
 
 - Main integrated/published3e4cae7 and upgraded the isolated preview after qualification. The current independent administration package and exact helper ownership are recorded at the top of this file. The agreed full build is **not complete** while that package or the dependent adapters/acceptance gates remain unqualified.
-- `/root/inventory_lookup`: completed/frozen Office coverage, the owner's explicit-ID paging correction and executed-authority expiry acceptance; no active runner.
-- `/root/access_foundation`: completed/frozen shared physical-stock package and actual phone acceptance; tested selector fixes are retained with this checkpoint; no active runner.
-- `/root/payload_manager`: completed/frozen read-only review. All3 physical/Office stale-response/location findings were corrected and qualified; no active runner.
+- Office coverage, the owner's explicit-ID paging correction and executed-authority expiry acceptance remain published and qualified; no second writer or duplicate correction was started.
+- The current helper assignments and frozen administration candidate are recorded above. After phone qualification, integrate the independent tab/session and connected-client work, then recheck retained file-manager navigation before the next completion audit.
 
-These native helper references identify completed scoped runs, not scheduled workers. Remaining dependent packages are evidenced DMP unit/line/attempt normalization and official finals, supported MARS creation, actual Zebra/printer/browser qualification, real owner/client/recovery setup and approved cutover. Do not invent contracts or expand scope to fill time. See [bounded questions](open-questions.md), [MCP runbook](mcp-runbook.md) and [cutover runbook](cutover-runbook.md).
+These native helper references identify bounded assignments, not scheduled workers. Remaining dependent packages are evidenced DMP unit/line/attempt normalization and official finals, supported MARS creation, actual Zebra/printer/browser qualification, real owner/client/recovery setup and approved cutover. Do not invent contracts or expand scope to fill time. See [bounded questions](open-questions.md), [MCP runbook](mcp-runbook.md) and [cutover runbook](cutover-runbook.md).
 
 Owner steering late2026-10-31: Adam is home without DMP access. Keep private DMP/official-finals requests parked; no upstream samples or credentials are requested tonight. Remaining concrete gates:
 
