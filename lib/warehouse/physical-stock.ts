@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { prisma } from "@/lib/db";
+import { readSnapshot } from "@/lib/read-snapshot";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { deriveCustody, type PhysicalFact } from "@/lib/office/domain";
@@ -103,7 +103,8 @@ async function readPage(principal: Principal, input: Filters): Promise<PhysicalS
   const asOf = input.asOf ? new Date(input.asOf) : new Date();
   if (asOf.getTime()>Date.now()+5000) throw new WarehouseCommandError("Physical-stock asOf must not be in the future.");
   const needle = `%${input.search.replace(/[\\%_]/g,"\\$&")}%`;
-  return prisma.$transaction(async tx => {
+  // Keep this page's accepted-evidence boundary stable across fresh read attempts.
+  return readSnapshot(async tx => {
     await assertCurrentPrincipal(tx, principal, "inventory.read");
     const candidates = await tx.$queryRaw<{ id: string }[]>`SELECT u.id FROM "WarehouseUnit" u WHERE u."createdAt"<=${asOf} AND (${input.cursor ?? null}::text IS NULL OR u.id>${input.cursor ?? null})
       AND (${input.search}='' OR u.id ILIKE ${needle} OR u."creationEvidence" ILIKE ${needle}

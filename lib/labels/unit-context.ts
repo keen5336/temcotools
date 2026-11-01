@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { readSnapshot } from "@/lib/read-snapshot";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { dispatchDay, dispatchSlot, dispatchSourceNotice } from "@/lib/dispatch/model";
@@ -120,10 +121,10 @@ export async function deriveUnitLabelContext(tx: Prisma.TransactionClient, raw: 
 }
 
 export async function getUnitLabelContext(principal: Principal, raw: unknown) {
-  return prisma.$transaction(async tx => { const current = await assertCurrentPrincipal(tx, principal, "inventory.read"); assertUnitContextScopes(current); return deriveUnitLabelContext(tx, raw); }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
+  return readSnapshot(async tx => { const current = await assertCurrentPrincipal(tx, principal, "inventory.read"); assertUnitContextScopes(current); return deriveUnitLabelContext(tx, raw); }, { isolationLevel: "RepeatableRead", timeout: 30_000 });
 }
 export async function evaluateUnitLabels(principal: Principal, raw: unknown) {
-  return prisma.$transaction(async tx => {
+  return readSnapshot(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.read"); assertUnitContextScopes(current);
     const context = await deriveUnitLabelContext(tx, raw);
     const workflows = await tx.labelWorkflow.findMany({ where: { enabled: true, publishedVersionId: { not: null } }, include: { publishedVersion: true }, orderBy: { purpose: "asc" } });

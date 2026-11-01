@@ -64,6 +64,15 @@ async function main() {
     assert.equal(catalogPage.tools.some(tool => ["office", "users", "payloads", "labels"].includes(tool.id)), false, "The catalog must preserve the client's actual scope even when the person has broader warehouse rights.");
     const uiCatalog = await fetch(new URL("/api/tool-favorites", app), { headers }); assert.equal(uiCatalog.status, 200);
     assert.ok((await uiCatalog.json()).tools.some((tool: { id: string }) => tool.id === "inventory-audit"), "The UI API uses the same catalog query.");
+    const connectionSetup = await sdk.callTool({ name: "application_action", arguments: { action: "access.setup", input: {} } }); assert.notEqual(connectionSetup.isError, true);
+    const setupText = (connectionSetup.content as { type: string; text?: string }[])[0]; assert.ok(setupText.type === "text" && setupText.text);
+    const setupPage = JSON.parse(setupText.text);
+    assert.equal(setupPage.actorUserId, user.id); assert.equal(setupPage.connection.mcpUrl, resource.href); assert.equal(setupPage.connection.status, "loopback");
+    assert.deepEqual(setupPage.availableReadScopes, ["inventory.read"], "Connection setup cannot widen the actual client's scopes.");
+    assert.ok(setupPage.oauthGrants.some((grant: { clientId: string }) => grant.clientId === clientId));
+    assert.equal(setupText.text.includes(tokens.access_token), false); assert.equal(setupText.text.includes(tokens.refresh_token), false);
+    const uiSetup = await fetch(new URL("/api/access-grants/setup", app), { headers }); assert.equal(uiSetup.status, 200);
+    const ownSetup = await uiSetup.json(); assert.equal(ownSetup.actorUserId, user.id); assert.equal(ownSetup.connection.mcpUrl, resource.href);
     phase = "writer denial and session revocation";
     const refreshDenied = await sdk.callTool({ name: "application_action", arguments: { action: "office.refresh.advance", input: { operationId: randomUUID() } } }); assert.equal(refreshDenied.isError, true, "An inventory-read OAuth grant cannot advance Office evaluation.");
     const query = await sdk.callTool({ name: "warehouse_lookup", arguments: { kind: "lpn", value: `SYNTHETIC-NOT-STOCK-${suffix}` } }); assert.equal(query.isError, undefined);
@@ -74,7 +83,7 @@ async function main() {
     let revoked = false;
     try { revoked = (await sdk.callTool({ name: "warehouse_lookup", arguments: { kind: "lpn", value: "SYNTHETIC" } })).isError === true; } catch { revoked = true; }
     assert.equal(revoked, true);
-    console.log("PASS: running MCP discovery, actual password/TOTP/PKCE/consent, SDK connection, scoped UI/MCP catalogs, shared lookup/physical-stock defaults, Office writer denial and session revocation. Synthetic fixtures only; owner enrollment untouched.");
+    console.log("PASS: running MCP discovery, actual password/TOTP/PKCE/consent, SDK connection, scoped UI/MCP catalogs and connection setup, shared lookup/physical-stock defaults, Office writer denial and session revocation. Synthetic fixtures only; owner enrollment untouched.");
   } finally {
     await sdk.close().catch(() => undefined);
     await prisma.user.delete({ where: { id: user.id } });

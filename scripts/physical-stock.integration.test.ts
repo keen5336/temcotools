@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
+import { Client } from "pg";
 import { CAPABILITIES, type Principal } from "../lib/auth/principal";
 
 const testUrl=process.env.PHYSICAL_STOCK_TEST_DATABASE_URL;
@@ -95,6 +96,63 @@ test("Inventory Audit shared physical view uses native corrected evidence with b
       assert.deepEqual(found,new Set([sparse[5].id,sparse[7].id]));
       const part=await stock.exportPhysicalStock(actor,{search:`${prefix}-sparse`,view:"all",scanLimit:8,limit:1});assert.equal(part.rowCount,1);assert.equal(part.hasMore,true);assert.equal(part.nextCursor,sparse[0].id);
       await assert.rejects(stock.getPhysicalStock(actor,{limit:101}));await assert.rejects(stock.exportPhysicalStock(actor,{limit:1001}));await assert.rejects(stock.getPhysicalStock(actor,{asOf:new Date(Date.now()+60_000).toISOString()}),/future/);
+    });
+    async function sessionChangeRace<T>(read:()=>Promise<T>,changes:Array<"activity"|"revoke">){
+      const blocker=new Client({connectionString:testUrl,application_name:`physical-stock-blocker-${prefix}`});
+      const observer=new Client({connectionString:testUrl,application_name:`physical-stock-observer-${prefix}`});
+      await Promise.all([blocker.connect(),observer.connect()]);
+      let result:Promise<{ok:true;value:T}|{ok:false;error:unknown}>|undefined;
+      const snapshots:string[]=[];
+      try{
+        const pid=(await blocker.query<{pid:number}>("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+        await blocker.query("BEGIN");await blocker.query('SELECT id FROM "UserSession" WHERE id=$1 FOR UPDATE',[session.id]);
+        result=read().then(value=>({ok:true as const,value}),error=>({ok:false as const,error}));
+        for(let index=0;index<changes.length;index++){
+          const deadline=Date.now()+10_000;let snapshot:string|undefined;
+          while(Date.now()<deadline){
+            const waiting=await observer.query<{snapshot:string}>("SELECT xact_start::text AS snapshot FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)) AND query LIKE '%UserSession%'",[pid]);
+            if(waiting.rows.length){snapshot=waiting.rows[0].snapshot;break;}await new Promise(resolve=>setTimeout(resolve,5));
+          }
+          assert.ok(snapshot,"The real physical-stock read must wait on this session after establishing its snapshot");
+          assert.ok(!snapshots.includes(snapshot),"Each retry must establish a new transaction snapshot");snapshots.push(snapshot);
+          if(changes[index]==="activity")await blocker.query('UPDATE "UserSession" SET "lastActivityAt"=clock_timestamp() WHERE id=$1',[session.id]);
+          else await blocker.query('UPDATE "UserSession" SET "revokedAt"=clock_timestamp() WHERE id=$1',[session.id]);
+          await blocker.query("COMMIT");
+          if(index+1<changes.length){await blocker.query("BEGIN");await blocker.query('SELECT id FROM "UserSession" WHERE id=$1 FOR UPDATE',[session.id]);}
+        }
+        return {outcome:await result,snapshots};
+      }finally{await blocker.query("ROLLBACK").catch(()=>undefined);if(result)await result;await Promise.all([blocker.end(),observer.end()]);}
+    }
+    await t.test("500-row CSV reads recover from an actual session activity serialization conflict with the original asOf",async()=>{
+      const asOf=new Date().toISOString(),before=await prisma.warehousePhysicalObservation.count({where:{userId:user.id}});
+      const race=await sessionChangeRace(()=>stock.exportPhysicalStock(actor,{view:"all",search:prefix,limit:500,asOf}),["activity"]);
+      assert.equal(race.outcome.ok,true);assert.equal(race.snapshots.length,1);
+      if(race.outcome.ok){assert.equal(race.outcome.value.asOf,asOf);assert.ok(race.outcome.value.rowCount>0);assert.match(race.outcome.value.csv,/page_metadata/);}
+      assert.equal(await prisma.warehousePhysicalObservation.count({where:{userId:user.id}}),before,"A read retry cannot manufacture physical facts");
+    });
+    await t.test("read retry exhaustion is finite and retains the actual Prisma P2010/driver SQLSTATE40001 error",async()=>{
+      const race=await sessionChangeRace(()=>stock.getPhysicalStock(actor,{view:"all",search:prefix}),["activity","activity","activity"]);
+      assert.equal(race.snapshots.length,3);assert.equal(race.outcome.ok,false);
+      if(!race.outcome.ok){const error=race.outcome.error as {name?:string;code?:string;meta?:{driverAdapterError?:{cause?:{originalCode?:string;kind?:string}}}};assert.equal(error.name,"PrismaClientKnownRequestError");assert.equal(error.code,"P2010");assert.equal(error.meta?.driverAdapterError?.cause?.originalCode,"40001");t.diagnostic(JSON.stringify({prismaCode:error.code,sqlState:error.meta?.driverAdapterError?.cause?.originalCode,attempts:race.snapshots.length}));}
+    });
+    await t.test("a fresh retry checks revocation instead of completing under the earlier session snapshot",async()=>{
+      try{
+        const race=await sessionChangeRace(()=>stock.getPhysicalStock(actor,{view:"all",search:prefix}),["revoke"]);
+        assert.equal(race.outcome.ok,false);if(!race.outcome.ok){const error=race.outcome.error as {status?:number;message?:string};assert.equal(error.status,403);assert.match(error.message??"",/session ended|locked/);}
+      }finally{await prisma.userSession.update({where:{id:session.id},data:{revokedAt:null}});}
+    });
+    const [{getOperationalDashboard},{getOfficeRefreshStatus},{getUnitLabelContext,evaluateUnitLabels}]=await Promise.all([import("../lib/dashboard"),import("../lib/office/refresh"),import("../lib/labels/unit-context")]);
+    const readSeams:Array<[string,()=>Promise<unknown>]>=[
+      ["operational dashboard",()=>getOperationalDashboard(actor)],
+      ["Office evaluation coverage",()=>getOfficeRefreshStatus(actor)],
+      ["unit label context",()=>getUnitLabelContext(actor,{unitId:ids[0]})],
+      ["unit label evaluation",()=>evaluateUnitLabels(actor,{unitId:ids[0]})],
+    ];
+    for(const [name,read] of readSeams)await t.test(`${name} recovers from the actual session activity serialization conflict without domain writes`,async()=>{
+      const before={observations:await prisma.warehousePhysicalObservation.count({where:{userId:user.id}}),audits:await prisma.identityAudit.count({where:{actorUserId:user.id}}),cases:await prisma.officeCase.count({where:{unitId:{in:ids}}})};
+      const race=await sessionChangeRace(read,["activity"]);assert.equal(race.outcome.ok,true);assert.equal(race.snapshots.length,1);
+      if(race.outcome.ok)assert.ok(race.outcome.value&&typeof race.outcome.value==="object");
+      assert.deepEqual({observations:await prisma.warehousePhysicalObservation.count({where:{userId:user.id}}),audits:await prisma.identityAudit.count({where:{actorUserId:user.id}}),cases:await prisma.officeCase.count({where:{unitId:{in:ids}}})},before);
     });
     await t.test("UI/MCP share discoverable input contracts and current scoped/revoked authority",async()=>{
       const created=await createAccessGrant(actor,{clientName:"Synthetic read-only physical view",scopes:["inventory.read"],lifetimeMinutes:5});const client=await authenticateAccessGrant(created.token);

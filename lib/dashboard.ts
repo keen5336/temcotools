@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { readSnapshot } from "@/lib/read-snapshot";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import type { Capability, Principal } from "@/lib/auth/principal";
 import { getOfficeRefreshStatusInTransaction } from "@/lib/office/refresh";
@@ -40,7 +41,7 @@ export async function saveDashboardPreferences(principal: Principal, input: unkn
   });
 }
 export async function getOperationalDashboard(principal: Principal) {
-  return prisma.$transaction(async tx => {
+  return readSnapshot(async tx => {
     const current = await assertCurrentPrincipal(tx, principal);
     const available = authorizedWidgets(current.capabilities);
     const preference = await tx.dashboardPreference.findUnique({ where: { userId: current.userId } });

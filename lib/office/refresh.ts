@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { readSnapshot } from "@/lib/read-snapshot";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { businessDay, fingerprint, OfficeError, plain } from "./domain";
@@ -65,7 +66,7 @@ export async function getOfficeRefreshStatusInTransaction(tx: Prisma.Transaction
 }
 export async function getOfficeRefreshStatus(principal: Principal, raw: unknown = {}) {
   officeRefreshStatusInputSchema.parse(raw); assertStatusScope(principal);
-  return prisma.$transaction(async tx => { const current = await assertCurrentPrincipal(tx, principal); assertStatusScope(current); return getOfficeRefreshStatusInTransaction(tx, current); }, { isolationLevel: "RepeatableRead" });
+  return readSnapshot(async tx => { const current = await assertCurrentPrincipal(tx, principal); assertStatusScope(current); return getOfficeRefreshStatusInTransaction(tx, current); }, { isolationLevel: "RepeatableRead" });
 }
 
 export async function advanceOfficeRefresh(principal: Principal, raw: unknown) {
