@@ -1,10 +1,10 @@
 import NavBar from "@/components/NavBar";
 import PickWavesClient from "@/components/pick-waves/PickWavesClient";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { listPickWaves } from "@/lib/pick-waves";
 
 export default async function PickWavesPage() {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const waves = await listPickWaves();
   return (
     <div className="min-h-screen bg-base-200">

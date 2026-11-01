@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import { createPickWave, PickWaveValidationError, type PickWaveRouteInput, type PickWaveWorkbookBuffer } from "@/lib/pick-waves";
+import { getCurrentPrincipal } from "@/lib/auth";
+import { PickWaveValidationError, type PickWaveRouteInput } from "@/lib/pick-waves";
+
+import { randomUUID } from "node:crypto";
+import { importPickWorkbook } from "@/lib/application/pick-actions";
 
 export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
-  const session = await getSession();
-  if (!session.userId) return NextResponse.json({ ok: false, error: "Authentication is required." }, { status: 401 });
-  if (!session.isActive) return NextResponse.json({ ok: false, error: "User account is inactive." }, { status: 403 });
+  const principal = await getCurrentPrincipal();
+  if (!principal) return NextResponse.json({ ok: false, error: "Authentication is required." }, { status: 401 });
 
   try {
     const formData = await req.formData();
@@ -25,12 +27,10 @@ export async function POST(req: NextRequest) {
       }
       routeMappings = parsed;
     }
-    const pickWave = await createPickWave({
-      name,
-      filename: upload.name,
-      fileBuffer: Buffer.from(await upload.arrayBuffer()) as unknown as PickWaveWorkbookBuffer,
-      routeMappings,
-      userId: session.userId,
+    if (upload.size > 16 * 1024 * 1024) return NextResponse.json({ok:false,error:"Workbook exceeds 16 MiB."},{status:413});
+    const pickWave = await importPickWorkbook(principal, {
+      name, filename: upload.name, contentBase64: Buffer.from(await upload.arrayBuffer()).toString("base64"), routeMappings,
+      operationId: typeof formData.get("operationId") === "string" ? formData.get("operationId") : randomUUID(),
     });
     return NextResponse.json({ ok: true, pickWave });
   } catch (error) {

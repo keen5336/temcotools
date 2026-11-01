@@ -4,6 +4,11 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { PICK_WAVE_STAGING_LOCATIONS } from "@/lib/pick-wave-constants";
+import type { Principal } from "@/lib/auth/principal";
+import { assertCurrentPrincipal } from "@/lib/auth/identity";
+import { resolveDispatchPickItemInTransaction } from "@/lib/dispatch/service";
+import { validateRetainedWorkbook } from "@/lib/retained-workbook";
+import { localCommandReceipt } from "@/lib/application/command-receipts";
 
 type WorksheetValue = ExcelJS.CellValue | null | undefined;
 export type PickWaveWorkbookBuffer = Parameters<ExcelJS.Workbook["xlsx"]["load"]>[0];
@@ -39,6 +44,7 @@ const COLUMN_ALIASES: Record<string, keyof Omit<PickWaveImportedItem, "rowNumber
 export class PickWaveValidationError extends Error {}
 
 export async function parsePickWaveWorkbook(fileBuffer: PickWaveWorkbookBuffer) {
+  await validateRetainedWorkbook(fileBuffer);
   const workbook = await loadWorkbook(fileBuffer);
   const worksheet = workbook.worksheets[0];
   if (!worksheet || worksheet.actualRowCount < 2) {
@@ -128,6 +134,8 @@ export async function createPickWave(options: {
   fileBuffer: PickWaveWorkbookBuffer;
   routeMappings: PickWaveRouteInput[];
   userId: string;
+  principal: Principal;
+  operationId: string;
 }) {
   const name = options.name.trim();
   if (!name) throw new PickWaveValidationError("A pick-wave name is required.");
@@ -141,15 +149,18 @@ export async function createPickWave(options: {
   if (missingRoutes.length) throw new PickWaveValidationError(`Choose a staging location or No Location for every route. Missing: ${missingRoutes.join(", ")}.`);
   if (extraRoutes.length) throw new PickWaveValidationError(`These mapped routes are not in the spreadsheet: ${extraRoutes.map((mapping) => mapping.routeNumber).join(", ")}.`);
 
-  const wave = await prisma.pickWave.create({
+  const wave = await prisma.$transaction(async tx => {
+    await assertCurrentPrincipal(tx, options.principal, "workflow.execute");
+    return localCommandReceipt(tx, options.principal, "pick-waves.import", options.operationId, { name, filename: options.filename, items: parsed.items, routeMappings }, () => tx.pickWave.create({
     data: {
       name,
       sourceFilename: options.filename,
-      createdByUserId: options.userId,
+      createdByUserId: options.principal.userId,
       items: { create: parsed.items },
       routeMappings: { create: routeMappings },
     },
     select: { id: true, name: true, createdAt: true, _count: { select: { items: true } } },
+  }));
   });
   return { ...wave, missingColumns: parsed.missingColumns };
 }
@@ -183,58 +194,33 @@ export async function getPickWave(id: string) {
   });
 }
 
-export async function setPickWaveArchived(id: string, archived: boolean) {
-  return prisma.pickWave.update({ where: { id }, data: { archivedAt: archived ? new Date() : null }, select: { id: true, archivedAt: true } });
-}
-
-export async function savePickWaveScansToList(id: string, userId: string) {
-  const wave = await prisma.pickWave.findUnique({
-    where: { id },
-    select: {
-      name: true,
-      scans: {
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: { id: true, scannedValue: true, createdAt: true, scannedByUserId: true },
-      },
-    },
+export async function setPickWaveArchived(id: string, archived: boolean, principal: Principal) {
+  return prisma.$transaction(async tx => {
+    await assertCurrentPrincipal(tx, principal, "workflow.execute");
+    return tx.pickWave.update({ where: { id }, data: { archivedAt: archived ? new Date() : null }, select: { id: true, archivedAt: true } });
   });
-  if (!wave) throw new PickWaveValidationError("Pick wave not found.");
-  if (!wave.scans.length) throw new PickWaveValidationError("This pick wave has no scans to save.");
-
-  // Repeated clicks and retries reuse this snapshot; later scans produce a new list.
-  const snapshot = createHash("sha256").update(JSON.stringify(wave.scans.map((scan) => scan.id))).digest("hex");
-  const localDraftId = `pick-wave:${id}:${snapshot}`;
-  const select = { id: true, name: true, _count: { select: { items: true } } } as const;
-  let scanList = await prisma.scanListSession.findUnique({ where: { localDraftId }, select });
-  if (!scanList) {
-    try {
-      scanList = await prisma.scanListSession.create({
-        data: {
-          localDraftId,
-          name: `Pick wave: ${wave.name}`.slice(0, 120),
-          createdByUserId: userId,
-          createdAt: wave.scans[0].createdAt,
-          closedAt: new Date(),
-          items: {
-            create: wave.scans.map((scan) => ({
-              scannedValue: scan.scannedValue,
-              createdAt: scan.createdAt,
-              scannedByUserId: scan.scannedByUserId,
-            })),
-          },
-        },
-        select,
-      });
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-      scanList = await prisma.scanListSession.findUnique({ where: { localDraftId }, select });
-      if (!scanList) throw error;
-    }
-  }
-  return { id: scanList.id, name: scanList.name, scanCount: scanList._count.items };
 }
 
-export async function replacePickWaveRoutes(id: string, inputs: PickWaveRouteInput[]) {
+export async function savePickWaveScansToList(id: string, userId: string, principal: Principal) {
+  return prisma.$transaction(async tx => {
+    await assertCurrentPrincipal(tx, principal, "workflow.execute");
+    if (userId !== principal.userId) throw new PickWaveValidationError("Individual scan-list attribution must match the current person.");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`pick-wave:${id}`}, 0))`;
+    const wave = await tx.pickWave.findUnique({ where: { id }, select: { name: true, scans: { orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true, scannedValue: true, createdAt: true, scannedByUserId: true } } } });
+    if (!wave) throw new PickWaveValidationError("Pick wave not found.");
+    if (!wave.scans.length) throw new PickWaveValidationError("This pick wave has no scans to save.");
+    const snapshot = createHash("sha256").update(JSON.stringify(wave.scans.map(scan => scan.id))).digest("hex");
+    const localDraftId = `pick-wave:${id}:${snapshot}`;
+    const list = await tx.scanListSession.upsert({ where: { localDraftId }, update: {}, create: {
+      localDraftId, name: `Pick wave: ${wave.name}`.slice(0, 120), createdByUserId: principal.userId,
+      createdAt: wave.scans[0].createdAt, closedAt: new Date(),
+      items: { create: wave.scans.map(scan => ({ scannedValue: scan.scannedValue, createdAt: scan.createdAt, scannedByUserId: scan.scannedByUserId })) },
+    }, select: { id: true, name: true, _count: { select: { items: true } } } });
+    return { id: list.id, name: list.name, scanCount: list._count.items };
+  });
+}
+
+export async function replacePickWaveRoutes(id: string, inputs: PickWaveRouteInput[], principal: Principal) {
   const routeMappings = normalizeRouteMappings(inputs);
   const itemRoutes = await prisma.pickWaveItem.findMany({ where: { pickWaveId: id, routeNumber: { not: null } }, distinct: ["routeNumber"], select: { routeNumber: true } });
   const spreadsheetRoutes = itemRoutes.map((item) => item.routeNumber).filter((route): route is string => Boolean(route));
@@ -243,19 +229,33 @@ export async function replacePickWaveRoutes(id: string, inputs: PickWaveRouteInp
   const extraRoutes = routeMappings.filter((mapping) => !spreadsheetRoutes.some((route) => route.toLowerCase() === mapping.routeNumber.toLowerCase()));
   if (missingRoutes.length) throw new PickWaveValidationError(`Choose a staging location or No Location for every route. Missing: ${missingRoutes.join(", ")}.`);
   if (extraRoutes.length) throw new PickWaveValidationError(`These mapped routes are not in the spreadsheet: ${extraRoutes.map((mapping) => mapping.routeNumber).join(", ")}.`);
-  await prisma.$transaction([
-    prisma.pickWaveRouteMapping.deleteMany({ where: { pickWaveId: id } }),
-    prisma.pickWaveRouteMapping.createMany({ data: routeMappings.map((mapping) => ({ pickWaveId: id, ...mapping })) }),
-  ]);
+  await prisma.$transaction(async tx => {
+    await assertCurrentPrincipal(tx, principal, "workflow.execute");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`pick-wave:${id}`}, 0))`;
+    if (await tx.dispatchWaveItem.findFirst({where:{pickWaveId:id},select:{id:true}})) throw new PickWaveValidationError("Amend dispatch demand rather than changing a bound wave's lane instructions independently.");
+    await tx.pickWaveRouteMapping.deleteMany({ where: { pickWaveId: id } });
+    await tx.pickWaveRouteMapping.createMany({ data: routeMappings.map(mapping => ({ pickWaveId: id, ...mapping })) });
+  });
   return routeMappings;
 }
 
-export async function scanPickWave(options: { id: string; scannedValue: string; userId: string }) {
+export async function scanPickWave(options: { id: string; scannedValue: string; userId: string; eventId?: string; principal: Principal }) {
   const scannedValue = options.scannedValue.trim();
   if (!scannedValue) throw new PickWaveValidationError("Scan a barcode value first.");
   if (scannedValue.length > 500) throw new PickWaveValidationError("The scanned value is too long.");
 
   return prisma.$transaction(async (tx) => {
+    await assertCurrentPrincipal(tx, options.principal, "workflow.execute");
+    if (options.userId !== options.principal.userId) throw new PickWaveValidationError("Scan attribution must match the current person.");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`pick-wave:${options.id}`}, 0))`;
+    const captureEventId = options.eventId ? `${options.userId}:${options.eventId}` : null;
+    if (captureEventId) {
+      const previous = await tx.pickWaveScan.findUnique({ where: { captureEventId } });
+      if (previous) {
+        if (previous.pickWaveId !== options.id || previous.scannedValue !== scannedValue) throw new PickWaveValidationError("This scan event was already used for different work.");
+        if (previous.captureResult) return { ...(previous.captureResult as object), replayed: true } as PickWaveScanResult;
+      }
+    }
     const wave = await tx.pickWave.findUnique({ where: { id: options.id }, select: { id: true, archivedAt: true } });
     if (!wave) throw new PickWaveValidationError("Pick wave not found.");
     if (wave.archivedAt) throw new PickWaveValidationError("Archived pick waves cannot be scanned.");
@@ -266,20 +266,32 @@ export async function scanPickWave(options: { id: string; scannedValue: string; 
         [field]: { equals: scannedValue, mode: "insensitive" },
       })),
     };
-    const candidates = await tx.pickWaveItem.findMany({ where: identifierWhere, orderBy: { rowNumber: "asc" } });
-    const item = candidates.find((candidate) => !candidate.scannedAt) ?? candidates[0] ?? null;
+    const binding = await resolveDispatchPickItemInTransaction(tx, { pickWaveId: options.id, rawIdentifier: scannedValue });
+    const candidates = binding.boundWave
+      ? binding.itemId ? await tx.pickWaveItem.findMany({ where: { id: binding.itemId, pickWaveId: options.id } }) : []
+      : await tx.pickWaveItem.findMany({ where: identifierWhere, orderBy: { rowNumber: "asc" } });
+    // An order or part shared by several rows is context, not a unique unit.
+    // Preserve the scan and ask for the unit barcode instead of choosing first.
+    const ambiguous = binding.ambiguous || candidates.length > 1;
+    const item = ambiguous ? null : candidates[0] ?? null;
     const alreadyScanned = Boolean(item?.scannedAt);
     if (item && !alreadyScanned) {
       await tx.pickWaveItem.update({ where: { id: item.id }, data: { scannedAt: new Date() } });
     }
+    const mapping = item?.routeNumber ? await tx.pickWaveRouteMapping.findFirst({ where: { pickWaveId: options.id, routeNumber: { equals: item.routeNumber, mode: "insensitive" } }, select: { stagingLocation: true } }) : null;
+    const result = { matched: Boolean(item), alreadyScanned, item: item ? { ...item, scannedAt: item.scannedAt ?? new Date() } : null, unitId: binding.unitId, stagingLocation: mapping?.stagingLocation ?? null, ambiguous, replayed: false, ...(binding.boundWave && !item ? { error: binding.reason } : {}) };
     await tx.pickWaveScan.create({
-      data: { pickWaveId: options.id, itemId: item?.id, scannedValue, matched: Boolean(item), alreadyScanned, scannedByUserId: options.userId },
+      data: { pickWaveId: options.id, itemId: item?.id, scannedValue, matched: Boolean(item), alreadyScanned, scannedByUserId: options.userId, captureEventId, captureResult: captureEventId ? JSON.parse(JSON.stringify(result)) : undefined },
     });
-    if (!item) return { matched: false as const, alreadyScanned: false as const, item: null, stagingLocation: null };
-    const mapping = item.routeNumber ? await tx.pickWaveRouteMapping.findFirst({ where: { pickWaveId: options.id, routeNumber: { equals: item.routeNumber, mode: "insensitive" } }, select: { stagingLocation: true } }) : null;
-    return { matched: true as const, alreadyScanned, item: { ...item, scannedAt: item.scannedAt ?? new Date() }, stagingLocation: mapping?.stagingLocation ?? null };
+    return result;
   });
 }
+
+type PickWaveScanResult = {
+  matched: boolean; alreadyScanned: boolean;
+  item: (Prisma.PickWaveItemGetPayload<object> & { scannedAt: Date | string | null }) | null;
+  stagingLocation: string | null; ambiguous: boolean; replayed: boolean;
+};
 
 function normalizeRouteMappings(inputs: PickWaveRouteInput[]) {
   const unique = new Map<string, PickWaveRouteInput>();

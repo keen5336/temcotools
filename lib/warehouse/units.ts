@@ -55,8 +55,8 @@ function observationReceipt(observation: { id: string; userId: string; eventId: 
   return { observationId: observation.id, eventId: observation.eventId, capturedByUserId: observation.userId, rawIdentifier: observation.rawIdentifier, identifierType: observation.identifierType, namespace: observation.identifierNamespace, type: observation.type, location: observation.location, deviceId: observation.deviceId, pickWaveId: observation.pickWaveId, captureMethod: observation.captureMethod, capturedAt: observation.capturedAt.toISOString(), receivedAt: observation.receivedAt.toISOString(), unitId: observation.unitId, resolution: observation.resolution, candidateUnitIds: observation.candidateUnitIds };
 }
 
-export async function recordWarehouseObservation(principal: Principal, input: ObservationInput) {
-  assertCapability(principal, "inventory.write");
+async function persistPhysicalObservation(tx: Prisma.TransactionClient, principal: Principal, input: ObservationInput, capability: "inventory.write" | "workflow.execute") {
+  assertCapability(principal, capability);
   const eventId = text(input.eventId, "Scan event ID", 150);
   text(input.rawIdentifier, "Scanned identifier");
   const rawIdentifier = input.rawIdentifier;
@@ -73,8 +73,7 @@ export async function recordWarehouseObservation(principal: Principal, input: Ob
   const captureMethod = input.captureMethod ?? "manual";
   if (!["scanner", "manual", "ocr"].includes(captureMethod)) throw new WarehouseCommandError("Unsupported capture method.");
   const fingerprint = hash({ eventId, rawIdentifier, identifier, type: input.type, location, deviceId, pickWaveId, captureMethod, capturedAt: capturedAt.toISOString(), actor: principal.userId });
-  return prisma.$transaction(async (tx) => {
-    await assertCurrentPrincipal(tx, principal, "inventory.write");
+    await assertCurrentPrincipal(tx, principal, capability);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`warehouse-event:${principal.userId}:${eventId}`}, 0))`;
     const existing = await tx.warehousePhysicalObservation.findUnique({ where: { userId_eventId: { userId: principal.userId, eventId } } });
     if (existing) {
@@ -84,7 +83,21 @@ export async function recordWarehouseObservation(principal: Principal, input: Ob
     const resolved = await resolveInTransaction(tx, identifier);
     const observation = await tx.warehousePhysicalObservation.create({ data: { id: randomUUID(), userId: principal.userId, eventId, fingerprint, rawIdentifier, identifierType: identifier.kind, identifierNamespace: identifier.namespace, type: input.type, location, deviceId, pickWaveId, captureMethod, capturedAt, unitId: resolved.unitId, resolution: resolved.resolution, candidateUnitIds: resolved.candidateUnitIds } });
     return { observation: observationReceipt(observation), resolution: resolved.resolution, unitId: resolved.unitId, candidateUnitIds: resolved.candidateUnitIds, replayed: false };
-  });
+}
+
+export async function recordWarehouseObservation(principal: Principal, input: ObservationInput) {
+  assertCapability(principal, "inventory.write");
+  return prisma.$transaction((tx) => persistPhysicalObservation(tx, principal, input, "inventory.write"));
+}
+
+// Trusted task commands can commit their own physical confirmation and task
+// result together. API/MCP callers cannot select an authorization capability.
+export async function recordWorkflowObservation(tx: Prisma.TransactionClient, principal: Principal, input: ObservationInput) {
+  return persistPhysicalObservation(tx, principal, input, "workflow.execute");
+}
+
+export async function resolveWarehouseIdentifierInTransaction(tx: Prisma.TransactionClient, input: WarehouseIdentifierInput) {
+  return resolveInTransaction(tx, parseIdentifier(input));
 }
 
 export async function createWarehouseUnit(principal: Principal, input: { operationId: string; evidence: string }) {
@@ -166,26 +179,84 @@ export async function correctWarehouseObservation(principal: Principal, input: {
   });
 }
 
-export async function getWarehouseUnit(principal: Principal, input: { unitId: string }) {
+export async function getWarehouseUnit(principal: Principal, input: { unitId: string }, transaction?: Prisma.TransactionClient) {
   assertCapability(principal, "inventory.read");
   const unitId = text(input.unitId, "Physical unit ID", 200);
-  return prisma.$transaction(async (tx) => {
+  const read = async (tx: Prisma.TransactionClient) => {
     const unit = await tx.warehouseUnit.findUnique({ where: { id: unitId }, include: { identifiers: { orderBy: [{ createdAt: "desc" }, { id: "desc" }] }, inventoryRows: { include: { sourceRevisions: { orderBy: { revision: "desc" }, take: 20, include: { memberships: { include: { importBatch: true }, orderBy: [{ importBatch: { createdAt: "desc" } }, { id: "desc" }], take: 5 } } } } } } });
     if (!unit) throw new WarehouseCommandError("Physical unit not found.", 404);
     const rawObservations = await tx.warehousePhysicalObservation.findMany({ where: { OR: [{ unitId }, { corrections: { some: { unitId } } }] }, orderBy: [{ capturedAt: "desc" }, { id: "desc" }], take: 200, include: { corrections: { orderBy: { revision: "desc" } } } });
     const observations = rawObservations.map((item) => ({ ...observationReceipt(item), effectiveUnitId: item.corrections[0] ? item.corrections[0].unitId : item.unitId, associationCurrent: (item.corrections[0] ? item.corrections[0].unitId : item.unitId) === unitId, correctionRevision: item.corrections[0]?.revision ?? 0, corrections: item.corrections.map((correction) => ({ correctionId: correction.id, unitId: correction.unitId, reason: correction.reason, userId: correction.userId, revision: correction.revision, correctedAt: correction.createdAt.toISOString() })) }));
-    const last = observations.find((item) => item.associationCurrent) ?? null;
-    const simultaneous = last ? observations.filter((item) => item.associationCurrent && item.capturedAt === last.capturedAt) : [];
-    const conflicting = simultaneous.some((item) => item.type !== last?.type || item.location !== last?.location);
+    const latestPhysical = await tx.$queryRaw<{ id: string; type: string; location: string | null; capturedAt: Date; receivedAt: Date }[]>`
+      WITH effective AS (
+        SELECT o.id,o.type,o.location,o."capturedAt",o."receivedAt" FROM "WarehousePhysicalObservation" o
+        LEFT JOIN LATERAL (SELECT id,"unitId" FROM "WarehouseObservationCorrection" WHERE "observationId"=o.id ORDER BY revision DESC LIMIT 1) c ON true
+        WHERE CASE WHEN c.id IS NOT NULL THEN c."unitId" ELSE o."unitId" END=${unitId}
+      ) SELECT * FROM effective WHERE "capturedAt"=(SELECT max("capturedAt") FROM effective) ORDER BY "receivedAt" DESC,id DESC`;
+    const last = latestPhysical[0] ?? null;
+    const conflicting = latestPhysical.some((item) => item.type !== last?.type || item.location !== last?.location);
+    const oldestShown = rawObservations.at(-1);
     return {
       unitId, createdAt: unit.createdAt.toISOString(), identityEvidence: unit.creationEvidence,
       identifiers: unit.identifiers.map((link) => ({ identifierId: link.id, kind: link.kind, namespace: link.namespace, value: link.value, evidence: link.evidence, createdByUserId: link.createdByUserId, linkedAt: link.createdAt.toISOString(), revokedAt: link.revokedAt?.toISOString() ?? null, revokedByUserId: link.revokedByUserId, revocationReason: link.revocationReason })),
       reportedRows: unit.inventoryRows.map((row) => ({ inventoryRecordId: row.id, lpn: row.lpn, reportedStatus: row.status, orderNumber: row.orderNumber, description: row.description, revision: row.revision, sourceData: row.sourceData, archivedAt: row.archivedAt?.toISOString() ?? null, sourceHistory: row.sourceRevisions.map((revision) => ({ sourceRevisionId: revision.id, revision: revision.revision, sourceData: revision.sourceData, recordedAt: revision.recordedAt.toISOString(), migrationSnapshot: revision.migrationSnapshot, reports: revision.memberships.map((membership) => ({ importId: membership.importId, scope: membership.importBatch.scope, coverage: membership.importBatch.coverage, importedAt: membership.importBatch.createdAt.toISOString(), sourceAsOf: membership.importBatch.sourceAsOf?.toISOString() ?? null })) })) })),
       observations,
       observationsMayBeTruncated: rawObservations.length === 200,
-      physicalState: { basis: conflicting ? "conflicting_physical_observations" as const : last ? "physical_observation" as const : "no_physical_observation" as const, lastType: conflicting ? null : last?.type ?? null, location: conflicting ? null : last?.location ?? null, observedAt: last?.capturedAt ?? null, receivedAt: last?.receivedAt ?? null, conflictingObservationIds: conflicting ? simultaneous.map((item) => item.observationId) : [], certainty: "as_observed_not_live_presence" as const },
+      observationHistoryCursor: rawObservations.length === 200 && oldestShown ? historyCursor(oldestShown.capturedAt, oldestShown.id) : null,
+      sourceHistoryMayBeTruncated: unit.inventoryRows.some((row) => row.sourceRevisions.length === 20),
+      physicalState: { basis: conflicting ? "conflicting_physical_observations" as const : last ? "physical_observation" as const : "no_physical_observation" as const, lastType: conflicting ? null : last?.type ?? null, location: conflicting ? null : last?.location ?? null, observedAt: last?.capturedAt.toISOString() ?? null, receivedAt: last?.receivedAt.toISOString() ?? null, conflictingObservationIds: conflicting ? latestPhysical.map((item) => item.id) : [], certainty: "as_observed_not_live_presence" as const },
     };
-  }, { isolationLevel: "RepeatableRead" });
+  };
+  return transaction ? read(transaction) : prisma.$transaction(read, { isolationLevel: "RepeatableRead" });
+}
+
+function historyCursor(at: Date, recordId: string) { return Buffer.from(JSON.stringify({ at: at.toISOString(), id: recordId })).toString("base64url"); }
+function parseHistoryInput(input: { unitId: string; cursor?: string; limit?: number }) {
+  const unitId = text(input.unitId, "Physical unit ID", 200);
+  const limit = input.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new WarehouseCommandError("History page size must be 1–200.");
+  let cursor: { at: Date; id: string } | null = null;
+  if (input.cursor) {
+    try {
+      if (input.cursor.length > 1000) throw new Error();
+      const decoded = JSON.parse(Buffer.from(input.cursor, "base64url").toString("utf8"));
+      if (typeof decoded.at !== "string" || typeof decoded.id !== "string" || !decoded.id || decoded.id.length > 200 || !Number.isFinite(Date.parse(decoded.at))) throw new Error();
+      cursor = { at: new Date(decoded.at), id: decoded.id };
+    } catch { throw new WarehouseCommandError("Invalid history page cursor."); }
+  }
+  return { unitId, limit, cursor };
+}
+
+export async function getWarehouseUnitObservations(principal: Principal, raw: { unitId: string; cursor?: string; limit?: number }, transaction?: Prisma.TransactionClient) {
+  assertCapability(principal, "inventory.read");
+  const input = parseHistoryInput(raw);
+  const records = await (transaction ?? prisma).warehousePhysicalObservation.findMany({ where: { AND: [
+    { OR: [{ unitId: input.unitId }, { corrections: { some: { unitId: input.unitId } } }] },
+    ...(input.cursor ? [{ OR: [{ capturedAt: { lt: input.cursor.at } }, { capturedAt: input.cursor.at, id: { lt: input.cursor.id } }] }] : []),
+  ] }, orderBy: [{ capturedAt: "desc" }, { id: "desc" }], take: input.limit + 1, include: { corrections: { orderBy: { revision: "desc" } } } });
+  const shown = records.slice(0, input.limit);
+  return { unitId: input.unitId, items: shown.map((item) => ({ ...observationReceipt(item), effectiveUnitId: item.corrections[0] ? item.corrections[0].unitId : item.unitId, associationCurrent: (item.corrections[0] ? item.corrections[0].unitId : item.unitId) === input.unitId, correctionRevision: item.corrections[0]?.revision ?? 0, corrections: item.corrections.map((correction) => ({ correctionId: correction.id, unitId: correction.unitId, reason: correction.reason, userId: correction.userId, revision: correction.revision, correctedAt: correction.createdAt.toISOString() })) })), hasMore: records.length > input.limit, nextCursor: records.length > input.limit ? historyCursor(shown[shown.length - 1].capturedAt, shown[shown.length - 1].id) : null };
+}
+
+export async function getWarehouseSourceRevisions(principal: Principal, raw: { unitId: string; cursor?: string; limit?: number }, transaction?: Prisma.TransactionClient) {
+  assertCapability(principal, "inventory.read");
+  const input = parseHistoryInput(raw);
+  const records = await (transaction ?? prisma).inventorySourceRevision.findMany({ where: { inventoryItem: { unitId: input.unitId }, ...(input.cursor ? { OR: [{ recordedAt: { lt: input.cursor.at } }, { recordedAt: input.cursor.at, id: { lt: input.cursor.id } }] } : {}) }, orderBy: [{ recordedAt: "desc" }, { id: "desc" }], take: input.limit + 1, include: { memberships: { include: { importBatch: true }, orderBy: [{ importBatch: { createdAt: "desc" } }, { id: "desc" }] } } });
+  const shown = records.slice(0, input.limit);
+  return { unitId: input.unitId, items: shown.map((revision) => ({ inventoryRecordId: revision.inventoryItemId, lpn: revision.lpn, sourceRevisionId: revision.id, revision: revision.revision, sourceData: revision.sourceData, recordedAt: revision.recordedAt.toISOString(), migrationSnapshot: revision.migrationSnapshot, reports: revision.memberships.map((membership) => ({ importId: membership.importId, scope: membership.importBatch.scope, coverage: membership.importBatch.coverage, importedAt: membership.importBatch.createdAt.toISOString(), sourceAsOf: membership.importBatch.sourceAsOf?.toISOString() ?? null })) })), hasMore: records.length > input.limit, nextCursor: records.length > input.limit ? historyCursor(shown[shown.length - 1].recordedAt, shown[shown.length - 1].id) : null };
+}
+
+export async function exportWarehouseUnitHistory(principal: Principal, input: { unitId: string }) {
+  assertCapability(principal, "inventory.read");
+  return prisma.$transaction(async (tx) => {
+  const unit = await getWarehouseUnit(principal, input, tx);
+  const observations: Awaited<ReturnType<typeof getWarehouseUnitObservations>>["items"] = [];
+  const sourceRevisions: Awaited<ReturnType<typeof getWarehouseSourceRevisions>>["items"] = [];
+  let cursor: string | undefined;
+  do { const page = await getWarehouseUnitObservations(principal, { unitId: unit.unitId, cursor, limit: 200 }, tx); observations.push(...page.items); cursor = page.nextCursor ?? undefined; } while (cursor);
+  do { const page = await getWarehouseSourceRevisions(principal, { unitId: unit.unitId, cursor, limit: 200 }, tx); sourceRevisions.push(...page.items); cursor = page.nextCursor ?? undefined; } while (cursor);
+  return { filename: `warehouse-unit-${unit.unitId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 100)}.json`, json: JSON.stringify({ exportedAt: new Date().toISOString(), unit, observations, sourceRevisions, limitation: "Each history record retains its own source/observation times. Export does not attest current physical presence." }, null, 2), observationCount: observations.length, sourceRevisionCount: sourceRevisions.length };
+  }, { isolationLevel: "RepeatableRead", timeout: 60_000 });
 }
 
 export async function listUnresolvedWarehouseObservations(principal: Principal, limit = 50) {

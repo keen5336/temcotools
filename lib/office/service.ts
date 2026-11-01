@@ -262,6 +262,10 @@ async function evaluateObservation(tx: Prisma.TransactionClient, principal: Prin
   if (!unitId) return { instructions: [], evaluation: null, reason: "Resolve the scan's unit identity before applying office instructions." };
   const data = await facts(tx, unitId, now);
   const instructions: Array<{ dispositionId: string; unitId: string; instruction: string; action: string; targetLocation: string | null }> = [];
+  for (const disposition of data.dispositions.filter(item => !["rtv", "conditional_rtv"].includes(item.kind))) {
+    if (disposition.expiresAt && disposition.expiresAt <= now) continue;
+    instructions.push({ dispositionId: disposition.id, unitId, instruction: disposition.instruction, action: disposition.kind, targetLocation: disposition.targetLocation });
+  }
   for (const disposition of data.dispositions) {
     if (!["rtv", "conditional_rtv"].includes(disposition.kind) || !disposition.authorizedAt || !disposition.authorizedByUserId || !disposition.expiresAt || disposition.expiresAt <= now) continue;
     if (observation.type === "departure" || !data.custody.warehouseEvidence || observation.capturedAt < disposition.authorizedAt || (disposition.triggerAt && observation.capturedAt < disposition.triggerAt)) continue;

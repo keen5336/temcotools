@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { PICK_WAVE_STAGING_LOCATIONS } from "@/lib/pick-wave-constants";
 
 export interface PickWaveSummary {
@@ -36,6 +36,8 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
   const assignedLocations = useMemo(() => new Set(Object.values(assignments).filter(Boolean)), [assignments]);
   const noLocationRoutes = preview?.routeNumbers.filter((route) => !assignments[route]) ?? [];
 
+  const importIntent = useRef<{key:string;id:string}|null>(null);
+
   async function handleFile(fileValue: File | null) {
     setFile(fileValue); setPreview(null); setAssignments({}); setError(null);
     if (!fileValue) return;
@@ -60,6 +62,9 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
     startTransition(async () => {
       setError(null);
       const form = new FormData();
+      const key = JSON.stringify({name:name.trim(),fileName:file.name,size:file.size,modified:file.lastModified,assignments});
+      if (importIntent.current?.key !== key) importIntent.current = {key,id:crypto.randomUUID()};
+      form.set("operationId", importIntent.current.id);
       form.set("name", name.trim());
       form.set("file", file);
       form.set("routeMappings", JSON.stringify(preview?.routeNumbers.map((routeNumber) => ({ routeNumber, stagingLocation: assignments[routeNumber] || null })) ?? []));

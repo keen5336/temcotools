@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { getOfficeCase, getOfficeUnitContext, listOfficeCases, getExpectedReturnWorklist, getOfficePeople } from "@/lib/office/service";
 import type { getWarehouseUnit, resolveWarehouseIdentifier } from "@/lib/warehouse/units";
 
@@ -19,6 +19,17 @@ function Field({ title, value, change, type = "text", required = false }: { titl
 function Area({ title, value, change, required = true }: { title: string; value: string; change: (value: string) => void; required?: boolean }) { return <label className="form-control"><span className="label-text font-semibold">{title}</span><textarea className="textarea textarea-bordered mt-1 min-h-24 w-full" value={value} onChange={(event) => change(event.target.value)} minLength={required ? 5 : undefined} maxLength={2000} required={required} /></label>; }
 
 export default function OfficeWorkspaceClient({ userId, canDecide, canAuthorizeRtv, canExecute, canEvaluate }: { userId: string; canDecide: boolean; canAuthorizeRtv: boolean; canExecute: boolean; canEvaluate: boolean }) {
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const query = new URLSearchParams(window.location.search);
+      if (query.get("caseId")) void openCase(query.get("caseId")!);
+      else if (query.get("unitId")) selectUnit(query.get("unitId")!);
+      else void loadCases();
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // Load the initial read-only deep link once; edits and filters stay local.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [unitId, setUnitId] = useState(""); const [identifier, setIdentifier] = useState("");
   const [candidates, setCandidates] = useState<Awaited<ReturnType<typeof resolveWarehouseIdentifier>>["candidates"]>([]);
   const [context, setContext] = useState<UnitContext | null>(null);

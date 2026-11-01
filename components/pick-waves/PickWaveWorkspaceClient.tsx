@@ -8,6 +8,9 @@ import ScannerCapture, { type ScannerFeedback } from "@/components/scanner/Scann
 import LabelOutputSelector from "@/components/labels/LabelOutputSelector";
 import { useLabelConfiguration } from "@/components/labels/useLabelConfiguration";
 import { sendLabel as printLabel } from "@/lib/label-printing";
+import { useObservationQueue, type ObservationReceipt } from "@/components/scanner/useObservationQueue";
+import ScanInstructions from "@/components/scanner/ScanInstructions";
+import type { QueuedObservation } from "@/lib/observation-queue";
 
 interface PickWaveItem {
   id: string; rowNumber: number; routeNumber: string | null; contact: string | null; orderNumber: string | null;
@@ -20,13 +23,14 @@ interface PickWaveDetail {
   id: string; name: string; sourceFilename: string; createdAt: string; updatedAt: string; archivedAt: string | null; createdBy: string | null;
   items: PickWaveItem[]; routeMappings: RouteMapping[]; scans: RecentScan[]; scanCount: number;
 }
-interface ScanResult { matched: boolean; alreadyScanned: boolean; item: PickWaveItem | null; stagingLocation: string | null }
+interface ScanResult { matched: boolean; alreadyScanned: boolean; item: PickWaveItem | null; stagingLocation: string | null; ambiguous?: boolean; replayed?: boolean; error?: string }
 
 const AUTO_PRINT_STORAGE = "pick-wave.autoPrint";
 
-export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: PickWaveDetail }) {
+export default function PickWaveWorkspaceClient({ initialWave, userId }: { initialWave: PickWaveDetail; userId: string }) {
   const [wave, setWave] = useState(initialWave);
   const labels = useLabelConfiguration("pick_wave");
+  const [instructions, setInstructions] = useState<unknown>(null);
   const [lastResult, setLastResult] = useState<ScanResult | null>(null);
   const [routeMappings, setRouteMappings] = useState(() => buildRouteMappings(initialWave));
   const [search, setSearch] = useState("");
@@ -47,7 +51,8 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
   const [message, setMessage] = useState<{ text: string; tone: "success" | "warning" | "error" | "info" } | null>(null);
 
   useEffect(() => {
-    setAutoPrint(localStorage.getItem(AUTO_PRINT_STORAGE) === "true");
+    const load = window.setTimeout(() => setAutoPrint(localStorage.getItem(AUTO_PRINT_STORAGE) === "true"), 0);
+    return () => window.clearTimeout(load);
   }, []);
 
   const scannedCount = wave.items.filter((item) => item.scannedAt).length;
@@ -65,58 +70,52 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
     ? wave.routeMappings.find((mapping) => mapping.routeNumber.toLowerCase() === selectedItem.routeNumber?.toLowerCase())?.stagingLocation ?? null
     : null;
 
-  async function handleScan(value: string) {
-    if (!value || busy || wave.archivedAt) return;
-    setBusy(true); setMessage(null);
-    try {
-      const response = await fetch(`/api/pick-waves/${encodeURIComponent(wave.id)}/scan`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scannedValue: value }),
-      });
-      const payload = await response.json() as { ok: true; result: ScanResult } | { ok: false; error: string };
-      if (!response.ok || !payload.ok) throw new Error("error" in payload ? payload.error : "Scan failed.");
-      const result = payload.result;
-      setLastResult(result);
-      setWave((current) => ({
-        ...current,
-        items: result.item && !result.alreadyScanned ? current.items.map((item) => item.id === result.item?.id ? { ...item, scannedAt: result.item.scannedAt } : item) : current.items,
-        scanCount: current.scanCount + 1,
-        scans: [{ id: crypto.randomUUID(), scannedValue: value, matched: result.matched, alreadyScanned: result.alreadyScanned, createdAt: new Date().toISOString() }, ...current.scans].slice(0, 25),
-      }));
-      if (!result.matched) setMessage({ text: "Not in pick wave", tone: "info" });
-      else if (result.alreadyScanned) setMessage({ text: "This matching item was already scanned.", tone: "warning" });
-      else {
-        setMessage({ text: result.stagingLocation ? `Matched — stage at ${result.stagingLocation}.` : "Item has no location.", tone: result.stagingLocation ? "success" : "info" });
-        if (autoPrint && result.stagingLocation) await sendLabel(result.item, result.stagingLocation, true);
-      }
-    } catch (error) {
-      const text = error instanceof Error ? error.message : "Scan failed.";
-      setMessage({ text, tone: "error" });
-      throw new Error(text);
-    } finally {
-      setBusy(false);
+  const [printMessage, setPrintMessage] = useState("");
+  const scanQueue = useObservationQueue(userId, acceptScanReceipt);
+
+  function acceptScanReceipt(receipt: ObservationReceipt, event: QueuedObservation) {
+    if (event.pickWaveId !== wave.id) return;
+    setInstructions(receipt.office);
+    const result = receipt.task as ScanResult | undefined;
+    if (!result) return;
+    setLastResult(result);
+    setWave(current => ({
+      ...current,
+      items: result.item ? current.items.map(item => item.id === result.item?.id ? { ...item, scannedAt: result.item.scannedAt } : item) : current.items,
+      scanCount: current.scanCount + (result.replayed ? 0 : 1),
+      scans: result.replayed ? current.scans : [{ id: event.eventId, scannedValue: event.rawIdentifier, matched: result.matched, alreadyScanned: result.alreadyScanned, createdAt: event.capturedAt }, ...current.scans].slice(0, 25),
+    }));
+    if (result.ambiguous) setMessage({ text: "Multiple units match. Scan the unique appliance barcode; no item was picked.", tone: "warning" });
+    else if (result.error) setMessage({ text: `Physical observation saved. Pick work needs review: ${result.error}`, tone: "warning" });
+    else if (!result.matched) setMessage({ text: "Presence evidence saved globally; this item is not in the pick wave.", tone: "info" });
+    else if (result.alreadyScanned) setMessage({ text: "This item was already scanned; the new observation was retained.", tone: "warning" });
+    else {
+      setMessage({ text: result.stagingLocation ? `Matched — stage at ${result.stagingLocation}. Placement still needs confirmation.` : "Item has no location.", tone: "success" });
+      if (autoPrint && result.stagingLocation && !result.replayed && !receipt.replayed) void sendLabel(result.item, result.stagingLocation, true);
     }
+  }
+
+  async function handleScan(value: string, source: "scanner" | "manual" = "scanner") {
+    if (!value || wave.archivedAt) return;
+    await scanQueue.capture({ rawIdentifier: value, captureMethod: source, pickWaveId: wave.id });
+    setMessage({ text: "Captured on device; waiting for server acknowledgement.", tone: "info" });
   }
 
   async function sendLabel(item: PickWaveItem | null, stagingLocation: string | null, automatic = false) {
     if (!item) return;
-    if (!stagingLocation) { setMessage({ text: "Item has no location. No label was printed.", tone: "info" }); return; }
-    if (!labels.printer || !labels.template) { setMessage({ text: "A manager must activate a printer destination and Pick Wave template before printing.", tone: "warning" }); return; }
-    if (printingRef.current) {
-      if (!automatic) return;
-      // A new scan must still print if an earlier manual label is in flight.
-      await printingRef.current;
-    }
+    if (!stagingLocation) { setPrintMessage("Item has no location. No label was sent."); return; }
+    if (!labels.printer || !labels.template) { setPrintMessage("Activate a printer and Pick Wave template before printing."); return; }
+    if (printingRef.current && !automatic) return;
+    const printer = labels.printer, template = labels.template, relay = labels.relayEnabled, fields = labelFields(item, stagingLocation);
+    const prior = printingRef.current ?? Promise.resolve();
     setPrinting(true);
-    const fields = labelFields(item, stagingLocation);
-    const pending = printLabel(labels.printer, renderPickWaveLabel(labels.template.zpl, fields) + "\x04", labels.relayEnabled)
-      .then((result) => { setMessage({ text: `${result} Item: ${itemIdentifier(item)}.`, tone: "success" }); })
-      .catch((error: unknown) => { setMessage({ text: error instanceof Error ? error.message : "Unable to send label.", tone: "warning" }); });
+    const pending = prior.catch(() => undefined).then(async () => {
+      try { setPrintMessage(`${await printLabel(printer, renderPickWaveLabel(template.zpl, fields) + "\x04", relay)} Item: ${itemIdentifier(item)}. Physical output is unconfirmed.`); }
+      catch (error) { setPrintMessage(error instanceof Error ? error.message : "Print outcome unknown. Check physical output before reprinting."); }
+    });
     printingRef.current = pending;
     await pending;
-    if (printingRef.current === pending) {
-      printingRef.current = null;
-      setPrinting(false);
-    }
+    if (printingRef.current === pending) { printingRef.current = null; setPrinting(false); }
   }
 
   async function saveRoutes() {
@@ -187,11 +186,14 @@ export default function PickWaveWorkspaceClient({ initialWave }: { initialWave: 
 
       {message ? <div className={`alert ${message.tone === "success" ? "alert-success" : message.tone === "warning" ? "alert-warning" : message.tone === "info" ? "alert-info" : "alert-error"}`}><span>{message.text}</span></div> : null}
 
+      <ScanInstructions result={instructions} />
+      <div className="rounded-xl border border-base-300 p-3 space-y-2"><p role="status">Pending observations on this device: {scanQueue.queuedCount} · needs review: {scanQueue.rejectedCount}</p>{scanQueue.error && <p className="text-warning">{scanQueue.error}</p>}<button className="btn btn-sm btn-outline" onClick={() => void scanQueue.retry()}>Save pending observations</button>{printMessage && <p className="text-sm" role="status">{printMessage}</p>}</div>
+
       <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6 items-start">
         <div className="space-y-6">
           <section className="card bg-base-100 border border-base-200 shadow-sm">
             <div className="card-body gap-5">
-              <div className="flex flex-wrap justify-between gap-3"><div><h2 className="card-title">Scan Item</h2><p className="text-sm text-base-content/60 mt-1">Matches LPN, serial, tracking, order, or part number.</p></div><label className="label cursor-pointer gap-3"><span className="label-text font-semibold">Automatically print label</span><input type="checkbox" className="toggle toggle-success" checked={autoPrint} onChange={(event) => { setAutoPrint(event.target.checked); localStorage.setItem(AUTO_PRINT_STORAGE, String(event.target.checked)); }} /></label></div>
+              <div className="flex flex-wrap justify-between gap-3"><div><h2 className="card-title">Scan Item</h2><p className="text-sm text-base-content/60 mt-1">Identifies warehouse stock globally before matching this wave. Shared order/part matches require a unique appliance barcode.</p></div><label className="label cursor-pointer gap-3"><span className="label-text font-semibold">Automatically print label</span><input type="checkbox" className="toggle toggle-success" checked={autoPrint} onChange={(event) => { setAutoPrint(event.target.checked); localStorage.setItem(AUTO_PRINT_STORAGE, String(event.target.checked)); }} /></label></div>
               <ScannerCapture title="Pick Wave Scanning" description="Scanner events are captured anywhere on the one-screen view without opening the keyboard." onScan={handleScan} enabled={!wave.archivedAt} disabledReason="Restore this wave before scanning." count={scannedCount} countLabel="picked" feedback={scanFeedback} result={lastItem && !lastResult?.stagingLocation ? <div className="grid h-full min-w-0 place-items-center text-center text-3xl sm:text-4xl font-black">Item has no location</div> : lastItem ? <div className="min-w-0 max-w-full overflow-hidden"><div className="text-xs uppercase tracking-[0.2em] text-slate-400">Staging Location</div><div className="max-w-full text-5xl sm:text-8xl font-black leading-none my-3 break-all">{lastResult?.stagingLocation}</div><div className="grid min-w-0 grid-cols-2 gap-3 text-sm">{itemFields(lastItem).map(({ label, value }) => <div key={label} className="min-w-0"><div className="text-xs uppercase text-slate-400">{label}</div><div className="font-semibold break-all">{value || "—"}</div></div>)}</div><button type="button" className="btn btn-success mt-4 w-full" disabled={printing || !labels.printer || !labels.template} onClick={() => void sendLabel(lastItem, lastResult?.stagingLocation ?? null)}>{lastResult?.alreadyScanned ? "Print Label Anyway" : "Print Label"}</button>{!labels.printer || !labels.template ? <p className="mt-2 text-xs text-amber-300">A printer and template must be configured before printing.</p> : null}</div> : lastResult && !lastResult.matched ? <div className="grid h-full min-w-0 place-items-center text-center text-3xl sm:text-4xl font-black">Not in pick wave</div> : undefined} />
 
               {lastItem && !lastResult?.stagingLocation ? <div className="rounded-2xl border-2 border-info bg-info/10 p-6"><div className="text-4xl font-bold">Item has no location</div><p className="mt-2">No label will be printed.</p></div> : lastItem ? <div className={`rounded-2xl border-2 p-5 ${lastResult?.alreadyScanned ? "border-warning bg-warning/10" : "border-success bg-success/10"}`}>

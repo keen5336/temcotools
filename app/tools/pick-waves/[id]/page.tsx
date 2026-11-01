@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import PickWaveWorkspaceClient from "@/components/pick-waves/PickWaveWorkspaceClient";
-import { requireAuth } from "@/lib/auth";
+import { requireCapability } from "@/lib/auth";
 import { getPickWave } from "@/lib/pick-waves";
 
 export default async function PickWavePage({ params }: { params: Promise<{ id: string }> }) {
-  const session = await requireAuth();
+  const session = await requireCapability("workflow.read");
   const { id } = await params;
   const wave = await getPickWave(id);
   if (!wave) notFound();
@@ -13,7 +13,7 @@ export default async function PickWavePage({ params }: { params: Promise<{ id: s
     <div className="min-h-screen bg-base-200">
       <NavBar session={session} />
       <main className="max-w-[1600px] mx-auto px-4 py-8">
-        <PickWaveWorkspaceClient initialWave={{
+        <PickWaveWorkspaceClient userId={session.userId} initialWave={{
           ...wave,
           createdAt: wave.createdAt.toISOString(), updatedAt: wave.updatedAt.toISOString(), archivedAt: wave.archivedAt?.toISOString() ?? null,
           createdBy: wave.createdByUser?.displayName ?? null,
