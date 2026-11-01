@@ -1,6 +1,14 @@
 # Authenticated remote MCP
 
-Implemented source: the installed MCP SDK's `mcpAuthRouter`/`OAuthServerProvider` and stateless `StreamableHTTPServerTransport`, backed by the existing application's PostgreSQL identity/session/command layer. This is an additional process in the existing application composition, not a new identity platform. Production deployment and actual external-client/operator acceptance remain pending.
+Implemented source: the installed MCP SDK's `mcpAuthRouter`/`OAuthServerProvider` and stateless `StreamableHTTPServerTransport`, backed by the existing application's PostgreSQL identity/session/command layer. This is an additional process in the existing application composition, not a new identity platform. Production cutover and actual owner-client/operator acceptance remain pending; the separate public pilot qualification is recorded below.
+
+## Live isolated public pilot
+
+Use **https://temco-v2.chronchive.com/mcp** with a Streamable HTTP/OAuth-capable client. Public UI/sign-in is https://temco-v2.chronchive.com/ and issuer/discovery uses the same HTTPS origin. The explicitly approved separate pilot runs native Linux/amd64 source 5187, without sharing production database/files/keys/cookies/relay sessions. Native and actual public HTTPS scoped SDK, admin denial and revocation passed `20261101-114236-build-64782`; independent Chrome verified sign-in and discovery. See the [launch record/private owner handoff](pilot-launch-status.md) for expiry, pins, isolation and exact limits.
+
+Adam privately activates his named account, chooses password/MFA/recovery and approves his actual client's minimal scopes; the agent never redeems credentials or self-approves consent. Actual owner-client attachment is pending. `workflow.read` supports named DMP reads/private samples; add `inventory.read` only for inventory lookup, and privileged administration scopes only for that authorized purpose. Work-browser DMP pairing/sharing and body-only JSON/CSV/XML intake are described in the [collaboration flow](pilot-runbook.md#first-collaboration-session-after-approved-launch). No browser session is copied between machines. Live MARS/printing and non-GET/HEAD DMP effects remain disabled; Route Planner live identity/reads and official finals remain unqualified.
+
+The local preview below is a separate retained 5bb9268 runtime with its own expired enrollment, not the public pilot. Its older source-specific action counts and checks remain historical.
 
 ## Running isolated local preview
 
@@ -12,7 +20,7 @@ Owner steering late2026-10-31 parks DMP qualification until work access is avail
 | MCP client server URL | `http://127.0.0.1:55371/mcp` |
 | OAuth issuer/discovery origin | `http://127.0.0.1:55371/` |
 
-These are loopback addresses on that Mac. A remote phone/cloud MCP client cannot reach them merely by entering this URL. No public proxy, DNS change, production deployment, client configuration or attachment to this assistant's tools has been performed. An HTTPS/private reachable endpoint and an actual client connection remain separate setup steps. No DMP session is needed to connect and use the independent application commands.
+These are loopback addresses on that Mac. A remote phone/cloud MCP client cannot reach them merely by entering this URL. This local preview itself has no public proxy or DNS and was not attached to this assistant's tools. The separately approved public pilot above now supplies the reachable endpoint; its actual owner-client connection remains a human setup step. No DMP session is needed to connect and use the independent application commands.
 
 Release: `/Volumes/MacDev/ProjectArchive/Development/Qualification/temcotools-v2-runtime-5bb9268`, with its own build/dependencies/generated client. Private runtime directory: `/Volumes/MacDev/ProjectArchive/Development/Qualification/temcotools-v2-build-20261031/mcp-runtime-private`. Its mode0700 directory holds mode0600 `environment.json`, PID files and logs. Keep those private and outside Git; never print their contents. The isolated task-owned PostgreSQL database is `temcotools_v2_preview_test` on loopback55439, with30 migrations and no operational data. The DMP broker URL deliberately points to a separate inactive local port; it cannot silently use the production broker.
 
