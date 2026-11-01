@@ -36,6 +36,18 @@ test("identity commands against disposable PostgreSQL", { skip: !testUrl }, asyn
     const setup = await mfa.beginMfaEnrollment(actor, { password }, context);
     await mfa.confirmMfaEnrollment(actor, { token: await generate({ secret: setup.secret }) }, context);
     actor = await principalFor(signedIn.claim);
+    await suite.test("delegated access administration cannot assign or recover authority beyond its client scope", async () => {
+      const { createAccessGrant, authenticateAccessGrant } = await import("../lib/application/grants");
+      const grant = await createAccessGrant(actor, { clientName: "Synthetic narrow administrator", scopes: ["users.manage"], lifetimeMinutes: 5 });
+      const narrow = await authenticateAccessGrant(grant.token);
+      await assert.rejects(identity.createIdentityUser(narrow, { username: `${namespace}-forbidden`, displayName: "Synthetic forbidden account", role: "admin" }));
+      await assert.rejects(identity.saveRoleBundle(narrow, { name: `${namespace}-forbidden`, capabilities: ["inventory.identify"] }));
+      await assert.rejects(identity.issueRecovery(narrow, { userId: admin.id, purpose: "reset", reason: "Synthetic narrowed recovery refusal" }));
+      await assert.rejects(identity.updateIdentityUser(narrow, { id: admin.id, bundleIds: ["legacy-admin"] }));
+      assert.equal(await prisma.user.count({ where: { username: `${namespace}-forbidden` } }), 0);
+      const permitted = await identity.saveRoleBundle(narrow, { name: `${namespace}-narrow`, capabilities: ["users.manage"] });
+      assert.deepEqual(permitted.capabilities, ["users.manage"]);
+    });
     let targetId = "";
     let targetName = "";
     let targetClaim: SessionClaim;

@@ -7,6 +7,8 @@ export const CAPABILITIES = [
   "labels.read", "labels.print", "labels.manage", "users.manage",
   "files.manage", "payloads.manage", "diagnostics.use",
   "office.decide", "office.authorize_rtv",
+  "account.self",
+  "dispatch.allocate", "dispatch.signoff",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -49,6 +51,7 @@ export const CURRENT_USER_SELECT = {
   roleBundles: { select: { bundle: { select: { capabilities: true } } } },
 } as const;
 const COMMON_CAPABILITIES: readonly Capability[] = [
+  "account.self",
   "inventory.read", "inventory.write", "workflow.read", "workflow.execute",
   "labels.read", "labels.print",
 ];
@@ -82,12 +85,16 @@ export async function resolvePrincipal(
   const user = await lookup(claim.userId!);
   if (!user || user.id !== claim.userId || !user.isActive || user.authVersion !== claim.authVersion) return null;
   if (user.role !== "admin" && user.role !== "manager" && user.role !== "user") return null;
+  const assigned = user.roleBundles
+    ? [...new Set(user.roleBundles.flatMap(({ bundle }) => bundle.capabilities))].filter((cap): cap is Capability => CAPABILITIES.includes(cap as Capability))
+    : [...capabilitiesForRole(user.role)];
   return {
     userId: user.id, username: user.username, displayName: user.displayName,
     role: user.role, authVersion: user.authVersion,
-    capabilities: user.roleBundles
-      ? [...new Set(user.roleBundles.flatMap(({ bundle }) => bundle.capabilities))].filter((cap): cap is Capability => CAPABILITIES.includes(cap as Capability))
-      : capabilitiesForRole(user.role),
+    // An active person can always secure their own account, even if all
+    // warehouse bundles are removed. Delegated grants still intersect scopes
+    // and receive this capability only when it was explicitly granted.
+    capabilities: [...new Set([...assigned, "account.self" as const])],
   };
 }
 

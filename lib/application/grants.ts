@@ -20,7 +20,7 @@ export async function createAccessGrant(principal: Principal, input: unknown) {
   if (data.scopes.some((scope) => !principal.capabilities.includes(scope))) throw new GrantError("A grant cannot exceed your current permissions.");
   const token = `temco_${randomBytes(32).toString("base64url")}`;
   return prisma.$transaction(async (tx) => {
-    const current = await assertCurrentPrincipal(tx, principal);
+    const current = await assertCurrentPrincipal(tx, principal, "account.self");
     if (data.scopes.some(scope => !current.capabilities.includes(scope))) throw new GrantError("A grant cannot exceed current permissions.");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`client-grants:${principal.userId}`}, 0))`;
     const activeCount = await tx.appAccessGrant.count({where:{userId:principal.userId,revokedAt:null,expiresAt:{gt:new Date()}}});
@@ -33,13 +33,13 @@ export async function createAccessGrant(principal: Principal, input: unknown) {
 
 export async function listAccessGrants(principal: Principal) {
   return prisma.$transaction(async tx => {
-    await assertCurrentPrincipal(tx, principal);
+    await assertCurrentPrincipal(tx, principal, "account.self");
     return tx.appAccessGrant.findMany({where:{userId:principal.userId},select:publicFields,orderBy:{createdAt:"desc"},take:100});
   });
 }
 export async function revokeAccessGrant(principal: Principal, id: string) {
   return prisma.$transaction(async tx => {
-    await assertCurrentPrincipal(tx, principal);
+    await assertCurrentPrincipal(tx, principal, "account.self");
     const result = await tx.appAccessGrant.updateMany({where:{id,userId:principal.userId,revokedAt:null},data:{revokedAt:new Date()}});
     if(result.count) await tx.identityAudit.create({data:{action:"client_grant_revoked",actorUserId:principal.userId,sessionId:principal.sessionId,reason:id}});
     return {revoked:result.count > 0};

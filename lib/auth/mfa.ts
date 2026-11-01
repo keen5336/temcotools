@@ -50,7 +50,7 @@ async function replaceRecoveryCodes(tx: Prisma.TransactionClient, userId: string
 
 export async function getMfaStatus(principal: Principal) {
   return prisma.$transaction(async (tx) => {
-    const current = await assertIdentityPrincipal(tx, principal);
+    const current = await assertIdentityPrincipal(tx, principal, "account.self");
     const factor = await tx.userMfa.findUnique({ where: { userId: current.userId }, select: { enabledAt: true, pendingExpiresAt: true } });
     return { enabled: Boolean(factor?.enabledAt), enabledAt: factor?.enabledAt ?? null, pendingExpiresAt: factor?.pendingExpiresAt ?? null,
       remainingRecoveryCodes: await tx.mfaRecoveryCode.count({ where: { userId: current.userId, consumedAt: null } }),
@@ -65,7 +65,7 @@ export async function beginMfaEnrollment(principal: Principal, input: unknown, c
   const secret = generateSecret();
   const encryptedSecret = encryptMfaSecret(principal.userId, secret);
   return prisma.$transaction(async (tx) => {
-    const current = await assertIdentityPrincipal(tx, principal);
+    const current = await assertIdentityPrincipal(tx, principal, "account.self");
     const existing = await tx.userMfa.findUnique({ where: { userId: current.userId } });
     if (existing?.enabledAt) throw new IdentityError("An authenticator is already enrolled. Verify it before replacing or disabling it.", 409);
     const at = new Date();
@@ -83,7 +83,7 @@ export async function confirmMfaEnrollment(principal: Principal, input: unknown,
   const { token } = z.object({ token: z.string().regex(/^\d{6}$/) }).parse(input);
   await consumeIdentityBudget("mfa", principal.userId, context);
   return prisma.$transaction(async (tx) => {
-    const current = await assertIdentityPrincipal(tx, principal);
+    const current = await assertIdentityPrincipal(tx, principal, "account.self");
     assertRecentPasswordAuthentication(current);
     const factor = await tx.userMfa.findUnique({ where: { userId: current.userId } });
     if (!factor || factor.enabledAt || factor.enrollmentSessionId !== current.sessionId || !factor.pendingExpiresAt || factor.pendingExpiresAt <= new Date()) throw new IdentityError("Authenticator setup expired or belongs to another session. Start again.", 409);
@@ -102,7 +102,7 @@ export async function verifyMfa(principal: Principal, input: unknown, context: I
   const data = proofSchema.parse(input);
   await confirmPassword(principal, data.password, context);
   return prisma.$transaction(async (tx) => {
-    const current = await assertIdentityPrincipal(tx, principal);
+    const current = await assertIdentityPrincipal(tx, principal, "account.self");
     const method = await consumeProof(tx, current, data);
     const at = new Date();
     await tx.userSession.update({ where: { id: current.sessionId }, data: { mfaVerifiedAt: at, lastStrongAuthenticatedAt: at, lastActivityAt: at } });
@@ -115,7 +115,7 @@ export async function regenerateMfaRecoveryCodes(principal: Principal, input: un
   const data = proofSchema.parse(input);
   await confirmPassword(principal, data.password, context);
   return prisma.$transaction(async (tx) => {
-    const current = await assertIdentityPrincipal(tx, principal);
+    const current = await assertIdentityPrincipal(tx, principal, "account.self");
     await consumeProof(tx, current, data);
     const at = new Date();
     const recoveryCodes = await replaceRecoveryCodes(tx, current.userId);
@@ -129,7 +129,7 @@ export async function disableMfa(principal: Principal, input: unknown, context: 
   const data = proofSchema.parse(input);
   await confirmPassword(principal, data.password, context);
   return prisma.$transaction(async (tx) => {
-    const current = await assertIdentityPrincipal(tx, principal);
+    const current = await assertIdentityPrincipal(tx, principal, "account.self");
     await consumeProof(tx, current, data);
     await tx.userMfa.delete({ where: { userId: current.userId } });
     await tx.userSession.updateMany({ where: { userId: current.userId }, data: { mfaVerifiedAt: null } });

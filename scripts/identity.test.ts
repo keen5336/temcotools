@@ -60,7 +60,7 @@ test("multiple current bundles grant a union; empty assignments fail closed and 
   const claim = { userId: "user-a", authVersion: 1, sessionId: "synthetic-session-a", issuedAt: now - 1000, expiresAt: now + 60_000 };
   const user = { id: "user-a", username: "a", displayName: "A", role: "user" as const, isActive: true, authVersion: 1 };
   const principal = await resolvePrincipal(claim, async () => ({ ...user, roleBundles: [{ bundle: { capabilities: ["inventory.read"] } }, { bundle: { capabilities: ["inventory.identify", "inventory.read", "invented.admin"] } }] }), now);
-  assert.deepEqual(principal?.capabilities, ["inventory.read", "inventory.identify"]);
-  assert.deepEqual((await resolvePrincipal(claim, async () => ({ ...user, roleBundles: [] }), now))?.capabilities, []);
+  assert.deepEqual(principal?.capabilities, ["inventory.read", "inventory.identify", "account.self"]);
+  assert.deepEqual((await resolvePrincipal(claim, async () => ({ ...user, roleBundles: [] }), now))?.capabilities, ["account.self"]);
   assert.equal(capabilitiesForRole("manager").includes("inventory.identify"), false);
 });
