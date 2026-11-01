@@ -62,7 +62,7 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     return { ...principal, sessionId: session.id, strongAuthenticatedAt: at.getTime(), mfaVerifiedAt: at.getTime() } as Principal;
   }
   try {
-    const admin = await actor("admin", ["labels.read", "labels.print", "labels.manage"]), requester = await actor("user", ["labels.read", "labels.print"]), receiver = await actor("user", ["labels.read", "labels.print"]);
+    const admin = await actor("admin", ["labels.read", "labels.print", "labels.manage", "inventory.read"]), requester = await actor("user", ["labels.read", "labels.print"]), receiver = await actor("user", ["labels.read", "labels.print"]);
     const printer = await prisma.labelPrinter.create({ data: { name: `Synthetic printer ${suffix}`, endpoint: "http://printer.invalid:9100", contentType: "text/plain" } }); printerId = printer.id;
     for (let i = 0; i < 4; i++) { const unit = await prisma.warehouseUnit.create({ data: { creationEvidence: "Synthetic label test only" } }); unitIds.push(unit.id); }
     await assert.rejects(workflow.saveLabelWorkflow(requester, { ...draft, expectedRevision: 0, note: "Unauthorized" }));
@@ -90,6 +90,9 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     const report = { ...claimInput, reportToken: claim.reportToken, status: "sent_unconfirmed", note: "Synthetic browser ACK; no physical print tested" };
     const sent = await effect.reportLabelDelivery(receiver, report);
     assert.equal(sent.state, "sent_unconfirmed"); assert.equal(sent.physicalOutput, "unconfirmed");
+    assert.equal((await effect.getLabelIssuance({ ...requester, capabilities: ["labels.read"] }, sent.id)).id, sent.id, "Viewing your receipt does not require executing another print.");
+    assert.equal((await effect.getLabelIssuance({ ...requester, capabilities: ["labels.print"] }, sent.id)).id, sent.id, "A print-only caller can recover its own original receipt.");
+    await assert.rejects(effect.getLabelIssuance({ ...receiver, capabilities: ["labels.print"] }, sent.id), "Print-only authority does not read somebody else's receipt.");
     assert.equal((await effect.reportLabelDelivery(receiver, report)).id, sent.id);
     await assert.rejects(effect.reportLabelDelivery(receiver, { ...report, status: "not_sent" }));
     const updated = await effect.prepareLabelIssuance(requester, { ...base, operationId: randomUUID(), fields: { ...fields, deliveryDate: "2026-11-03" } });
@@ -101,6 +104,8 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     assert.equal(reprint.issuance.reprintOf, updated.issuance.id); assert.equal(reprint.issuance.automatic, false);
     await effect.reconcileLabelIssuance(requester, { issuanceId: sent.id, outcome: "applied", reason: "Synthetic operator confirmation only" });
     const state = await workflow.evaluateLabel(admin, { purpose: draft.purpose, unitId: unitIds[0], fields });
+    await assert.rejects(workflow.evaluateLabel({ ...admin, capabilities: ["labels.read"] }, { purpose: draft.purpose, unitId: unitIds[0], fields }), "Label-template read scope does not reveal warehouse physical observations.");
+    assert.ok((await deviceCommands.listPrintingDevices(admin)).every(item => !("sessionId" in item)), "Shared device diagnostics do not expose another user's session binding.");
     assert.equal(state.lastObserved, null); assert.equal(await prisma.warehousePhysicalObservation.count({ where: { unitId: unitIds[0] } }), 0);
     const unknownSnapshot = await prisma.labelIssuance.findUniqueOrThrow({ where: { id: updated.issuance.id } });
     await prisma.labelIssuance.createMany({ data: Array.from({ length: 21 }, (_, index) => ({ ...unknownSnapshot, id: randomUUID(), operationId: randomUUID(), state: "verified_not_printed", createdAt: new Date(Date.now() + index + 1), claimTokenHash: null, reportFingerprint: null })) });

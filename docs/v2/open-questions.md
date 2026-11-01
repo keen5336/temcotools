@@ -2,6 +2,8 @@
 
 These questions gate particular capabilities, not the entire plan. The [strategy](strategy.md) fixes the operational model; the [implementation plan](implementation-plan.md) can begin with source-independent access and lookup work. No customer samples, credentials or captured production payloads belong in this public repository.
 
+Late-night owner steering: Adam is home without DMP access. Q1/Q2 reference requests are parked until work access is convenient; do not ask for credentials/screens tonight. Authenticated MCP is now running locally as described in the [handoff](mcp-runbook.md#running-isolated-local-preview). Independent implementation/qualification continues. Baseline source statements below are explicitly historical where v2 has since implemented the planned boundary; [build status](build-status.md) is the implementation record.
+
 ## Q1. Obtainable unit, line, attempt and submission links
 
 **Verified in source:** [DMP config](../../lib/api-relay/config.ts) defines `session` and `deliveries`, including the existing deliveries-by-date/location request. The owner confirms that integration works well. Other operations can be configured, but their deployed configuration was not inspected. No checked-in DMP response contract establishes MSN/line quantity, attempt outcomes, exchange direction or submission linkage. [`PickWaveItem.trackingNumber`](../../prisma/schema.prisma) is not evidence that this is MSN. [MARS workbook import](../../lib/mars/import.ts) has request/order/serial/model/status/replacement fields, but no typed MSN or LPN link. The [label helper](../../app/tools/rtv-label/MarsLabelClient.tsx) extracts from a detail page; it does not create submissions.
@@ -42,7 +44,7 @@ These questions gate particular capabilities, not the entire plan. The [strategy
 
 ## Q5. Recovery readiness and authentication deployment
 
-**Verified publicly on 2026-10-31:** Cloudflare [Email Service](https://developers.cloudflare.com/email-service/) includes outbound Sending beta via REST/Workers/SMTP. General-recipient transactional sending requires Workers Paid; [domain setup](https://developers.cloudflare.com/email-service/get-started/send-emails/) requires Cloudflare DNS and an onboarded sending domain. Email Routing alone is not general outbound sending. The app's source currently has PIN auth and no implemented recovery flow.
+**Verified publicly on 2026-10-31:** Cloudflare [Email Service](https://developers.cloudflare.com/email-service/) includes outbound Sending beta via REST/Workers/SMTP. General-recipient transactional sending requires Workers Paid; [domain setup](https://developers.cloudflare.com/email-service/get-started/send-emails/) requires Cloudflare DNS and an onboarded sending domain. Email Routing alone is not general outbound sending. The planning baseline had PIN auth/no recovery; v2 now implements strong passwords, server sessions, MFA and auditable one-use admin-assisted enrollment/recovery. Email delivery is still unconfigured.
 
 **Unverified:** intended recovery sender domain/account plan, domain onboarding/authentication, API permission and secure credential delivery, recipient inbox readiness, and whether all staff have individually controlled recovery destinations. No account credentials, DNS state or mail service configuration was inspected in this turn.
 

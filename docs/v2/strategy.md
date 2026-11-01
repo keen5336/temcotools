@@ -14,11 +14,13 @@ Standing build mandate, 2026-10-31: implement, test, review, correct, commit and
 
 Continuing owner authorization, updated 2026-10-31: Codex may use focused, bounded subagents when effective in later TemcoTools v2 planning/build tasks. This supersedes the original single-agent restriction. Inherit GPT-6.1 Sol with `reasoningEffort=xhigh`; no model substitution is authorized. The main thread owns integration and synthesis. Avoid duplicate investigation, delegation overhead and tests that merely test test infrastructure. This permission does not expand deployment or external-action authority.
 
-## Source-grounded current state
+Late-night owner steering: park requests for private DMP/unit/attempt/official-finals references while Adam lacks work access. Prioritize the authenticated MCP server and continue independent implementation. See the [running local service handoff](mcp-runbook.md#running-isolated-local-preview); upstream qualification remains pending rather than blocking unrelated work.
+
+## Source-grounded planning baseline
 
 The isolated `v2` worktree and original `main` checkout both started clean at the baseline above. Live remote inspection found `main` and `v1` at that same SHA, no remote `v2` yet, and no unpublished original-checkout commits. There was no local DMP drift to copy. These are inspection-time facts, not a future guarantee; recheck before implementation. No secret/config files or production data were inspected.
 
-[`package.json`](../../package.json) pins Next.js 16.2.2 and React 19.2.4 and declares Prisma 7.6, TypeScript and Tailwind. The following code, rather than the older `REPO_MAP.json`, grounds this plan:
+At planning time, [`package.json`](../../package.json) pinned Next.js16.2.2 and React19.2.4 and declared Prisma7.6, TypeScript and Tailwind. The table below records that baseline's source findings; it is not a claim that v2 still has PIN-only auth or a read-only unauthenticated MCP. Current implementation/security updates and exact tested source are in [build status](build-status.md).
 
 | Existing seam | Verified behavior and consequence |
 | --- | --- |

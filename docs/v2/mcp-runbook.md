@@ -2,6 +2,36 @@
 
 Implemented source: the installed MCP SDK's `mcpAuthRouter`/`OAuthServerProvider` and stateless `StreamableHTTPServerTransport`, backed by the existing application's PostgreSQL identity/session/command layer. This is an additional process in the existing application composition, not a new identity platform. Production deployment and actual external-client/operator acceptance remain pending.
 
+## Running isolated local preview
+
+Owner steering late2026-10-31 parks DMP qualification until work access is available and prioritizes a working MCP server. A fixed, optimized **8c65740** release is now running on the workspace Mac, independently of subsequent source edits:
+
+| Purpose | Local address |
+| --- | --- |
+| Application/sign-in/phone consent | `http://127.0.0.1:55370` |
+| MCP client server URL | `http://127.0.0.1:55371/mcp` |
+| OAuth issuer/discovery origin | `http://127.0.0.1:55371/` |
+
+These are loopback addresses on that Mac. A remote phone/cloud MCP client cannot reach them merely by entering this URL. No public proxy, DNS change, production deployment, client configuration or attachment to this assistant's tools has been performed. An HTTPS/private reachable endpoint and an actual client connection remain separate setup steps. No DMP session is needed to connect and use the independent application commands.
+
+Release: `/Volumes/MacDev/ProjectArchive/Development/Qualification/temcotools-v2-runtime-8c65740`, with its own build/dependencies/generated client. Private runtime directory: `/Volumes/MacDev/ProjectArchive/Development/Qualification/temcotools-v2-build-20261031/mcp-runtime-private`. Its mode0700 directory holds mode0600 `environment.json`, PID files and logs. Keep those private and outside Git; never print their contents. The isolated task-owned PostgreSQL database is `temcotools_v2_preview_test` on loopback55439, with30 migrations and no operational data. The DMP broker URL deliberately points to a separate inactive local port; it cannot silently use the production broker.
+
+From the v2 worktree, check current process ownership and health:
+
+```sh
+python3 scripts/v2-local-services.py status \
+  --runtime-dir /Volumes/MacDev/ProjectArchive/Development/Qualification/temcotools-v2-build-20261031/mcp-runtime-private \
+  --source /Volumes/MacDev/ProjectArchive/Development/Qualification/temcotools-v2-runtime-8c65740
+```
+
+Use the same arguments with `start` or `stop` for this preview only. The helper requires mounted MacDev, protected configuration, the exact test database and loopback URLs. It verifies command/cwd/process-group ownership before stopping, refuses unknown occupied ports and preserves failed diagnostics. It never force-kills or automatically retries unknown operations. Running it does not migrate the database, enroll a person, connect DMP, submit MARS, print or configure a public service. Start does not install login/reboot autostart; these detached processes persist across agent turns, but host restart or process exit requires an explicit start. At the recorded restart, supervisors were MCP97470/app97487; always recheck rather than trust historical PIDs.
+
+Owner username `adam` was created **unenrolled**. Its initial one-use enrollment code was written privately to `initial-enrollment.code` in that directory, never read/redeemed by the agent. It expires2026-11-01T05:15:08.799Z. When convenient, the person uses `/signin/recovery` on the local app to set their own passphrase, then `/account/security` for privileged MFA. If expired, an authorized host operator may explicitly reissue through the existing guarded `v2-bootstrap.ts --enroll-existing` workflow described in the [cutover runbook](cutover-runbook.md); do not silently replace identity, choose the owner's password or return the code in MCP output. Staff/operational setup is not required tonight.
+
+Local client setup: use the MCP server URL above in a Streamable HTTP/OAuth-capable client on the same Mac. Discovery/registration starts the browser consent flow; select the minimal scopes for the person's work. `application_actions` lists permitted actions, optionally by prefix; `application_action_info` describes one action and returns its published schema; `application_action` executes it with the shared validation/receipts. Domains without a published schema still enforce their canonical input validation. `warehouse_lookup` and retained MARS queries remain convenient typed tools. Human credential/authenticator/consent steps open the real UI rather than accepting secrets from an agent.
+
+The running service passed actual temporary synthetic password login, PKCE consent/token exchange, SDK connection, scoped action/schema discovery and shared lookup, administrative denial and session revocation. After a controlled stop/start the same smoke passed again: receipt `20261031-235123-build-97526.json`. The owner account remained unenrolled. `scripts/mcp-running-smoke.ts` is restricted to this exact isolated database and cleans only its own synthetic fixtures; load its environment securely without shell-expanding or printing private values. This is actual local SDK qualification, separate from a chosen owner's client, remote TLS/proxy and Zebra acceptance.
+
 ## Configure and run
 
 Apply the ordinary Prisma migrations, including `20261101100000_authenticated_mcp_oauth`, before enabling this process. Preserve the application's user IDs, session state, access generation and audit history. Use the same database and configuration in the Next app and MCP process:

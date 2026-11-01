@@ -13,6 +13,8 @@ Status: active build sequence under the standing owner mandate, 2026-10-31. See 
 
 ## Continuous execution
 
+Late-night owner steering parks private DMP/official-finals qualification questions until work access is available. Get the authenticated MCP service running and continue source-independent work. The [local MCP handoff](mcp-runbook.md#running-isolated-local-preview) records actual running-service qualification and its remote/client limits.
+
 Advance multiple dependency-ready packages in the same active run; a stage, passing suite, commit or helper handoff is a progress checkpoint, not a stopping point. The hourly supervisor is fallback only. Maintain the single verified adaptive continuation and state/validation/helper references in [build status](build-status.md); inspect before adding anything, never duplicate it, and cancel unused continuation after completion or full owner-dependent blockage. Recheck owner steering/state on every continuation.
 
 ## Sequenced vertical slices
@@ -132,6 +134,6 @@ For future authorized MARS creation, add the action to A12/A13 using the confirm
 
 ## Definition of a useful handoff
 
-Next build task should begin with slice 1, not a runtime rewrite. Record its exact scope, baseline and exclusions, preserve current DMP behavior, and deliver one reviewable operator improvement with its shared UI/MCP boundary. Resolve Q1/Q2 before making promises about automated demand/history/finals, and Q3 before any automated MARS creation. Do not block source-independent foundations on those samples.
+The initial build began with slice1 and has advanced through independent portions of the full sequence; resume from [build status](build-status.md), rather than restarting slice1. Preserve current DMP behavior and the shared UI/MCP boundary. Resolve Q1/Q2 before making promises about automated demand/history/official finals, and Q3 before automated MARS creation. Do not block independent implementation on those samples.
 
 At each slice handoff report changed behavior, relevant validation, remaining limits, branch/HEAD and publication state. Retain only useful receipts/diagnostics and normal tests; no separate proof bureaucracy. Deployment, real mail, DNS changes and live upstream mutations require explicit task authority and concrete readiness checks beyond the standing source build mandate.
