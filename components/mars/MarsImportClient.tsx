@@ -20,6 +20,11 @@ export default function MarsImportClient({ latestBatch }: MarsImportClientProps)
   const [result, setResult] = useState<MarsImportSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [scope, setScope] = useState("warehouse");
+  const [coverage, setCoverage] = useState("partial");
+  const [sourceAsOf, setSourceAsOf] = useState("");
+  const [coverageEvidence, setCoverageEvidence] = useState("");
+  const [operationId, setOperationId] = useState<string | null>(null);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -35,6 +40,11 @@ export default function MarsImportClient({ latestBatch }: MarsImportClientProps)
 
       const formData = new FormData();
       formData.set("file", file);
+      const currentOperation = operationId ?? crypto.randomUUID(); setOperationId(currentOperation);
+      formData.set("operationId", currentOperation);
+      formData.set("scope", scope); formData.set("coverage", coverage);
+      if (sourceAsOf) formData.set("sourceAsOf", new Date(sourceAsOf).toISOString());
+      if (coverageEvidence) formData.set("coverageEvidence", coverageEvidence);
 
       const response = await fetch("/api/mars/import", {
         method: "POST",
@@ -49,6 +59,7 @@ export default function MarsImportClient({ latestBatch }: MarsImportClientProps)
 
       setResult(payload);
       setFile(null);
+      setOperationId(null);
       form.reset();
       router.refresh();
     });
@@ -72,9 +83,14 @@ export default function MarsImportClient({ latestBatch }: MarsImportClientProps)
                   type="file"
                   accept=".xlsx,.xls"
                   className="file-input file-input-bordered w-full"
-                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                  onChange={(event) => { setFile(event.target.files?.[0] ?? null); setOperationId(null); }}
                 />
               </label>
+              <label className="block">Exact report scope<input className="input input-bordered w-full mt-1" value={scope} maxLength={150} required onChange={event => setScope(event.target.value)} /></label>
+              <label className="block">Coverage<select className="select select-bordered w-full mt-1" value={coverage} onChange={event => setCoverage(event.target.value)}><option value="partial">Partial / completeness not verified</option><option value="complete">Complete for this exact scope</option></select></label>
+              <label className="block">Source as of<input className="input input-bordered w-full mt-1" type="datetime-local" value={sourceAsOf} required={coverage === "complete"} onChange={event => setSourceAsOf(event.target.value)} /></label>
+              {coverage === "complete" && <label className="block">Full-scope filters / verification evidence<textarea className="textarea textarea-bordered w-full mt-1" value={coverageEvidence} required minLength={5} maxLength={2000} onChange={event => setCoverageEvidence(event.target.value)} /></label>}
+              <p className="text-sm">Partial files update reported rows only. A declared complete scope can flag an omitted submission as not reported; it cannot prove external deletion, archive completion or physical departure. Original rows and each new batch are retained.</p>
 
               <button type="submit" className={`btn btn-primary ${isPending ? "btn-disabled" : ""}`}>
                 {isPending ? "Importing..." : "Import Spreadsheet"}

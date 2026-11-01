@@ -1,5 +1,12 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { writeMars, MarsWorkflowError, type MarsWriter, type MarsDatabase } from "./access";
+import type { Principal } from "@/lib/auth/principal";
+import { recordWorkflowObservation } from "@/lib/warehouse/units";
+import { createHash } from "node:crypto";
+import { getMarsBatchSnapshot } from "./snapshots";
+
+export type MarsBufferedScan = string | { value: string; scannedAt?: string | null; eventId?: string; capturedByUserId?: string | null; captureSessionId?: string | null; captureMethod?: "scanner" | "manual"; legacyUnassigned?: boolean };
 import { classifyMarsUnit } from "@/lib/mars/classification";
 
 const AUDIT_FEEDBACK_UNIT_SELECT = {
@@ -31,6 +38,7 @@ const AUDIT_DETAIL_SESSION_SELECT = {
     },
   },
   marsAuditScans: {
+    where: { voidedAt: null },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     select: {
       id: true,
@@ -39,6 +47,12 @@ const AUDIT_DETAIL_SESSION_SELECT = {
       duplicateInSession: true,
       manualEntry: true,
       createdAt: true,
+      capturedAt: true,
+      captureMethod: true,
+      captureSessionId: true,
+      captureProvenance: true,
+      warehouseObservationId: true,
+      userId: true,
       marsUnitId: true,
       marsUnit: {
         select: {
@@ -84,7 +98,7 @@ const AUDIT_DETAIL_SESSION_SELECT = {
   },
   _count: {
     select: {
-      marsAuditScans: true,
+      marsAuditScans: { where: { voidedAt: null } },
     },
   },
 } as const satisfies Prisma.MarsAuditSessionSelect;
@@ -102,6 +116,7 @@ const AUDIT_LIST_SESSION_SELECT = {
     },
   },
   marsAuditScans: {
+    where: { voidedAt: null },
     select: {
       matched: true,
       duplicateInSession: true,
@@ -109,7 +124,7 @@ const AUDIT_LIST_SESSION_SELECT = {
   },
   _count: {
     select: {
-      marsAuditScans: true,
+      marsAuditScans: { where: { voidedAt: null } },
     },
   },
 } as const satisfies Prisma.MarsAuditSessionSelect;
@@ -183,6 +198,7 @@ export interface AuditUnknownScanRow {
 
 export interface MarsAuditDetail {
   session: SubmittedAuditSessionSummary;
+  voidedScans: Array<{ id: string; scannedValue: string; createdAt: Date; voidedAt: Date | null; voidedByUserId: string | null; voidReason: string | null }>;
   scans: Array<{
     id: string;
     scannedValue: string;
@@ -190,6 +206,12 @@ export interface MarsAuditDetail {
     duplicateInSession: boolean;
     manualEntry: boolean;
     createdAt: Date;
+    capturedAt: Date | null;
+    captureMethod: string | null;
+    captureSessionId: string | null;
+    captureProvenance: string;
+    warehouseObservationId: string | null;
+    userId: string | null;
     unit: {
       requestNumber: string;
       orderNumber: string | null;
@@ -206,6 +228,8 @@ export interface MarsAuditDetail {
 }
 
 export interface MarsAuditReportPayload {
+  sourceQualification?: string;
+  physicalEvidenceQualification?: string;
   importBatch: {
     id: string;
     filename: string;
@@ -244,7 +268,7 @@ interface BuiltAuditReport {
   importBatchId: string | null;
 }
 
-interface MarsAuditScanRecordInput {
+interface MarsAuditScanRecordInput extends MarsWriter {
   auditSessionId: string;
   scannedValue: string;
   userId?: string | null;
@@ -285,17 +309,20 @@ export function normalizeAuditScanValue(value: string): string {
 export async function startMarsAuditSession(options: {
   userId?: string | null;
   notes?: string | null;
-}) {
-  return prisma.marsAuditSession.create({
+} & MarsWriter) {
+  return writeMars(options, async (tx) => {
+    const batch = await tx.marsImportBatch.findFirst({ orderBy: [{ uploadedAt: "desc" }, { id: "desc" }], select: { id: true, filename: true } });
+    return tx.marsAuditSession.create({
     data: {
-      startedByUserId: options.userId ?? null,
-      notes: options.notes?.trim() || null,
+      startedByUserId: options.principal.userId,
+      notes: JSON.stringify({ schemaVersion: 1, importBatchId: batch?.id ?? null, importFilename: batch?.filename ?? null, operatorNotes: options.notes?.trim() || null }),
     },
     select: {
       id: true,
       startedAt: true,
       notes: true,
     },
+    });
   });
 }
 
@@ -303,28 +330,30 @@ export async function recordMarsAuditScan(options: {
   auditSessionId: string;
   scannedValue: string;
   userId?: string | null;
-}): Promise<MarsAuditScanResult> {
+} & MarsWriter): Promise<MarsAuditScanResult> {
   const normalizedValue = normalizeAuditScanValue(options.scannedValue);
   if (!normalizedValue) {
-    throw new Error("Scanned value is required.");
+    throw new MarsWorkflowError("Scanned value is required.");
   }
 
-  return prisma.$transaction(async (tx) => {
+  return writeMars(options, async (tx) => {
     const session = await tx.marsAuditSession.findUnique({
       where: { id: options.auditSessionId },
       select: { id: true, completedAt: true },
     });
 
     if (!session) {
-      throw new Error("Audit session not found.");
+      throw new MarsWorkflowError("Audit session not found.");
     }
 
+    if (session.completedAt) throw new MarsWorkflowError("Audit session is already completed.");
     const result = await processAuditScan(tx, {
       auditSessionId: options.auditSessionId,
       scannedValue: normalizedValue,
-      userId: options.userId ?? null,
+      userId: options.principal.userId,
       createdAt: new Date(),
       manualEntry: false,
+      principal: options.principal,
     });
 
     const summary = await getMarsAuditSummary(tx, options.auditSessionId);
@@ -343,15 +372,15 @@ export async function recordMarsAuditScan(options: {
   });
 }
 
-export async function completeMarsAuditSession(options: { auditSessionId: string }) {
-  return prisma.$transaction(async (tx) => {
+export async function completeMarsAuditSession(options: { auditSessionId: string } & MarsWriter) {
+  return writeMars(options, async (tx) => {
     const session = await tx.marsAuditSession.findUnique({
       where: { id: options.auditSessionId },
       select: { id: true, completedAt: true },
     });
 
     if (!session) {
-      throw new Error("Audit session not found.");
+      throw new MarsWorkflowError("Audit session not found.");
     }
 
     const completedAt = session.completedAt ?? new Date();
@@ -378,21 +407,21 @@ export async function completeMarsAuditSession(options: { auditSessionId: string
 }
 
 export async function submitMarsAuditSession(options: {
-  scans: string[];
+  scans: MarsBufferedScan[];
   userId?: string | null;
   deviceId?: string | null;
   localAuditId?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
-}) {
-  const normalizedScans = options.scans.map(normalizeAuditScanValue).filter(Boolean);
+} & MarsWriter) {
+  const normalizedScans = options.scans.map(scan => typeof scan === "string" ? { value: normalizeAuditScanValue(scan), legacyUnassigned: true } : { ...scan, value: normalizeAuditScanValue(scan.value) }).filter(scan => scan.value);
   if (!normalizedScans.length) {
-    throw new Error("At least one scanned value is required.");
+    throw new MarsWorkflowError("At least one scanned value is required.");
   }
 
   const startedAt = parseOptionalDate(options.startedAt) ?? new Date();
   const completedAt = parseOptionalDate(options.completedAt) ?? new Date();
-  const latestImportBatch = await prisma.marsImportBatch.findFirst({
+  const latestImportBatch = await (options.transaction ?? prisma).marsImportBatch.findFirst({
     orderBy: { uploadedAt: "desc" },
     select: {
       id: true,
@@ -410,14 +439,26 @@ export async function submitMarsAuditSession(options: {
     submittedScanCount: normalizedScans.length,
   };
 
-  return prisma.$transaction(async (tx) => {
+  return writeMars(options, async (tx) => {
+    const sourceDraftId = options.deviceId && options.localAuditId ? createHash("sha256").update(JSON.stringify([options.deviceId,options.localAuditId])).digest("hex") : null;
+    const sourceDraftFingerprint = createHash("sha256").update(JSON.stringify({ scans: normalizedScans, startedAt: options.startedAt, completedAt: options.completedAt })).digest("hex");
+    if (sourceDraftId) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`mars-draft:${sourceDraftId}`},0))`;
+      const previous = await tx.marsAuditSession.findUnique({ where: { sourceDraftId }, select: { id: true, startedAt: true, completedAt: true, sourceDraftFingerprint: true } });
+      if (previous) {
+        if (previous.sourceDraftFingerprint !== sourceDraftFingerprint) throw new MarsWorkflowError("This local draft was already submitted with different evidence. Review its original retained audit.");
+        return { session: { id: previous.id, startedAt: previous.startedAt, completedAt: previous.completedAt }, summary: await getMarsAuditSummary(tx, previous.id) };
+      }
+    }
     const session = await tx.marsAuditSession.create({
       data: {
-        startedByUserId: options.userId ?? null,
+        startedByUserId: options.principal.userId,
         startedAt,
         completedAt,
         lastAmendedAt: completedAt,
         notes: JSON.stringify(metadata),
+        sourceDraftId,
+        sourceDraftFingerprint,
       },
       select: {
         id: true,
@@ -428,13 +469,25 @@ export async function submitMarsAuditSession(options: {
 
     let createdAtCursor = startedAt.getTime();
 
-    for (const scannedValue of normalizedScans) {
+    for (const scan of normalizedScans) {
+      const capturedAt = scan.scannedAt ? new Date(scan.scannedAt) : null;
+      const legacy = Boolean(scan.legacyUnassigned);
+      if (!legacy) {
+        if (!capturedAt || !Number.isFinite(capturedAt.getTime()) || scan.capturedByUserId !== options.principal.userId || !scan.captureSessionId || capturedAt < startedAt || capturedAt > completedAt || capturedAt.getTime() > Date.now() + 300_000) throw new MarsWorkflowError("A physical buffered capture needs its original user, individual session and timestamp within the audit period. Unassigned legacy history cannot become a new person's physical observation.");
+        const captureSession = await tx.userSession.findUnique({ where: { id: scan.captureSessionId }, select: { userId: true, createdAt: true, expiresAt: true, revokedAt: true, lockedAt: true } });
+        if (!captureSession || captureSession.userId !== options.principal.userId || capturedAt < captureSession.createdAt || capturedAt > captureSession.expiresAt || (captureSession.revokedAt && capturedAt >= captureSession.revokedAt) || (captureSession.lockedAt && capturedAt >= captureSession.lockedAt)) throw new MarsWorkflowError("The buffered capture is not bound to this operator's valid original session.");
+      }
       await processAuditScan(tx, {
         auditSessionId: session.id,
-        scannedValue,
-        userId: options.userId ?? null,
-        createdAt: new Date(createdAtCursor),
-        manualEntry: false,
+        scannedValue: scan.value,
+        userId: legacy ? null : options.principal.userId,
+        createdAt: capturedAt && Number.isFinite(capturedAt.getTime()) ? capturedAt : new Date(createdAtCursor),
+        manualEntry: legacy || scan.captureMethod !== "scanner",
+        principal: options.principal,
+        captureProvenance: legacy ? "legacy_unassigned" : "user_bound_capture",
+        actualCapturedAt: capturedAt && Number.isFinite(capturedAt.getTime()) ? capturedAt : null,
+        captureSessionId: legacy ? null : scan.captureSessionId,
+        eventId: scan.eventId,
       });
       createdAtCursor += 1;
     }
@@ -447,20 +500,23 @@ export async function submitMarsAuditSession(options: {
 export async function recordMarsUnitSighting(options: {
   requestNumber: string;
   userId?: string | null;
-}) {
+  eventId?: string;
+} & MarsWriter) {
   const normalizedValue = normalizeAuditScanValue(options.requestNumber);
   if (!normalizedValue) {
-    throw new Error("Request number is required.");
+    throw new MarsWorkflowError("Request number is required.");
   }
 
-  return prisma.$transaction(async (tx) => {
+  return writeMars(options, async (tx) => {
     const unit = await tx.marsUnit.findUnique({
       where: { requestNumber: normalizedValue },
       select: AUDIT_FEEDBACK_UNIT_SELECT,
     });
 
     if (!unit) {
-      throw new Error("MARS unit not found in the current import.");
+      const seenAt = new Date();
+      const warehouseObservation = await recordWorkflowObservation(tx, options.principal, { eventId: options.eventId ?? `mars-sighting:${crypto.randomUUID()}`, rawIdentifier: normalizedValue, identifierType: "submission", namespace: "mars", type: "presence", capturedAt: seenAt.toISOString(), capturedByUserId: options.principal.userId, captureMethod: "manual" });
+      return { seenAt, unit: null, warehouseObservation };
     }
 
     const seenAt = new Date();
@@ -473,11 +529,11 @@ export async function recordMarsUnitSighting(options: {
       select: AUDIT_FEEDBACK_UNIT_SELECT,
     });
 
-    await tx.marsEvent.create({
+    const sighting = await tx.marsEvent.create({
       data: {
         marsUnitId: unit.id,
         type: "manual_seen",
-        userId: options.userId ?? null,
+        userId: options.principal.userId,
         payload: {
           requestNumber: normalizedValue,
           seenAt,
@@ -485,17 +541,20 @@ export async function recordMarsUnitSighting(options: {
       },
     });
 
+    const warehouseObservation = await recordWorkflowObservation(tx, options.principal, { eventId: options.eventId ?? `mars-sighting:${sighting.id}`, rawIdentifier: normalizedValue, identifierType: "submission", namespace: "mars", type: "presence", capturedAt: seenAt.toISOString(), capturedByUserId: options.principal.userId, captureMethod: "manual" });
+
     return {
       seenAt,
       unit: updated,
+      warehouseObservation,
     };
   });
 }
 
 export async function listSubmittedMarsAuditSessions(
-  limit = 20
+  limit = 20, db: MarsDatabase = prisma
 ): Promise<SubmittedAuditSessionSummary[]> {
-  const sessions = await prisma.marsAuditSession.findMany({
+  const sessions = await db.marsAuditSession.findMany({
     where: {
       completedAt: {
         not: null,
@@ -514,25 +573,26 @@ export async function addMarsAuditScan(
 ): Promise<MarsAuditScanRecord & { summary: MarsAuditSummary }> {
   const normalizedValue = normalizeAuditScanValue(options.scannedValue);
   if (!normalizedValue) {
-    throw new Error("Scanned value is required.");
+    throw new MarsWorkflowError("Scanned value is required.");
   }
 
-  return prisma.$transaction(async (tx) => {
+  return writeMars(options, async (tx) => {
     const session = await tx.marsAuditSession.findUnique({
       where: { id: options.auditSessionId },
       select: { id: true },
     });
 
     if (!session) {
-      throw new Error("Audit session not found.");
+      throw new MarsWorkflowError("Audit session not found.");
     }
 
     const result = await processAuditScan(tx, {
       auditSessionId: options.auditSessionId,
       scannedValue: normalizedValue,
-      userId: options.userId ?? null,
+      userId: options.principal.userId,
       createdAt: new Date(),
       manualEntry: options.manualEntry ?? true,
+      principal: options.principal,
     });
 
     await tx.marsAuditSession.update({
@@ -558,8 +618,9 @@ export async function addMarsAuditScan(
 export async function deleteMarsAuditScan(options: {
   auditSessionId: string;
   scanId: string;
-}) {
-  return prisma.$transaction(async (tx) => {
+  reason?: string;
+} & MarsWriter) {
+  return writeMars(options, async (tx) => {
     const scan = await tx.marsAuditScan.findFirst({
       where: {
         id: options.scanId,
@@ -571,11 +632,12 @@ export async function deleteMarsAuditScan(options: {
     });
 
     if (!scan) {
-      throw new Error("Audit scan not found.");
+      throw new MarsWorkflowError("Audit scan not found.");
     }
 
-    await tx.marsAuditScan.delete({
-      where: { id: options.scanId },
+    await tx.marsAuditScan.updateMany({
+      where: { id: options.scanId, voidedAt: null },
+      data: { voidedAt: new Date(), voidedByUserId: options.principal.userId, voidReason: options.reason?.trim() || "Removed from active audit by an authorized operator; original evidence retained." },
     });
 
     await recomputeDuplicateFlags(tx, options.auditSessionId);
@@ -586,6 +648,8 @@ export async function deleteMarsAuditScan(options: {
 
     return {
       scanId: options.scanId,
+      physicalObservationRetained: true,
+      correctionMeaning: "Audit membership was voided. Any original physical observation remains evidence; retract or correct it through the authorized warehouse observation review.",
       summary: await getMarsAuditSummary(tx, options.auditSessionId),
     };
   });
@@ -595,15 +659,15 @@ export async function generateMarsAuditReport(options: {
   auditSessionId: string;
   userId?: string | null;
   label?: string | null;
-}): Promise<MarsAuditReportGenerationResult> {
-  return prisma.$transaction(async (tx) => {
+} & MarsWriter): Promise<MarsAuditReportGenerationResult> {
+  return writeMars(options, async (tx) => {
     const session = await tx.marsAuditSession.findUnique({
       where: { id: options.auditSessionId },
       select: { id: true },
     });
 
     if (!session) {
-      throw new Error("Audit session not found.");
+      throw new MarsWorkflowError("Audit session not found.");
     }
 
     const built = await buildAuditReport(tx, options.auditSessionId);
@@ -611,7 +675,7 @@ export async function generateMarsAuditReport(options: {
       data: {
         auditSessionId: options.auditSessionId,
         importBatchId: built.importBatchId,
-        generatedByUserId: options.userId ?? null,
+        generatedByUserId: options.principal.userId,
         label: options.label?.trim() || null,
         summary: built.payload.summary,
         payload: built.payload as unknown as Prisma.InputJsonValue,
@@ -633,8 +697,8 @@ export async function generateMarsAuditReport(options: {
   });
 }
 
-export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAuditDetail | null> {
-  const session = await prisma.marsAuditSession.findUnique({
+export async function getMarsAuditDetail(auditSessionId: string, db: MarsDatabase = prisma): Promise<MarsAuditDetail | null> {
+  const session = await db.marsAuditSession.findUnique({
     where: { id: auditSessionId },
     select: AUDIT_DETAIL_SESSION_SELECT,
   });
@@ -643,7 +707,7 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
     return null;
   }
 
-  const built = await buildAuditReport(prisma, auditSessionId);
+  const built = await buildAuditReport(db, auditSessionId);
 
   return {
     session: toSubmittedAuditSessionSummary(session),
@@ -654,6 +718,12 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
       duplicateInSession: scan.duplicateInSession,
       manualEntry: scan.manualEntry,
       createdAt: scan.createdAt,
+      capturedAt: scan.capturedAt,
+      captureMethod: scan.captureMethod,
+      captureSessionId: scan.captureSessionId,
+      captureProvenance: scan.captureProvenance,
+      warehouseObservationId: scan.warehouseObservationId,
+      userId: scan.userId,
       unit: scan.marsUnit
         ? {
             requestNumber: scan.marsUnit.requestNumber,
@@ -668,6 +738,7 @@ export async function getMarsAuditDetail(auditSessionId: string): Promise<MarsAu
         : null,
     })),
     currentReport: built.payload,
+    voidedScans: await db.marsAuditScan.findMany({ where: { auditSessionId, voidedAt: { not: null } }, select: { id: true, scannedValue: true, createdAt: true, voidedAt: true, voidedByUserId: true, voidReason: true }, orderBy: { voidedAt: "desc" } }),
     savedReports: session.marsAuditReports.map((report) => ({
       id: report.id,
       label: report.label,
@@ -689,11 +760,17 @@ async function processAuditScan(
     userId: string | null;
     createdAt: Date;
     manualEntry: boolean;
+    principal: Principal;
+    captureProvenance?: "user_bound_capture" | "legacy_unassigned";
+    actualCapturedAt?: Date | null;
+    captureSessionId?: string | null;
+    eventId?: string;
   }
 ) {
   const duplicateCount = await tx.marsAuditScan.count({
     where: {
       auditSessionId: options.auditSessionId,
+      voidedAt: null,
       scannedValue: options.scannedValue,
     },
   });
@@ -707,6 +784,7 @@ async function processAuditScan(
   const scan = await tx.marsAuditScan.create({
     data: {
       auditSessionId: options.auditSessionId,
+      voidedAt: null,
       scannedValue: options.scannedValue,
       marsUnitId: matchedUnit?.id ?? null,
       matched: Boolean(matchedUnit),
@@ -714,6 +792,10 @@ async function processAuditScan(
       manualEntry: options.manualEntry,
       userId: options.userId,
       createdAt: options.createdAt,
+      capturedAt: options.captureProvenance === "legacy_unassigned" ? options.actualCapturedAt ?? null : options.createdAt,
+      captureMethod: options.manualEntry ? "manual" : "scanner",
+      captureSessionId: options.captureSessionId ?? (options.captureProvenance === "legacy_unassigned" ? null : options.principal.sessionId),
+      captureProvenance: options.captureProvenance ?? "user_bound_capture",
     },
     select: {
       id: true,
@@ -724,9 +806,14 @@ async function processAuditScan(
     },
   });
 
+  if (options.captureProvenance !== "legacy_unassigned") {
+    const observation = await recordWorkflowObservation(tx, options.principal, { eventId: options.eventId ?? `mars-audit:${scan.id}`, rawIdentifier: options.scannedValue, identifierType: "submission", namespace: "mars", type: "presence", capturedAt: options.createdAt.toISOString(), capturedByUserId: options.principal.userId, captureMethod: options.manualEntry ? "manual" : "scanner" });
+    await tx.marsAuditScan.update({ where: { id: scan.id }, data: { warehouseObservationId: observation.observation.observationId } });
+  }
+
   let unit = matchedUnit;
 
-  if (matchedUnit) {
+  if (matchedUnit && options.captureProvenance !== "legacy_unassigned") {
     unit = await tx.marsUnit.update({
       where: { id: matchedUnit.id },
       data: {
@@ -766,7 +853,7 @@ async function recomputeDuplicateFlags(
   auditSessionId: string
 ) {
   const scans = await tx.marsAuditScan.findMany({
-    where: { auditSessionId },
+    where: { auditSessionId, voidedAt: null },
     select: {
       id: true,
       scannedValue: true,
@@ -792,10 +879,10 @@ async function getMarsAuditSummary(
   auditSessionId: string
 ): Promise<MarsAuditSummary> {
   const [totalScans, matchedScans, duplicateScans, unknownScans] = await Promise.all([
-    tx.marsAuditScan.count({ where: { auditSessionId } }),
-    tx.marsAuditScan.count({ where: { auditSessionId, matched: true } }),
-    tx.marsAuditScan.count({ where: { auditSessionId, duplicateInSession: true } }),
-    tx.marsAuditScan.count({ where: { auditSessionId, matched: false } }),
+    tx.marsAuditScan.count({ where: { auditSessionId, voidedAt: null } }),
+    tx.marsAuditScan.count({ where: { auditSessionId, voidedAt: null, matched: true } }),
+    tx.marsAuditScan.count({ where: { auditSessionId, voidedAt: null, duplicateInSession: true } }),
+    tx.marsAuditScan.count({ where: { auditSessionId, voidedAt: null, matched: false } }),
   ]);
 
   return {
@@ -830,7 +917,7 @@ async function buildAuditReport(
   });
 
   if (!session) {
-    throw new Error("Audit session not found.");
+    throw new MarsWorkflowError("Audit session not found.");
   }
 
   const metadata = parseAuditSessionMetadata(session.notes);
@@ -845,26 +932,8 @@ async function buildAuditReport(
       })
     : null;
 
-  const snapshotUnits = importBatch
-    ? await db.marsUnit.findMany({
-        where: { lastKnownImportBatchId: importBatch.id },
-        select: {
-          id: true,
-          requestNumber: true,
-          orderNumber: true,
-          vendor: true,
-          serialNumber: true,
-          modelNumber: true,
-          dateRequested: true,
-          returnStatus: true,
-          staged: true,
-          localStatus: true,
-          lastImportedAt: true,
-          lastAuditSeenAt: true,
-        },
-        orderBy: { requestNumber: "asc" },
-      })
-    : [];
+  const capturedSnapshot = importBatch ? await getMarsBatchSnapshot(db, importBatch.id) : { units: [], qualification: "No pinned import batch is available." };
+  const snapshotUnits = capturedSnapshot.units;
 
   const seenByUnitId = new Map<
     string,
@@ -940,7 +1009,7 @@ async function buildAuditReport(
 
   const physicallyPresentButUnexpected: AuditUnitRow[] = [];
   for (const scan of seenByUnitId.values()) {
-    const unit = scan.marsUnit;
+    const unit = snapshotByUnitId.get(scan.marsUnit.id) ?? scan.marsUnit;
 
     const classification = classifyMarsUnit(unit, { seenInAudit: true });
 
@@ -970,6 +1039,8 @@ async function buildAuditReport(
   return {
     importBatchId: importBatch?.id ?? null,
     payload: {
+      sourceQualification: capturedSnapshot.qualification,
+      physicalEvidenceQualification: session.marsAuditScans.every(scan => scan.captureProvenance === "user_bound_capture") ? "Individual-session captures; sightings are separate from departure/external status." : "Historical or unsigned captures are included; this report does not establish current attributed warehouse presence.",
       importBatch,
       summary: {
         expectedMissing: expectedMissing.length,

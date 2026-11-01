@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 const links = [
+  { href: "/tools/mars/worklist", label: "Returns / submissions" },
   { href: "/tools/mars/import", label: "Import" },
   { href: "/tools/mars/inventory", label: "Inventory" },
   { href: "/tools/mars/audit", label: "Audit" },

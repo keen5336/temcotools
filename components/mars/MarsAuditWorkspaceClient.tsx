@@ -121,6 +121,8 @@ export default function MarsAuditWorkspaceClient({
 
   return (
     <div className="space-y-6">
+      <p className="text-sm">{data.currentReport.sourceQualification}</p><p className="text-sm">{data.currentReport.physicalEvidenceQualification}</p><p className="text-sm">Removing a scan changes this audit&#39;s membership. Its original warehouse sighting remains evidence; use authorized observation review if that sighting was wrong.</p>
+
       <section className="card bg-base-100 border border-base-200 shadow-sm">
         <div className="card-body gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">

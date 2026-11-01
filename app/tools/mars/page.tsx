@@ -1,13 +1,13 @@
 import NavBar from "@/components/NavBar";
 import MarsInventoryScreen from "@/components/mars/MarsInventoryScreen";
-import { requireCapability } from "@/lib/auth";
-import { getMarsOperationalOverview, listMarsUnits } from "@/lib/mars/inventory";
+import { requireMarsPage } from "@/lib/mars/page";
+import { getMarsOverview, listMarsInventory } from "@/lib/mars/service";
 
 export default async function MarsPage() {
-  const session = await requireCapability("workflow.read");
+  const { session, principal } = await requireMarsPage();
   const [overview, initialResponse] = await Promise.all([
-    getMarsOperationalOverview(),
-    listMarsUnits({
+    getMarsOverview(principal),
+    listMarsInventory(principal, {
       page: 1,
       limit: 50,
       archived: false,

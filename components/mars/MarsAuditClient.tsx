@@ -8,11 +8,15 @@ import ScannerCapture from "@/components/scanner/ScannerCapture";
 
 interface MarsAuditClientProps {
   initialHistory: SubmittedAuditSessionSummary[];
+  currentUserId: string;
+  currentSessionId: string;
 }
 
 interface LocalAuditDraft {
   id: string;
   deviceId: string;
+  ownerUserId?: string;
+  submittedAt?: string;
   startedAt: string;
   scans: LocalAuditScan[];
 }
@@ -21,12 +25,18 @@ interface LocalAuditScan {
   value: string;
   scannedAt: string;
   duplicate: boolean;
+  eventId?: string;
+  capturedByUserId?: string | null;
+  captureSessionId?: string | null;
+  captureMethod?: "scanner" | "manual";
+  legacyUnassigned?: boolean;
 }
 
-const DRAFT_STORAGE_KEY = "mars_audit_local_draft_v1";
+const DRAFT_STORAGE_KEY = "mars_audit_local_draft_v2";
+const LEGACY_DRAFT_STORAGE_KEY = "mars_audit_local_draft_v1";
 const DEVICE_STORAGE_KEY = "mars_audit_device_id_v1";
 
-export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps) {
+export default function MarsAuditClient({ initialHistory, currentUserId, currentSessionId }: MarsAuditClientProps) {
   const router = useRouter();
   const [draft, setDraft] = useState<LocalAuditDraft | null>(null);
   const [history, setHistory] = useState(initialHistory);
@@ -45,14 +55,17 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [legacyDraft, setLegacyDraft] = useState<LocalAuditDraft | null>(null);
+  const storageKey = `${DRAFT_STORAGE_KEY}:${currentUserId}`;
   const [isPending, startTransition] = useTransition();
   const draftRef = useRef<LocalAuditDraft | null>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       const deviceId = loadOrCreateDeviceId();
-      const savedDraft = loadDraft();
-      if (savedDraft && savedDraft.deviceId === deviceId) {
+      const savedDraft = loadDraft(storageKey);
+      setLegacyDraft(loadDraft(LEGACY_DRAFT_STORAGE_KEY));
+      if (savedDraft && savedDraft.deviceId === deviceId && savedDraft.ownerUserId === currentUserId) {
         draftRef.current = savedDraft;
         setDraft(savedDraft);
         setLastScanned(savedDraft.scans[0] ?? null);
@@ -60,17 +73,17 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
       setReady(true);
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, []);
+  }, [currentUserId, storageKey]);
 
   useEffect(() => {
     if (!ready) return;
     if (draft) {
-      window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      window.localStorage.setItem(storageKey, JSON.stringify(draft));
       return;
     }
 
-    window.localStorage.removeItem(DRAFT_STORAGE_KEY);
-  }, [draft, ready]);
+    window.localStorage.removeItem(storageKey);
+  }, [draft, ready, storageKey]);
 
   const summary = useMemo(() => {
     const scans = draft?.scans ?? [];
@@ -88,6 +101,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
     const nextDraft: LocalAuditDraft = {
       id: crypto.randomUUID(),
       deviceId,
+      ownerUserId: currentUserId,
       startedAt: new Date().toISOString(),
       scans: [],
     };
@@ -99,19 +113,21 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
   }
 
   function handleDiscardDraft() {
+    if (draftRef.current?.submittedAt) { setError("This upload may already be saved. Retry the unchanged batch to recover its receipt before clearing it."); return; }
     draftRef.current = null;
     setDraft(null);
     setLastScanned(null);
     setError(null);
   }
 
-  function handleSubmitScan(value: string) {
+  function handleSubmitScan(value: string, source: "scanner" | "manual" = "manual") {
     const currentDraft = draftRef.current;
     if (!currentDraft) {
       setError("Start an audit on this device before scanning.");
       return;
     }
 
+    if (currentDraft.submittedAt) { setError("Resolve the submitted batch receipt before adding more scans."); return; }
     const normalized = normalizeScanValue(value);
     if (!normalized) {
       return;
@@ -122,6 +138,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
       value: normalized,
       scannedAt: new Date().toISOString(),
       duplicate,
+      eventId: crypto.randomUUID(), capturedByUserId: currentUserId, captureSessionId: currentSessionId, captureMethod: source, legacyUnassigned: false,
     };
 
     setError(null);
@@ -139,6 +156,10 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
 
     startTransition(async () => {
       setError(null);
+      const submission = { ...draft, submittedAt: draft.submittedAt ?? new Date().toISOString() };
+      try { window.localStorage.setItem(storageKey, JSON.stringify(submission)); } catch { setError("Could not preserve the upload identity locally. Retain/export this draft before retrying."); return; }
+      draftRef.current = submission; setDraft(submission);
+      try {
 
       const response = await fetch("/api/mars/audit/submit", {
         method: "POST",
@@ -147,8 +168,8 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
           localAuditId: draft.id,
           deviceId: draft.deviceId,
           startedAt: draft.startedAt,
-          completedAt: new Date().toISOString(),
-          scans: [...draft.scans].reverse().map((scan) => scan.value),
+          completedAt: submission.submittedAt,
+          scans: [...submission.scans].reverse().map(scan => ({ value: scan.value, scannedAt: scan.scannedAt, ...(scan.eventId ? { eventId: scan.eventId } : {}), capturedByUserId: scan.capturedByUserId ?? null, captureSessionId: scan.captureSessionId ?? null, captureMethod: scan.captureMethod ?? "manual", legacyUnassigned: scan.legacyUnassigned ?? !scan.capturedByUserId })),
         }),
       });
 
@@ -195,6 +216,7 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
       setLastScanned(null);
       router.push(`/tools/mars/audit/${encodeURIComponent(payload.session.id)}`);
       router.refresh();
+      } catch { setError("Upload result is uncertain. This unchanged batch is preserved; retry it to recover the same receipt before adding or discarding scans."); }
     });
   }
 
@@ -208,18 +230,22 @@ export default function MarsAuditClient({ initialHistory }: MarsAuditClientProps
       body: JSON.stringify({ requestNumber }),
     });
     const payload = (await response.json()) as
-      | { ok: true; seenAt: string; unit: { requestNumber: string; orderNumber: string | null; vendor: string | null; serialNumber: string | null; modelNumber: string | null; dateRequested: string | null; returnStatus: string | null } }
+      | { ok: true; seenAt: string; unit: { requestNumber: string; orderNumber: string | null; vendor: string | null; serialNumber: string | null; modelNumber: string | null; dateRequested: string | null; returnStatus: string | null } | null }
       | { ok: false; error: string };
     if (!response.ok || !payload.ok) {
       const message = "error" in payload ? payload.error : "Failed to record item sighting.";
       setError(message);
       throw new Error(message);
     }
-    setLastSighted(payload);
+    if (!payload.unit) { setError("Sighting saved globally; the submission identity is unknown or ambiguous. Review before MARS work."); return; }
+    setLastSighted({ seenAt: payload.seenAt, unit: payload.unit });
   }
 
   return (
     <div className="space-y-6">
+      {legacyDraft && !draft && <section className="alert alert-warning block space-y-2"><p>An unassigned v1 audit remains on this device. Reviewing it preserves original times with an unknown captor; it does not create attributed physical presence.</p><button className="btn btn-sm" onClick={() => { const review = { ...legacyDraft, ownerUserId: currentUserId, scans: legacyDraft.scans.map(scan => ({ ...scan, legacyUnassigned: true, capturedByUserId: null, captureSessionId: null })) }; draftRef.current = review; setDraft(review); setLegacyDraft(null); }}>Review as unassigned historical audit</button></section>}
+
+      {draft?.scans.some(scan => scan.legacyUnassigned) && <p className="alert alert-warning block">This historical review includes unsigned captures. Their original captor remains unknown and they do not create shared attributed physical presence.</p>}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <CounterCard label="Total Scans" value={summary.totalScans} tone="default" />
         <CounterCard label="Unique" value={summary.uniqueScans} tone="success" />
@@ -436,8 +462,8 @@ function CounterCard({
   );
 }
 
-function loadDraft(): LocalAuditDraft | null {
-  const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+function loadDraft(key: string): LocalAuditDraft | null {
+  const raw = window.localStorage.getItem(key);
   if (!raw) return null;
 
   try {

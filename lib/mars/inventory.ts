@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { writeMars, type MarsWriter, type MarsDatabase } from "./access";
 import {
   classifyMarsUnit,
   getMarsBucketWhere,
@@ -35,6 +36,7 @@ const MARS_UNIT_LIST_SELECT = {
 
 const MARS_IMPORT_BATCH_SUMMARY_SELECT = {
   id: true,
+  scope: true, coverage: true, sourceAsOf: true, coverageEvidence: true,
   filename: true,
   uploadedAt: true,
   rowCount: true,
@@ -173,22 +175,22 @@ export function parseMarsUnitSortField(value: string | null): MarsUnitSortField 
     : DEFAULT_SORT_BY;
 }
 
-export async function listMarsUnits(options: ListMarsUnitsOptions): Promise<ListMarsUnitsResult> {
+export async function listMarsUnits(options: ListMarsUnitsOptions, db: MarsDatabase = prisma): Promise<ListMarsUnitsResult> {
   const page = normalizePositiveInt(options.page, 1);
   const limit = Math.min(normalizePositiveInt(options.limit, 25), 200);
   const where = buildMarsUnitsWhere(options);
   const orderBy = buildMarsUnitsOrderBy(options);
 
   const [rawItems, totalCount, filterOptions] = await Promise.all([
-    prisma.marsUnit.findMany({
+    db.marsUnit.findMany({
       where,
       select: MARS_UNIT_LIST_SELECT,
       orderBy,
       skip: (page - 1) * limit,
       take: limit,
     }),
-    prisma.marsUnit.count({ where }),
-    getMarsUnitFilterOptions(),
+    db.marsUnit.count({ where }),
+    getMarsUnitFilterOptions(db),
   ]);
   const items = rawItems.map(withOperationalClassification);
 
@@ -202,15 +204,15 @@ export async function listMarsUnits(options: ListMarsUnitsOptions): Promise<List
   };
 }
 
-export async function getLatestMarsImportBatch(): Promise<MarsImportBatchSummary | null> {
-  return prisma.marsImportBatch.findFirst({
+export async function getLatestMarsImportBatch(db: MarsDatabase = prisma): Promise<MarsImportBatchSummary | null> {
+  return db.marsImportBatch.findFirst({
     select: MARS_IMPORT_BATCH_SUMMARY_SELECT,
     orderBy: { uploadedAt: "desc" },
   });
 }
 
-export async function getRecentMarsImportBatches(limit = 5): Promise<MarsImportBatchSummary[]> {
-  return prisma.marsImportBatch.findMany({
+export async function getRecentMarsImportBatches(limit = 5, db: MarsDatabase = prisma): Promise<MarsImportBatchSummary[]> {
+  return db.marsImportBatch.findMany({
     select: MARS_IMPORT_BATCH_SUMMARY_SELECT,
     orderBy: { uploadedAt: "desc" },
     take: Math.min(Math.max(limit, 1), 20),
@@ -221,8 +223,8 @@ export async function setMarsUnitStaged(options: {
   requestNumber: string;
   staged: boolean;
   userId?: string | null;
-}) {
-  return prisma.$transaction(async (tx) => {
+} & MarsWriter) {
+  return writeMars(options, async (tx) => {
     const unit = await tx.marsUnit.findUnique({
       where: { requestNumber: options.requestNumber },
       select: {
@@ -246,7 +248,7 @@ export async function setMarsUnitStaged(options: {
       data: {
         marsUnitId: unit.id,
         type: options.staged ? "marked_staged" : "unmarked_staged",
-        userId: options.userId ?? null,
+        userId: options.principal.userId,
         payload: {
           requestNumber: unit.requestNumber,
           previousStaged: unit.staged,
@@ -264,8 +266,8 @@ export async function setMarsUnitArchived(options: {
   archived: boolean;
   reason?: string | null;
   userId?: string | null;
-}) {
-  return prisma.$transaction(async (tx) => {
+} & MarsWriter) {
+  return writeMars(options, async (tx) => {
     const unit = await tx.marsUnit.findUnique({
       where: { requestNumber: options.requestNumber },
       select: {
@@ -296,7 +298,7 @@ export async function setMarsUnitArchived(options: {
       data: {
         marsUnitId: unit.id,
         type: options.archived ? "archived" : "unarchived",
-        userId: options.userId ?? null,
+        userId: options.principal.userId,
         payload: {
           requestNumber: unit.requestNumber,
           previousArchivedAt: unit.archivedAt?.toISOString() ?? null,
@@ -392,8 +394,8 @@ export type MarsUnitDetail = Prisma.MarsUnitGetPayload<{
   select: typeof MARS_UNIT_DETAIL_SELECT;
 }>;
 
-export async function getMarsUnitDetail(requestNumber: string): Promise<MarsUnitDetail | null> {
-  return prisma.marsUnit.findUnique({
+export async function getMarsUnitDetail(requestNumber: string, db: MarsDatabase = prisma): Promise<MarsUnitDetail | null> {
+  return db.marsUnit.findUnique({
     where: { requestNumber },
     select: MARS_UNIT_DETAIL_SELECT,
   });
@@ -480,18 +482,18 @@ function withOperationalClassification(
   };
 }
 
-export async function getMarsOperationalOverview() {
-  const latestImportBatch = await getLatestMarsImportBatch();
+export async function getMarsOperationalOverview(db: MarsDatabase = prisma) {
+  const latestImportBatch = await getLatestMarsImportBatch(db);
 
   const [activeUnits, archivedUnits, stagedUnits, deletedUnits, notSeenInAudit, shippedOrReceived, recentProblems, bucketCounts] =
     await Promise.all([
-      prisma.marsUnit.count({
+      db.marsUnit.count({
         where: { archivedAt: null, presentInLatestImport: true, localStatus: "active" },
       }),
-      prisma.marsUnit.count({ where: { archivedAt: { not: null } } }),
-      prisma.marsUnit.count({ where: { archivedAt: null, staged: true } }),
-      prisma.marsUnit.count({ where: { localStatus: "deleted" } }),
-      prisma.marsUnit.count({
+      db.marsUnit.count({ where: { archivedAt: { not: null } } }),
+      db.marsUnit.count({ where: { archivedAt: null, staged: true } }),
+      db.marsUnit.count({ where: { localStatus: "deleted" } }),
+      db.marsUnit.count({
         where: {
           archivedAt: null,
           presentInLatestImport: true,
@@ -499,7 +501,7 @@ export async function getMarsOperationalOverview() {
           lastAuditSeenAt: null,
         },
       }),
-      prisma.marsUnit.count({
+      db.marsUnit.count({
         where: {
           archivedAt: null,
           presentInLatestImport: true,
@@ -510,7 +512,7 @@ export async function getMarsOperationalOverview() {
           ],
         },
       }),
-      prisma.marsUnit.findMany({
+      db.marsUnit.findMany({
         where: {
           archivedAt: null,
           OR: [
@@ -536,7 +538,7 @@ export async function getMarsOperationalOverview() {
         orderBy: [{ lastImportedAt: "desc" }, { requestNumber: "asc" }],
         take: 12,
       }),
-      getMarsWorkflowBucketSummaries(),
+      getMarsWorkflowBucketSummaries(db),
     ]);
 
   return {
@@ -557,7 +559,7 @@ export async function getMarsOperationalOverview() {
   };
 }
 
-export async function getMarsWorkflowBucketSummaries(): Promise<MarsWorkflowBucketSummary[]> {
+export async function getMarsWorkflowBucketSummaries(db: MarsDatabase = prisma): Promise<MarsWorkflowBucketSummary[]> {
   const buckets: Array<Omit<MarsWorkflowBucketSummary, "count">> = [
     {
       bucket: "awaiting_pickup",
@@ -593,7 +595,7 @@ export async function getMarsWorkflowBucketSummaries(): Promise<MarsWorkflowBuck
 
   const counts = await Promise.all(
     buckets.map((bucket) =>
-      prisma.marsUnit.count({
+      db.marsUnit.count({
         where: getMarsBucketWhere(bucket.bucket),
       })
     )
@@ -614,7 +616,7 @@ function deriveProblemReason(unit: {
   returnStatus: string | null;
 }) {
   if (unit.localStatus === "deleted" || !unit.presentInLatestImport || unit.missingFromLatestImportAt) {
-    return "Deleted from MARS and archived locally.";
+    return unit.localStatus === "deleted" ? "Legacy import marked this submission deleted; verify the source before treating that as external completion." : "Not reported in the latest declared complete scope; external deletion or physical departure is not inferred.";
   }
   if (unit.returnStatus?.toLowerCase() === "received" || unit.returnStatus?.toLowerCase() === "shipped") {
     return "MARS says this item has already moved out of the warehouse.";
@@ -639,19 +641,19 @@ function buildMarsUnitsOrderBy(options: ListMarsUnitsOptions): Prisma.MarsUnitOr
   return [{ [sortBy]: sortDirection }, { requestNumber: "asc" }];
 }
 
-async function getMarsUnitFilterOptions(): Promise<MarsUnitFilterOptions> {
+async function getMarsUnitFilterOptions(db: MarsDatabase = prisma): Promise<MarsUnitFilterOptions> {
   const [requestStatuses, returnStatuses, replacementNeededOptions] = await Promise.all([
-    prisma.marsUnit.findMany({
+    db.marsUnit.findMany({
       where: { requestStatus: { not: null } },
       select: { requestStatus: true },
       distinct: ["requestStatus"],
     }),
-    prisma.marsUnit.findMany({
+    db.marsUnit.findMany({
       where: { returnStatus: { not: null } },
       select: { returnStatus: true },
       distinct: ["returnStatus"],
     }),
-    prisma.marsUnit.findMany({
+    db.marsUnit.findMany({
       where: { replacementNeeded: { not: null } },
       select: { replacementNeeded: true },
       distinct: ["replacementNeeded"],

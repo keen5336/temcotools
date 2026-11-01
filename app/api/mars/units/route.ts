@@ -1,79 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import {
-  listMarsUnits,
-  parseArchivedFilter,
-  parseMarsUnitSortField,
-  parseMarsOperationalBucket,
-  parseReturnStatusMode,
-  parseSortDirection,
-  parseStagedFilter,
-} from "@/lib/mars/inventory";
-
+import { marsApi } from "@/lib/mars/http";
+import { listMarsInventory } from "@/lib/mars/service";
+import { parseArchivedFilter, parseMarsUnitSortField, parseMarsOperationalBucket, parseReturnStatusMode, parseSortDirection, parseStagedFilter } from "@/lib/mars/inventory";
 export const runtime = "nodejs";
-
-export async function GET(req: NextRequest) {
-  const session = await getSession();
-  if (session.userId && !session.capabilities?.includes("workflow.read")) return Response.json({ error: "You do not have permission for this action." }, { status: 403 });
-  if (!session.userId) {
-    return NextResponse.json(
-      { ok: false, error: "Authentication is required." },
-      { status: 401 }
-    );
-  }
-
-  if (!session.isActive) {
-    return NextResponse.json({ ok: false, error: "User account is inactive." }, { status: 403 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  const q = searchParams.get("q");
-  const requestNumber = searchParams.get("requestNumber");
-  const orderNumber = searchParams.get("orderNumber");
-  const vendor = searchParams.get("vendor");
-  const serialNumber = searchParams.get("serialNumber");
-  const modelNumber = searchParams.get("modelNumber");
-  const vendorRaNumber = searchParams.get("vendorRaNumber");
-  const requestStatus = searchParams.get("requestStatus");
-  const returnStatus = searchParams.get("returnStatus");
-  const replacementNeeded = searchParams.get("replacementNeeded");
-  const staged = parseStagedFilter(searchParams.get("staged"));
-  const archived = parseArchivedFilter(searchParams.get("archived"));
-  const bucket = parseMarsOperationalBucket(searchParams.get("bucket"));
-  const returnStatusMode = parseReturnStatusMode(searchParams.get("returnStatusMode"));
-  const needsAttentionOnly = searchParams.get("needsAttentionOnly") === "true";
-  const dateRequestedOn = searchParams.get("dateRequestedOn");
-  const lastImportedOn = searchParams.get("lastImportedOn");
-  const lastAuditSeenOn = searchParams.get("lastAuditSeenOn");
-  const sortBy = parseMarsUnitSortField(searchParams.get("sortBy"));
-  const sortDirection = parseSortDirection(searchParams.get("sortDirection"));
-  const page = Number(searchParams.get("page") ?? "1");
-  const limit = Number(searchParams.get("limit") ?? "25");
-
-  const result = await listMarsUnits({
-    q,
-    requestNumber,
-    orderNumber,
-    vendor,
-    serialNumber,
-    modelNumber,
-    vendorRaNumber,
-    requestStatus,
-    returnStatus,
-    replacementNeeded,
-    staged,
-    archived,
-    bucket,
-    needsAttentionOnly,
-    returnStatusMode,
-    dateRequestedOn,
-    lastImportedOn,
-    lastAuditSeenOn,
-    sortBy,
-    sortDirection,
-    page,
-    limit,
-  });
-
-  return NextResponse.json({ ok: true, ...result });
-}
+export async function GET(request: Request) { return marsApi(principal => {
+ const search = new URL(request.url).searchParams;
+ const input = Object.fromEntries(["q","requestNumber","orderNumber","vendor","serialNumber","modelNumber","vendorRaNumber","requestStatus","returnStatus","replacementNeeded","dateRequestedOn","lastImportedOn","lastAuditSeenOn"].map(key => [key, search.get(key)]));
+ return listMarsInventory(principal, { ...input, staged: parseStagedFilter(search.get("staged")), archived: parseArchivedFilter(search.get("archived")), bucket: parseMarsOperationalBucket(search.get("bucket")), returnStatusMode: parseReturnStatusMode(search.get("returnStatusMode")), needsAttentionOnly: search.get("needsAttentionOnly")==="true", sortBy: parseMarsUnitSortField(search.get("sortBy")), sortDirection: parseSortDirection(search.get("sortDirection")), page: Number(search.get("page") ?? "1"), limit: Number(search.get("limit") ?? "25") });
+}); }

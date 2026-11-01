@@ -1,50 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import {
-  importMarsWorkbook,
-  MarsImportValidationError,
-  type WorkbookInputBuffer,
-} from "@/lib/mars/import";
-
+import { marsApi, marsOperationId } from "@/lib/mars/http";
+import { importMarsInventory, MarsWorkflowError } from "@/lib/mars/service";
 export const runtime = "nodejs";
-
-export async function POST(req: NextRequest) {
-  const session = await getSession();
-  if (session.userId && !session.capabilities?.includes("workflow.execute")) return Response.json({ error: "You do not have permission for this action." }, { status: 403 });
-  if (!session.userId) {
-    return NextResponse.json(
-      { ok: false, error: "Authentication is required." },
-      { status: 401 }
-    );
-  }
-
-  if (!session.isActive) {
-    return NextResponse.json({ ok: false, error: "User account is inactive." }, { status: 403 });
-  }
-
-  try {
-    const formData = await req.formData();
-    const upload = formData.get("file") ?? formData.get("files");
-
-    if (!(upload instanceof File) || upload.size === 0) {
-      return NextResponse.json(
-        { ok: false, error: "A spreadsheet file upload is required." },
-        { status: 400 }
-      );
-    }
-
-    const summary = await importMarsWorkbook({
-      filename: upload.name,
-      fileBuffer: Buffer.from(await upload.arrayBuffer()) as unknown as WorkbookInputBuffer,
-      uploadedByUserId: session.userId,
-    });
-
-    return NextResponse.json(summary);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to import the spreadsheet.";
-    const status = error instanceof MarsImportValidationError ? 400 : 500;
-
-    return NextResponse.json({ ok: false, error: message }, { status });
-  }
+export async function POST(request: Request) {
+  return marsApi(async principal => {
+    if (Number(request.headers.get("content-length")) > 22 * 1024 * 1024) throw new MarsWorkflowError("Use a workbook of at most 20 MiB.", 413);
+    const form = await request.formData(); const upload = form.get("file") ?? form.get("files");
+    if (!(upload instanceof File) || !upload.size || upload.size > 20 * 1024 * 1024) throw new MarsWorkflowError("Use a nonempty workbook of at most 20 MiB.");
+    return importMarsInventory(principal, { filename: upload.name, fileBase64: Buffer.from(await upload.arrayBuffer()).toString("base64"), operationId: typeof form.get("operationId") === "string" ? form.get("operationId") : marsOperationId({}), scope: form.get("scope") || "warehouse", coverage: form.get("coverage") || "partial", ...(form.get("sourceAsOf") ? { sourceAsOf: form.get("sourceAsOf") } : {}), ...(form.get("coverageEvidence") ? { coverageEvidence: form.get("coverageEvidence") } : {}) });
+  });
 }

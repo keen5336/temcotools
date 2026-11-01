@@ -1,10 +1,9 @@
+import { listMarsInventory, getMarsOverview } from "@/lib/mars/service";
 import NavBar from "@/components/NavBar";
 import MarsInventoryScreen from "@/components/mars/MarsInventoryScreen";
 import type { InventoryUrlState } from "@/components/mars/MarsInventoryClient";
-import { requireCapability } from "@/lib/auth";
+import { requireMarsPage } from "@/lib/mars/page";
 import {
-  getMarsOperationalOverview,
-  listMarsUnits,
   parseArchivedFilter,
   parseMarsOperationalBucket,
   parseMarsUnitSortField,
@@ -19,12 +18,12 @@ export default async function MarsInventoryPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const session = await requireCapability("workflow.read");
+  const { session, principal } = await requireMarsPage();
   const params = await searchParams;
   const initialState = parseInventoryState(params);
   const [overview, initialResponse] = await Promise.all([
-    getMarsOperationalOverview(),
-    listMarsUnits(toListOptions(initialState)),
+    getMarsOverview(principal),
+    listMarsInventory(principal, toListOptions(initialState)),
   ]);
 
   return (

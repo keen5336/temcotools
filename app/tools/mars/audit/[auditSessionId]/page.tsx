@@ -3,17 +3,17 @@ import { notFound } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import MarsNav from "@/components/mars/MarsNav";
 import MarsAuditWorkspaceClient from "@/components/mars/MarsAuditWorkspaceClient";
-import { requireCapability } from "@/lib/auth";
-import { getMarsAuditDetail } from "@/lib/mars/audit";
+import { requireMarsPage } from "@/lib/mars/page";
+import { getMarsAudit } from "@/lib/mars/service";
 
 export default async function MarsAuditDetailPage({
   params,
 }: {
   params: Promise<{ auditSessionId: string }>;
 }) {
-  const session = await requireCapability("workflow.read");
+  const { session, principal } = await requireMarsPage();
   const { auditSessionId } = await params;
-  const data = await getMarsAuditDetail(auditSessionId);
+  const data = await getMarsAudit(principal, { auditSessionId });
 
   if (!data) {
     notFound();

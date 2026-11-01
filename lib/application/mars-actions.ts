@@ -1,0 +1,33 @@
+import * as mars from "@/lib/mars/service";
+import * as submissions from "@/lib/mars/submissions";
+
+export const marsActions = {
+  "mars.inventory": { capability: "workflow.read", description: "Filter retained MARS submissions without asserting physical stock", run: mars.listMarsInventory },
+  "mars.submission": { capability: "workflow.read", description: "Read imported submission history", run: mars.getMarsSubmission },
+  "mars.overview": { capability: "workflow.read", description: "Read imported MARS operational summaries", run: mars.getMarsOverview },
+  "mars.buckets": { capability: "workflow.read", description: "Read retained MARS classification buckets", run: mars.getMarsBuckets },
+  "mars.imports": { capability: "workflow.read", description: "Read MARS refresh scope/coverage history", run: mars.getMarsImports },
+  "mars.source.rows": { capability: "workflow.read", description: "Page retained original MARS batch rows with source scope/as-of", run: mars.getMarsSourceRows },
+  "mars.reconciliation": { capability: "workflow.read", description: "Read retained legacy MARS audit reconciliation", run: mars.reconcileMarsInventory },
+  "mars.import": { capability: "workflow.execute", description: "Refresh a bounded base64 workbook with explicit scope/coverage; no inferred external deletion", run: mars.importMarsInventory },
+  "mars.stage": { capability: "workflow.execute", description: "Record the retained local MARS staged flag", run: mars.stageMarsSubmission },
+  "mars.archive": { capability: "workflow.execute", description: "Archive/unarchive local working inventory without changing external status", run: mars.archiveMarsSubmission },
+  "mars.sighting": { capability: "workflow.execute", description: "Record an attributed legacy submission sighting", run: mars.sightMarsSubmission },
+  "mars.audits": { capability: "workflow.read", description: "List retained submitted MARS audits", run: mars.getMarsAudits },
+  "mars.audit": { capability: "workflow.read", description: "Read active/voided scan evidence and immutable saved audit reports", run: mars.getMarsAudit },
+  "mars.audit.start": { capability: "workflow.execute", description: "Start one idempotent local MARS audit", run: mars.startMarsAudit },
+  "mars.audit.scan": { capability: "workflow.execute", description: "Record a current local audit scan", run: mars.scanMarsAudit },
+  "mars.audit.amend": { capability: "workflow.execute", description: "Append a scan amendment without changing saved reports", run: mars.amendMarsAudit },
+  "mars.audit.complete": { capability: "workflow.execute", description: "Complete the local audit separately from external return completion", run: mars.completeMarsAudit },
+  "mars.audit.submit": { capability: "workflow.execute", description: "Submit an attributed buffered local audit, retaining event times", run: mars.submitMarsAudit },
+  "mars.audit.scan.void": { capability: "workflow.execute", description: "Remove a scan from active counts while retaining original evidence/actor/reason", run: mars.voidMarsAuditScan },
+  "mars.audit.report": { capability: "workflow.execute", description: "Save an immutable version of the local audit report", run: mars.reportMarsAudit },
+  "mars.intents": { capability: "workflow.read", description: "Read exact-unit human-assisted submission work and uncertain outcomes", run: submissions.listMarsSubmissionIntents },
+  "mars.intent.prepare": { capability: "workflow.execute", description: "Prepare exact-unit authorized human MARS work; no upstream submission is made", run: submissions.prepareMarsSubmissionIntent },
+  "mars.intent.start": { capability: "workflow.execute", description: "Record one human workflow handoff after current physical/office review", run: submissions.startMarsSubmissionIntent },
+  "mars.intent.unknown": { capability: "workflow.execute", description: "Retain an uncertain human/upstream result and prevent another intent", run: submissions.markMarsSubmissionUnknown },
+  "mars.intent.cancel": { capability: "workflow.execute", description: "Cancel only work that has not started; uncertain work requires reconciliation", run: submissions.cancelMarsSubmissionIntent },
+  "mars.intent.reconcile": { capability: "workflow.execute", description: "Reconcile exact-unit intent with attributed verified outcome; no retry occurs", run: submissions.reconcileMarsSubmissionIntent },
+  "mars.submission.link": { capability: "workflow.execute", description: "Link an evidenced submission to the exact unit using current identity rights or exact office authorization", run: submissions.linkMarsSubmission },
+  "mars.label.handoff": { capability: "workflow.read", description: "Prepare existing MARS label fields/detail-page handoff without printing", run: submissions.getMarsLabelHandoff },
+} as const;

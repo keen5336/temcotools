@@ -1,12 +1,12 @@
 import NavBar from "@/components/NavBar";
 import MarsAuditClient from "@/components/mars/MarsAuditClient";
 import MarsNav from "@/components/mars/MarsNav";
-import { requireCapability } from "@/lib/auth";
-import { listSubmittedMarsAuditSessions } from "@/lib/mars/audit";
+import { requireMarsPage } from "@/lib/mars/page";
+import { getMarsAudits } from "@/lib/mars/service";
 
 export default async function MarsAuditPage() {
-  const session = await requireCapability("workflow.read");
-  const auditHistory = await listSubmittedMarsAuditSessions(20);
+  const { session, principal } = await requireMarsPage();
+  const auditHistory = await getMarsAudits(principal, { limit: 20 });
 
   return (
     <div className="min-h-screen bg-base-200">
@@ -18,7 +18,7 @@ export default async function MarsAuditPage() {
           saved reports only when the session is ready.
         </p>
         <MarsNav />
-        <MarsAuditClient initialHistory={auditHistory} />
+        <MarsAuditClient initialHistory={auditHistory} currentUserId={session.userId!} currentSessionId={session.sessionId!} />
       </main>
     </div>
   );

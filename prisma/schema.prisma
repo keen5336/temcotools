@@ -374,6 +374,22 @@ model MarsImportBatch {
   coverageEvidence String?
   marsUnits        MarsUnit[]
   marsAuditReports MarsAuditReport[]
+  sourceRows       MarsImportRow[]
+}
+
+model MarsImportRow {
+  id            String @id @default(cuid())
+  batchId       String
+  batch         MarsImportBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  rowNumber     Int
+  requestNumber String?
+  fields        Json
+  sourceData    Json
+  contentHash   String
+  recordedAt    DateTime @default(now())
+
+  @@unique([batchId, rowNumber])
+  @@index([batchId, requestNumber])
 }
 
 model MarsUnit {
@@ -423,6 +439,8 @@ model MarsAuditSession {
   completedAt      DateTime?
   lastAmendedAt    DateTime?
   notes            String?
+  sourceDraftId    String? @unique
+  sourceDraftFingerprint String?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   startedByUser    User?             @relation(fields: [startedByUserId], references: [id])
@@ -446,6 +464,11 @@ model MarsAuditScan {
   voidedAt           DateTime?
   voidedByUserId     String?
   voidReason         String?
+  capturedAt         DateTime?
+  captureMethod      String?
+  captureSessionId   String?
+  captureProvenance  String @default("legacy_unknown")
+  warehouseObservationId String?
 
   @@index([auditSessionId, voidedAt, createdAt])
 }

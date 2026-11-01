@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import type { MarsDatabase } from "./access";
+import { getMarsBatchSnapshot } from "./snapshots";
 
 const RECONCILIATION_UNIT_SELECT = {
   id: true,
@@ -61,6 +63,7 @@ export interface UnknownScanRow {
 
 export interface MarsReconciliationResult {
   strictMode: true;
+  sourceQualification?: string;
   latestImportBatch: {
     id: string;
     filename: string;
@@ -85,9 +88,9 @@ export interface MarsReconciliationResult {
   matched: ReconciliationUnitRow[];
 }
 
-export async function getMarsReconciliation(): Promise<MarsReconciliationResult> {
+export async function getMarsReconciliation(db: MarsDatabase = prisma): Promise<MarsReconciliationResult> {
   const [latestImportBatch, latestCompletedAudit, stagedUnits] = await Promise.all([
-    prisma.marsImportBatch.findFirst({
+    db.marsImportBatch.findFirst({
       orderBy: { uploadedAt: "desc" },
       select: {
         id: true,
@@ -95,11 +98,12 @@ export async function getMarsReconciliation(): Promise<MarsReconciliationResult>
         uploadedAt: true,
       },
     }),
-    prisma.marsAuditSession.findFirst({
+    db.marsAuditSession.findFirst({
       where: {
         completedAt: {
           not: null,
         },
+        marsAuditScans: { some: { voidedAt: null, captureProvenance: "user_bound_capture" }, none: { voidedAt: null, captureProvenance: { not: "user_bound_capture" } } },
       },
       orderBy: { completedAt: "desc" },
       select: {
@@ -108,24 +112,19 @@ export async function getMarsReconciliation(): Promise<MarsReconciliationResult>
         completedAt: true,
       },
     }),
-    prisma.marsUnit.findMany({
+    db.marsUnit.findMany({
       where: { staged: true },
       select: RECONCILIATION_UNIT_SELECT,
       orderBy: { requestNumber: "asc" },
     }),
   ]);
 
-  const latestSnapshotUnits = latestImportBatch
-    ? await prisma.marsUnit.findMany({
-        where: { lastKnownImportBatchId: latestImportBatch.id },
-        select: RECONCILIATION_UNIT_SELECT,
-        orderBy: { requestNumber: "asc" },
-      })
-    : [];
+  const capturedSnapshot = latestImportBatch ? await getMarsBatchSnapshot(db, latestImportBatch.id) : { units: [], qualification: "No source batch available." };
+  const latestSnapshotUnits = capturedSnapshot.units;
 
   const latestAuditScans = latestCompletedAudit
-    ? await prisma.marsAuditScan.findMany({
-        where: { auditSessionId: latestCompletedAudit.id },
+    ? await db.marsAuditScan.findMany({
+        where: { auditSessionId: latestCompletedAudit.id, voidedAt: null },
         select: LATEST_AUDIT_SCAN_SELECT,
         orderBy: { createdAt: "desc" },
       })
@@ -196,6 +195,7 @@ export async function getMarsReconciliation(): Promise<MarsReconciliationResult>
 
   return {
     strictMode: true,
+    sourceQualification: capturedSnapshot.qualification,
     latestImportBatch,
     latestCompletedAudit,
     summary: {

@@ -1,44 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import { setMarsUnitStaged } from "@/lib/mars/inventory";
-
+import { marsApi, marsBody, marsOperationId } from "@/lib/mars/http";
+import { stageMarsSubmission, MarsWorkflowError } from "@/lib/mars/service";
 export const runtime = "nodejs";
-
-export async function POST(
-  req: NextRequest,
-  context: { params: Promise<{ requestNumber: string }> }
-) {
-  const session = await getSession();
-  if (session.userId && !session.capabilities?.includes("workflow.execute")) return Response.json({ error: "You do not have permission for this action." }, { status: 403 });
-  if (!session.userId) {
-    return NextResponse.json(
-      { ok: false, error: "Authentication is required." },
-      { status: 401 }
-    );
-  }
-
-  if (!session.isActive) {
-    return NextResponse.json({ ok: false, error: "User account is inactive." }, { status: 403 });
-  }
-
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body.staged !== "boolean") {
-    return NextResponse.json(
-      { ok: false, error: "Request body must include a boolean staged value." },
-      { status: 400 }
-    );
-  }
-
-  const { requestNumber } = await context.params;
-  const unit = await setMarsUnitStaged({
-    requestNumber,
-    staged: body.staged,
-    userId: session.userId,
-  });
-
-  if (!unit) {
-    return NextResponse.json({ ok: false, error: "MARS unit not found." }, { status: 404 });
-  }
-
-  return NextResponse.json({ ok: true, unit });
+export async function POST(request: Request, context: { params: Promise<{ requestNumber: string }> }) {
+  return marsApi(async principal => { const body = await marsBody(request); const result = await stageMarsSubmission(principal, { ...body, requestNumber: (await context.params).requestNumber, operationId: marsOperationId(body) }); if (!result.unit) throw new MarsWorkflowError("MARS submission not found.", 404); return result; });
 }

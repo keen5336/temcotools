@@ -2,17 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import NavBar from "@/components/NavBar";
 import MarsNav from "@/components/mars/MarsNav";
-import { requireCapability } from "@/lib/auth";
-import { getMarsUnitDetail } from "@/lib/mars/inventory";
+import { requireMarsPage } from "@/lib/mars/page";
+import { getMarsSubmission } from "@/lib/mars/service";
 
 export default async function MarsInventoryDetailPage({
   params,
 }: {
   params: Promise<{ requestNumber: string }>;
 }) {
-  const session = await requireCapability("workflow.read");
+  const { session, principal } = await requireMarsPage();
   const { requestNumber } = await params;
-  const unit = await getMarsUnitDetail(requestNumber);
+  const unit = await getMarsSubmission(principal, { requestNumber });
 
   if (!unit) {
     notFound();
@@ -71,6 +71,7 @@ export default async function MarsInventoryDetailPage({
         </div>
 
         <MarsNav />
+        <Link className="btn btn-outline mb-4" href={`/api/mars/source-rows?requestNumber=${encodeURIComponent(unit.requestNumber)}`}>Retained source-row history (paged JSON)</Link>
 
         <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)] gap-6">
           <div className="card bg-base-100 border border-base-200 shadow-sm">

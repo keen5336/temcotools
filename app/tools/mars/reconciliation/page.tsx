@@ -1,11 +1,11 @@
 import NavBar from "@/components/NavBar";
 import MarsNav from "@/components/mars/MarsNav";
-import { requireCapability } from "@/lib/auth";
-import { getMarsReconciliation } from "@/lib/mars/reconciliation";
+import { requireMarsPage } from "@/lib/mars/page";
+import { reconcileMarsInventory } from "@/lib/mars/service";
 
 export default async function MarsReconciliationPage() {
-  const session = await requireCapability("workflow.read");
-  const data = await getMarsReconciliation();
+  const { session, principal } = await requireMarsPage();
+  const data = await reconcileMarsInventory(principal);
 
   return (
     <div className="min-h-screen bg-base-200">
@@ -17,6 +17,7 @@ export default async function MarsReconciliationPage() {
           focused on what should be here and what should not be here.
         </p>
         <MarsNav />
+        <p className="alert block mb-4">{data.sourceQualification} · This retained report uses only individual-session captures for its current physical audit comparison. Expected returns without a submission are in the Office worklist.</p>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           <SummaryPanel

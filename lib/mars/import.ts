@@ -1,6 +1,8 @@
 import ExcelJS from "exceljs";
 import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import { writeMars, type MarsWriter } from "./access";
+import { assertCapability } from "@/lib/auth/principal";
+import { createHash } from "node:crypto";
 
 type WorksheetValue = ExcelJS.CellValue | null | undefined;
 export type WorkbookInputBuffer = Parameters<ExcelJS.Workbook["xlsx"]["load"]>[0];
@@ -107,12 +109,17 @@ interface ParsedWorksheet {
   skippedCount: number;
   warnings: string[];
   rows: ParsedMarsRow[];
+  sourceRows: Array<{ rowNumber: number; requestNumber: string | null; fields: Prisma.InputJsonValue; sourceData: Prisma.InputJsonValue }>;
 }
 
-interface ImportWorkbookOptions {
+interface ImportWorkbookOptions extends MarsWriter {
   filename: string;
   fileBuffer: WorkbookInputBuffer;
   uploadedByUserId?: string | null;
+  scope?: string;
+  coverage?: "partial" | "complete";
+  sourceAsOf?: string;
+  coverageEvidence?: string;
 }
 
 export class MarsImportValidationError extends Error {}
@@ -120,18 +127,36 @@ export class MarsImportValidationError extends Error {}
 export async function importMarsWorkbook({
   filename,
   fileBuffer,
-  uploadedByUserId,
+  principal,
+  transaction,
+  scope = "warehouse",
+  coverage = "partial",
+  sourceAsOf,
+  coverageEvidence,
 }: ImportWorkbookOptions): Promise<MarsImportSummary> {
+  assertCapability(principal, "workflow.execute");
+  const uploadedByUserId = principal.userId;
+  if (!scope.trim() || scope.length > 150) throw new MarsImportValidationError("Name the exact MARS source scope.");
+  const sourceTime = sourceAsOf ? new Date(sourceAsOf) : null;
+  if (sourceTime && (!/T.*(Z|[+-]\d{2}:\d{2})$/.test(sourceAsOf!) || !Number.isFinite(sourceTime.getTime()) || sourceTime.getTime() > Date.now() + 300_000)) throw new MarsImportValidationError("Source-as-of must be a valid timestamp with timezone.");
+  if (coverage === "complete" && (!sourceTime || !coverageEvidence?.trim() || coverageEvidence.trim().length < 5)) throw new MarsImportValidationError("Complete coverage requires its exact source-as-of and scope/filter evidence.");
   const parsed = await parseMarsWorkbook(fileBuffer);
   const importedAt = new Date();
 
-  return prisma.$transaction(async (tx: MarsImportTransaction): Promise<MarsImportSummary> => {
+  return writeMars({ principal, transaction }, async (tx: MarsImportTransaction): Promise<MarsImportSummary> => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(8110116)`;
+    const newer = sourceTime && await tx.marsImportBatch.findFirst({ where: { scope, sourceAsOf: { gt: sourceTime } }, select: { id: true } });
+    if (newer) throw new MarsImportValidationError("A newer source snapshot was already accepted for this scope. Older source data cannot replace it.");
     const batch = await tx.marsImportBatch.create({
       data: {
         filename,
         uploadedByUserId: uploadedByUserId ?? null,
         rowCount: parsed.rowCount,
         skippedCount: parsed.skippedCount,
+        scope,
+        coverage,
+        sourceAsOf: sourceTime,
+        coverageEvidence: coverageEvidence?.trim() || null,
         notes: parsed.warnings.length ? parsed.warnings.join("\n").slice(0, 4000) : null,
       },
     });
@@ -146,6 +171,10 @@ export async function importMarsWorkbook({
           },
         })
       : [];
+
+    for (let cursor = 0; cursor < parsed.sourceRows.length; cursor += 500) {
+      await tx.marsImportRow.createMany({ data: parsed.sourceRows.slice(cursor, cursor + 500).map(row => ({ ...row, batchId: batch.id, contentHash: createHash("sha256").update(JSON.stringify({ fields: row.fields, sourceData: row.sourceData })).digest("hex") })) });
+    }
 
     const existingByRequestNumber = new Map<string, ExistingMarsUnitRecord>(
       existingUnits.map((unit) => [unit.requestNumber, unit] as const)
@@ -231,9 +260,10 @@ export async function importMarsWorkbook({
       });
     }
 
-    const unitsMissingFromLatestImport = await tx.marsUnit.findMany({
+    const unitsMissingFromLatestImport = coverage === "complete" ? await tx.marsUnit.findMany({
       where: {
         presentInLatestImport: true,
+        lastKnownImportBatch: { scope },
         requestNumber: {
           notIn: Array.from(importedRequestNumbers),
         },
@@ -242,7 +272,7 @@ export async function importMarsWorkbook({
         id: true,
         requestNumber: true,
       },
-    });
+    }) : [];
 
     if (unitsMissingFromLatestImport.length) {
       await tx.marsUnit.updateMany({
@@ -254,22 +284,20 @@ export async function importMarsWorkbook({
         data: {
           presentInLatestImport: false,
           missingFromLatestImportAt: importedAt,
-          localStatus: "deleted",
-          archivedAt: importedAt,
-          archivedReason: "Deleted from MARS.",
         },
       });
 
       await tx.marsEvent.createMany({
         data: unitsMissingFromLatestImport.map((unit) => ({
           marsUnitId: unit.id,
-          type: "deleted_from_mars",
+          type: "not_reported_in_complete_scope",
           userId: uploadedByUserId ?? null,
           payload: {
             batchId: batch.id,
             requestNumber: unit.requestNumber,
-            deletedAt: importedAt.toISOString(),
-            archivedAt: importedAt.toISOString(),
+            sourceAsOf: sourceTime?.toISOString(),
+            scope,
+            qualification: "Absent from the operator-declared complete scope. External deletion and physical departure are not established.",
           },
         })),
       });
@@ -317,6 +345,7 @@ export async function parseMarsWorkbook(fileBuffer: WorkbookInputBuffer): Promis
   }
 
   const warnings: string[] = [];
+  const sourceRows: ParsedWorksheet["sourceRows"] = [];
   const dedupedRows = new Map<string, ParsedMarsRow>();
   let rowCount = 0;
   let skippedCount = 0;
@@ -326,6 +355,9 @@ export async function parseMarsWorkbook(fileBuffer: WorkbookInputBuffer): Promis
     rowCount += 1;
 
     const normalized = normalizeWorksheetRow(row, rowNumber, headerMap);
+    const fields = JSON.parse(JSON.stringify(normalized)) as Prisma.InputJsonValue;
+    const columns = Array.from({ length: worksheet.actualColumnCount }, (_, index) => ({ index: index + 1, header: extractCellString(worksheet.getRow(1).getCell(index + 1).value) ?? "", value: row.getCell(index + 1).value ?? null }));
+    sourceRows.push({ rowNumber, requestNumber: normalized.requestNumber, fields, sourceData: JSON.parse(JSON.stringify({ columns })) as Prisma.InputJsonValue });
     if (!normalized.requestNumber) {
       skippedCount += 1;
       continue;
@@ -345,6 +377,7 @@ export async function parseMarsWorkbook(fileBuffer: WorkbookInputBuffer): Promis
     skippedCount,
     warnings,
     rows: Array.from(dedupedRows.values()),
+    sourceRows,
   };
 }
 

@@ -1,12 +1,12 @@
 import NavBar from "@/components/NavBar";
 import MarsImportClient from "@/components/mars/MarsImportClient";
 import MarsNav from "@/components/mars/MarsNav";
-import { requireCapability } from "@/lib/auth";
-import { getLatestMarsImportBatch } from "@/lib/mars/inventory";
+import { requireMarsPage } from "@/lib/mars/page";
+import { getMarsImports } from "@/lib/mars/service";
 
 export default async function MarsImportPage() {
-  const session = await requireCapability("workflow.read");
-  const latestBatch = await getLatestMarsImportBatch();
+  const { session, principal } = await requireMarsPage();
+  const latestBatch = (await getMarsImports(principal, { limit: 1 }))[0] ?? null;
 
   return (
     <div className="min-h-screen bg-base-200">
