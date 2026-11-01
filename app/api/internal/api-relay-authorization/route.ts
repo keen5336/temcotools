@@ -3,14 +3,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { CURRENT_USER_SELECT, isLivePersistentSession, resolvePrincipal } from "@/lib/auth/principal";
-import { authorizeDmpPayload } from "@/lib/api-relay/payload-policy";
+import { verifyQueuedDmpPayload } from "@/lib/api-relay/payload-policy";
 import { dmpConfig } from "@/lib/api-relay/config";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 
 export const runtime = "nodejs";
 const inputSchema = z.object({
   owner: z.object({ userId: z.string(), authSessionId: z.string(), authVersion: z.number().int(), grantId: z.string().optional() }),
-  origin: z.string(), payloadGrant: z.unknown(), operation: z.string().max(64),
+  origin: z.string(), payloadGrant: z.unknown(), operation: z.string().max(64), requestMethod: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]),
 });
 export async function POST(request: Request) {
   const secret = process.env.SESSION_SECRET;
@@ -30,11 +30,11 @@ export async function POST(request: Request) {
       ...principal, sessionId: session.id, grantId: input.owner.grantId,
       strongAuthenticatedAt: session.lastStrongAuthenticatedAt.getTime(), mfaVerifiedAt: session.mfaVerifiedAt?.getTime(),
     }));
-    const policy = await authorizeDmpPayload(input.payloadGrant, input.origin);
+    const policy = await verifyQueuedDmpPayload(input.payloadGrant, input.origin);
     const config = dmpConfig();
     if (!Object.hasOwn(config.operations, input.operation) || !policy.operationNames.includes(input.operation)) throw new Error();
     const operation = config.operations[input.operation];
-    const capability = ["GET", "HEAD"].includes(operation.method || "GET") ? "workflow.read" : "workflow.execute";
+    const capability = ["GET", "HEAD"].includes(operation.method || "GET") && ["GET", "HEAD"].includes(input.requestMethod) ? "workflow.read" : "workflow.execute";
     if (!current.capabilities.includes(capability)) throw new Error();
     return NextResponse.json({ authorized: true }, { headers: { "Cache-Control": "no-store" } });
   } catch { return NextResponse.json({ authorized: false }, { headers: { "Cache-Control": "no-store" } }); }

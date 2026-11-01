@@ -62,7 +62,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], heartbeatMs 
       if (job.started) continue;
       if ([...c.pending.values()].filter(j => j.started).length >= maxConcurrent) break;
       let allowed = false;
-      try { allowed = await authorize(job.owner || c.owner, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation: job.operation }); } catch { /* unavailable authorization fails closed */ }
+      try { allowed = await authorize(job.owner || c.owner, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation: job.operation, requestMethod: job.request.method }); } catch { /* unavailable authorization fails closed */ }
       if (!connections.has(c.id) || c.pending.get(requestId) !== job || !live(c.owner) || c.ws.readyState !== WebSocket.OPEN) continue;
       if (!allowed) { complete(c, requestId, { ok: false, error: "Current user, client grant or payload authorization is unavailable. This queued request was not dispatched." }); continue; }
       job.started = true;
@@ -211,7 +211,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const authorize = async (owner, context) => {
     if (!owner.authSessionId || !Number.isSafeInteger(owner.authVersion) || !context.operation) return false;
     const check = async (currentOwner) => {
-      const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({owner:currentOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation}),redirect:"error",signal:AbortSignal.timeout(5000)});
+      const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({owner:currentOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation,requestMethod:context.requestMethod}),redirect:"error",signal:AbortSignal.timeout(5000)});
       return response.ok && (await response.json()).authorized === true;
     };
     return (await check(context.connectionOwner)) && (await check(owner));

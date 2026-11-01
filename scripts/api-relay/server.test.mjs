@@ -149,6 +149,14 @@ test("queued authorization is rechecked before send without replaying or ending 
   assert.equal(job.request.path, "/new-authorized-intent");
   f.respond(c, job, "new result"); assert.equal((await next).body, "new result");
 });
+test("authorization receives the captured request method rather than trusting a later operation classification", async t => {
+  const methods = [];
+  const f = await fixture(t, { authorize: async (_owner, context) => { methods.push(context.requestMethod); return context.requestMethod === "GET"; } });
+  const c = await f.paired();
+  const denied = await f.control("request", alice, { connectionId: c.id, operation: "synthetic", request: { method: "POST", path: "/synthetic-only", body: "{}" } });
+  assert.equal(denied.ok, false); assert.equal(denied.dispatchState, "not_dispatched");
+  assert.deepEqual(methods, ["POST"]); assert.equal(c.messages.some(message => message.type === "request"), false);
+});
 
 test("timeout cancels a job, ignores late results, and does not retry", async (t) => {
   const f = await fixture(t);
