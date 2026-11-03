@@ -4,6 +4,14 @@ Standing mandate: implement, review, test, correct, commit and push continuously
 
 Work only on `v2` in `/Volumes/MacDev/ProjectArchive/Development/worktrees/t3code/temcotools/v2` (T3 alias `/Users/openclaw/.t3/worktrees/temcotools/v2`). Preserve main/v1 at `fea1f22af1b2fae788388f2aefed3e3998e98d09`, the original checkout and production. Only the explicitly approved isolated pilot/new-host DNS and proxy were deployed. No production deployment/migration/data change, live upstream operational action, real print/email or paid provisioning occurred.
 
+## Nov3 expanded build — active, not whole-program blocked
+
+Owner authorized implementation AND deployment of packages A–D: explicit warehouse/platform authority, versioned actions/providers, declarative workflows with runnable synthetic Receiving, and the full platform-admin TemcoScan Lab. [Expanded program](expanded-program.md) records boundaries/acceptance/ownership. Existing owner login and identity/factor/session/grant state are protected; routine v2 migration/restart is authorized without ceremonial backup/approval gates. Missing upstream contracts, physical devices or owner MCP attachment do not block independent software work.
+
+Current inspection: clean `v2` source51437d6, main/v1 stillfea1f22; native pilot still48c and healthy. Adam remains active/password-enrolled, MFA not enabled, four retained sessions and zero OAuth grants observed privately; no credential values were printed or modified. MacDev routing41OK and dev-run remain in force. No implementation of the new four packages is claimed yet.
+
+The independent scanner specialist is active in its own T3 worktree; exact task/model/hook ownership is in the expanded program. Full scanner handoff was included in the task, with all11 sections and primary references. Coordinator owns shared platform guard, site/DB boundaries, registry/navigation/dependencies and deployment. Root queued exactly one adaptive continuation ordinal11 (`temco-expanded-adaptive-handoff-run10-20261103-01`); do not add another. Existing hourly supervisor is root-managed review/recovery, not an assignment gate. The next coordinator work is warehouse authority/scoping implementation while scanner work proceeds independently.
+
 ## Live parallel pilot — native and public qualification
 
 **UI:** https://temco-v2.chronchive.com/ · **MCP:** https://temco-v2.chronchive.com/mcp. **Tested/deployed runtime HEAD: `48c646fcf43acde8995b028526cb084581f89f4c`**, native Linux/x86_64 on the existing `15.204.239.71` host. Later documentation commits do not change its images. Adam explicitly approved both the new DNS record and isolated launch, clearing the earlier automatic rejection; root created only the new proxied A at 17:27:41 UTC on 2026-11-01. No DNS/deployment approval remains pending for this pilot.
