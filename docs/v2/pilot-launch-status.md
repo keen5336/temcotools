@@ -1,6 +1,6 @@
 # Parallel pilot launch and first-account handoff
 
-**Live isolated pilot:** https://temco-v2.chronchive.com/ · **MCP:** https://temco-v2.chronchive.com/mcp. Application/image source is `48c646fcf43acde8995b028526cb084581f89f4c`; later documentation commits do not change that runtime. Native VPS, public HTTPS SDK and independent Chrome sign-in/discovery checks passed on 2026-11-01. Adam completed password activation; his client consent and privileged MFA remain human steps; full v2/upstream/device acceptance is not complete.
+**Live isolated pilot:** https://temco-v2.chronchive.com/ · **MCP:** https://temco-v2.chronchive.com/mcp. Current application/image source is `7ddeb76e9738b1d7d44b9976a731c0ffe550b4ae`; later documentation commits do not change that runtime. Native expanded release, public scoped SDK and actual public both-engine scanner inference passed; earlier48c release records below are historical. Adam completed password activation; his client consent and privileged MFA remain human steps; full v2/upstream/device acceptance is not complete.
 
 ## Authority and actual routing
 
@@ -14,20 +14,22 @@ Root-private proxy/TLS backup: `/root/temcotools-v2-pilot-backup-20261101/caddy-
 
 ## Nov3 expanded release — current native runtime
 
-**Live runtime source `2ae6cb2d39d7d685035c469f2383ef56a67df0d2`**, deployed November3 at20:25 UTC on the same isolated host/project. Documentation/tests may advance beyond this pin. Source `48c` below is the previous release, retained as history, not the current runtime.
+**Live runtime source `7ddeb76e9738b1d7d44b9976a731c0ffe550b4ae`**, following the November3 expanded2ae release on the same isolated host/project.7d fixes timezone-sensitive SSR hydration and adds public qualification; auth/broker/schema/lockfile are unchanged. Documentation/tests may advance beyond this pin. The2ae native SDK result and older48c records remain separately attributed history.
 
 | Service | Current container prefix | Native amd64 image ID |
 | --- | --- | --- |
-| App | `7b006d77e9aa` | `sha256:c0c386486aa766142c65d42728d98a9a1bc825ffd19ae3d6982228f356055c67` |
-| Existing DMP API relay | `79a941d3d64d` | Same pinned app image |
-| MCP HTTP | `be3d8544ce6d` | `sha256:db009517e1fcf21d4776a0f6d21dce078a4e9d9cd19a176cf8e49337bd1cc8fa` |
-| Migrator, completed | One-off | `sha256:7788ac93a6fe1c942bac7b50c9bd7aaefa83065bef1dedc023e63dabbc49ff1a` |
+| App | `24356f972ef0` | `sha256:91c631e52d81811b17354450fdc07829e89ddde980a31d8505a9c352d6c4fc80` |
+| Existing DMP API relay | `f42f05fb9642` | Same pinned app image |
+| MCP HTTP | `2994c7118f9b` | `sha256:16c5dcdc88a24a25a7a92afffc44bde51acf321c298e7a41dad9585a3ed02133` |
+| Migrator, completed | One-off | `sha256:72b22e0430956bdf87c58cbfb4efab5b708bea948a0d23c9e6ca7a86f4be4086` |
 
-The original DB container `b872082621ef` remains at its November1 start. All34 migrations applied successfully with no pending/failed/checksum/unknown entries. Source/image/clean-v2/resource/port guard render+verify passed. Private receipts/logs: `/srv/temcotools-v2-pilot/artifacts/2ae6cb2/` and `/srv/temcotools-v2-pilot/receipts/render-2ae6cb2/`. The compose migrator consumed remaining stdin in the first launcher, leaving the pilot stopped after a successful migration; actual DB state34/0 was verified, then only the three intended pilot services were started. No schema replay or production restart occurred.
+The original DB container `b872082621ef` remains at its November1 start. All34 migrations applied successfully with no pending/failed/checksum/unknown entries. Source/image/clean-v2/resource/port guard render+verify passed. Current native build logs/image metadata: `/srv/temcotools-v2-pilot/artifacts/7ddeb76/`; guard `/srv/temcotools-v2-pilot/receipts/render-7ddeb76/`. The34-migration and identity-preservation receipts remain under `artifacts/2ae6cb2/`;7d made no schema change or migration replay. The compose migrator consumed remaining stdin in the first launcher, leaving the pilot stopped after a successful migration; actual DB state34/0 was verified, then only the three intended pilot services were started. No schema replay or production restart occurred.
 
 Private before/after fingerprints matched Adam's identity, password/PIN envelope, MFA/factors/recovery, retained session/grant state and all pilot keys/database/origin. No new enrollment/reset/login impersonation was performed. Production container IDs/images/start times/mounts/ports and clean main `fea1f22` matched before/after; production sign-in200. Main/v1 published refs remain `fea1f22`.
 
 Current qualification:
+
+- **Actual public pilot Chrome4/4 PASS**, receipt `20261103-145029-build-89132`:390px and Pacific/Auckland timezone; synthetic platform-admin password login, anonymous/site-admin Lab denial, two-warehouse tab/RSC pinning, BOTH real Tesseract+Paddle workers on the same synthetic serial fixture. Raw misreads are preserved; Tesseract read `0010-I1S5-8B`, Paddle read `001O-I1S5-8B`. No external OCR request, React error or horizontal overflow. Temporary synthetic people/sessions/sites all0 after cleanup, operational effects0, Adam unused. This is software/public execution, not a physical-device benchmark. The first2ae run exposed server/device timezone hydration;7d renders a stable initial instant then device-local time. Failed diagnostics and exact-namespace cleanup are retained.
 
 - Full local optimized2ae app and actual390px Chrome integration passed: platform-only Lab denial, cross-tab/RSC warehouse pinning, Receiving run persistence, real same-frame Tesseract+Paddle workers, no external recognition request/overflow. Receipt `20261103-141433-build-82293`.
 - Native Linux/x64/UID1001 password/TOTP/PKCE/scoped SDK, read-only consent before MFA, scope denial, current session revocation and pilot-effect denial passed; the reused fixture was adapted to explicit platform/site authority and a privileged **synthetic-only fixture client** for honest before/after counts. Actual public HTTPS SDK passed with normal native headers/default TLS verification; revoked bearer401. Temporary synthetic person/client removed and effect rows0. Receipt `20261103-142708-build-84433`; private summary `Qualification/temcotools-v2-expanded-2ae6cb2-20261103/native/native-internal-summary.json`. This is not Adam's MCP attachment.
@@ -59,7 +61,7 @@ The three-image archive was transferred and SHA256-verified before load: `e78e2a
 
 Production `/srv/temcotools` remains clean published main/fea1f22. App/label/API/DB IDs `00d4d1e637cd`, `410f55a04bd9`, `f8299cd43494`, `a8b7323556b4`, their start times, images and mounts matched the private before/after baseline. Production origin sign-in and both relay health endpoints stayed200. No production container restart, DB/volume/file/key mutation or image retag occurred.
 
-## Qualification and honest limits
+## Historical48c qualification and honest limits
 
 - Native source/image guard render, verify and immediate prestart passed. Current private DB/env backup, native image IDs, manifest, rollout and HTTP results: `/srv/temcotools-v2-pilot/candidates/48c646f/`. DB/files/keys/sessions, production containers/source and shared proxy/DNS are preserved. The initial metadata comparison stopped before changes because retained mount records used null/omitted fields and a different order; every recorded field matched after normalization. No safety check was disabled.
 - Reused scoped fixture **`20261101-162353-build-34854.json` PASS** on 48c: two-read HTTP consent before MFA, privileged password/TOTP/PKCE, scoped SDK catalog/lookup, admin denial, current-session revocation and pilot effect denial. Actual public HTTPS/native SDK passed with normal headers/default certificate validation; revoked bearer401. Temporary synthetic actor/client removed, baseline counts preserved, effect rows0. Summary: MacDev `Qualification/temcotools-v2-ui-48c646f-20261101/native/native-internal-summary.json`. This is synthetic qualification, not Adam's client authorization.
@@ -97,4 +99,4 @@ The explicit operational-target flag admits only the exact named pilot database;
 
 New pilot environment/keys, database/files and audit/unknown-effect ledgers stay private and retained. To suspend admission, validate and restore **only** the new hostname's saved maintenance fragment, then gracefully reload after checking relevant streams; production routes remain unchanged. Stop only the explicit pilot Compose project if needed. Never use `down -v`, prune, replace production resources or run an old image against a forward-migrated database. The [pilot runbook](pilot-runbook.md) and [cutover package](cutover-runbook.md) retain the concrete recovery boundaries; production cutover is not authorized.
 
-Existing Work recovery/review supervision is active, without guaranteed instant/continuous execution. The T3 queue was read back empty at this checkpoint; no new coordinator, supervisor or idle continuation was created. The next useful source work is evidence-backed DMP normalization/RP qualification when the owner connects or supplies private bodies; do not manufacture mappings while awaiting that human input.
+Existing Work recovery/review supervision is active, without guaranteed instant/continuous execution. The T3 queue was read back empty at this checkpoint; no new coordinator, supervisor or idle continuation was created. The Nov3 expanded build remains active: generic provider activation/durable dispatch, supported workflow building blocks, platform/site defaults and controlled custody are independent implementation packages. Missing upstream identity/receipt/close evidence and physical-device acceptance gate only their dependent live behavior. Do not manufacture mappings or stop the independent program awaiting owner MCP consent.

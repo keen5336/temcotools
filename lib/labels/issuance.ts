@@ -1,3 +1,4 @@
+import { gatePrinterQueueDispatch, lockPrinterQueueSettlement } from "./printer-queue";
 import { randomBytes } from "node:crypto";
 import type { LabelIssuance, Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -119,8 +120,12 @@ export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionCl
 export async function claimLabelDispatch(principal: Principal, input: unknown): Promise<LabelDispatchClaim | { dispatch: false; issuance: ReturnType<typeof receipt> }> {
   const data = labelDispatchClaimInput.parse(input);
   return prisma.$transaction(async tx => {
-    const device = await currentPrintingDevice(tx, principal, data.deviceId, data.deviceToken);
-    const row = await lockIssuance(tx, data.issuanceId);
+    const queue = await gatePrinterQueueDispatch(tx, principal, data);
+    if (queue.kind !== "ready") {
+      const current = await tx.labelIssuance.findUniqueOrThrow({ where: { id: data.issuanceId } });
+      return { dispatch: false as const, issuance: receipt(current), ...(queue.kind === "blocked" ? { blocked: { code: queue.code, reason: queue.reason } } : {}) };
+    }
+    const { device, row } = queue;
     if (row.deviceId !== device.id || row.mode !== device.mode || !device.printerIds.includes(row.printerId)) throw new AuthorizationError("This issuance is assigned to a different printing device.");
     if (row.state !== "queued") return { dispatch: false, issuance: receipt(row) };
     let requester: Principal;
@@ -192,7 +197,7 @@ export async function reportLabelDelivery(principal: Principal, input: unknown) 
   const data = labelDeliveryReportInput.parse(input);
   return prisma.$transaction(async tx => {
     await currentPrintingDevice(tx, principal, data.deviceId, data.deviceToken);
-    const row = await lockIssuance(tx, data.issuanceId);
+    const row = await lockPrinterQueueSettlement(tx, principal, data.issuanceId);
     if (row.deviceId !== data.deviceId || !row.claimTokenHash || row.claimTokenHash !== hashDeviceToken(data.reportToken)) throw new AuthorizationError("This device cannot report that label issuance.");
     const reportFingerprint = fingerprint({ status: data.status, note: data.note });
     if (row.reportFingerprint) {
@@ -209,7 +214,7 @@ export async function cancelQueuedLabel(principal: Principal, input: unknown) {
   const data = labelCancelInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");
-    const row = await lockIssuance(tx, data.issuanceId);
+    const row = await lockPrinterQueueSettlement(tx, current, data.issuanceId);
     if (row.actorUserId !== current.userId && !current.capabilities.includes("labels.manage")) throw new AuthorizationError();
     if (row.state !== "queued") return receipt(row);
     const updated = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });
@@ -221,7 +226,7 @@ export async function reconcileLabelIssuance(principal: Principal, input: unknow
   const data = labelReconcileInput.parse(input);
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, principal, "labels.print");
-    const row = await lockIssuance(tx, data.issuanceId);
+    const row = await lockPrinterQueueSettlement(tx, current, data.issuanceId);
     if (row.actorUserId !== current.userId && !current.capabilities.includes("labels.manage")) throw new AuthorizationError();
     const at = new Date();
     if (data.outcome !== "not_printed" && !row.dispatchedAt) throw new LabelError("This issuance has not been dispatched. Confirm the physical result against the issuance that was actually sent.", 409);
