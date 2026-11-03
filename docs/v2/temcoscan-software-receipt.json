@@ -1,0 +1,1733 @@
+{
+  "environment": {
+    "browser": "156.0.8078.80",
+    "physicalHardware": false,
+    "origin": "loopback isolated fixture harness",
+    "gpu": "disabled",
+    "headers": "no COOP/COEP",
+    "date": "2026-11-03T19:56:55.813Z",
+    "bundle": "React 19.2.4 production, esbuild 0.25.12 minified"
+  },
+  "checks": [
+    "No recognition runtime/model download before capture",
+    "Actual Tesseract and Paddle mobile WASM inference on identical PNG blob/frame hash",
+    "Real ZXing Code128 and QR exact-match decoding",
+    "Two real barcodes in one image are independently decoded through production ROI crops",
+    "Actual getUserMedia fake-camera settings/inline video and pointer ROI movement",
+    "Actual software-camera MediaStream -> production capture -> ZXing exact match",
+    "Actual software-camera MediaStream -> local Tesseract WASM OCR returns printed model text",
+    "Continuous software-camera attempts complete with bounded admission and duplicate marking",
+    "Reset closes OCR hosts and their worker trees",
+    "Real ZXing blank-image miss returns no fabricated barcode",
+    "Missing real Paddle model fails visibly without stuck admission",
+    "Real two-engine OCR condition matrix uses identical saved inputs; raw misreads retained",
+    "390px mobile layout has no page horizontal overflow",
+    "Production canvas crops source ROI before clockwise rotation (pixel-verified)",
+    "Worker reports initialization failures explicitly",
+    "Harness inference made no app API/WMS request",
+    "React navigation/unmount cleanup stops actual MediaStream tracks"
+  ],
+  "measurements": [
+    {
+      "fixture": "serial-clean",
+      "id": "32c394cb-2be5-4358-88d4-a65ae38787ea",
+      "timestamp": "2026-11-03T19:56:56.192Z",
+      "source": "upload",
+      "task": "ocr",
+      "outputs": [
+        {
+          "engine": "tesseract",
+          "rawText": "SERIAL: 0010-I1S5-8B\nMODEL: QX-007\n",
+          "detections": [
+            {
+              "kind": "ocr",
+              "rawText": "SERIAL: 0010-I1S5-8B\n",
+              "confidence": 91,
+              "confidenceScale": "0-100",
+              "boundingBox": {
+                "x": 38,
+                "y": 43,
+                "width": 595,
+                "height": 33
+              },
+              "normalizedText": "SERIAL: 0010-I1S5-8B"
+            },
+            {
+              "kind": "ocr",
+              "rawText": "MODEL: QX-007\n",
+              "confidence": 89,
+              "confidenceScale": "0-100",
+              "boundingBox": {
+                "x": 35,
+                "y": 123,
+                "width": 385,
+                "height": 38
+              },
+              "normalizedText": "MODEL: QX-007"
+            }
+          ],
+          "initMs": 279.5,
+          "inferenceMs": 79.30000019073486,
+          "runtime": {
+            "backend": "WASM",
+            "worker": true,
+            "language": "eng",
+            "downloads": [
+              {
+                "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+                "bytes": 10923060,
+                "downloadMs": 26.90000057220459
+              }
+            ],
+            "version": "7.0.0"
+          }
+        },
+        {
+          "engine": "paddle",
+          "rawText": "SERIAL:  001O-I1S5-8B\nMODEL: QX-007",
+          "detections": [
+            {
+              "kind": "ocr",
+              "rawText": "SERIAL:  001O-I1S5-8B",
+              "confidence": 0.9461624792643956,
+              "confidenceScale": "0-1",
+              "points": [
+                {
+                  "x": 36,
+                  "y": 41
+                },
+                {
+                  "x": 633,
+                  "y": 41
+                },
+                {
+                  "x": 633,
+                  "y": 86
+                },
+                {
+                  "x": 36,
+                  "y": 86
+                }
+              ],
+              "normalizedText": "SERIAL: 001O-I1S5-8B"
+            },
+            {
+              "kind": "ocr",
+              "rawText": "MODEL: QX-007",
+              "confidence": 0.9630251343433673,
+              "confidenceScale": "0-1",
+              "points": [
+                {
+                  "x": 31,
+                  "y": 114
+                },
+                {
+                  "x": 425,
+                  "y": 114
+                },
+                {
+                  "x": 425,
+                  "y": 171
+                },
+                {
+                  "x": 31,
+                  "y": 171
+                }
+              ],
+              "normalizedText": "MODEL: QX-007"
+            }
+          ],
+          "initMs": 995.6000003814697,
+          "inferenceMs": 188.5,
+          "runtime": {
+            "backend": "wasm",
+            "detProvider": "wasm",
+            "recProvider": "wasm",
+            "assets": [
+              {
+                "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+                "bytes": 4843520
+              },
+              {
+                "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+                "bytes": 16701440
+              }
+            ],
+            "downloads": [
+              {
+                "type": "asset",
+                "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+                "bytes": 4843520,
+                "downloadMs": 25
+              },
+              {
+                "type": "asset",
+                "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+                "bytes": 16701440,
+                "downloadMs": 48.89999961853027
+              },
+              {
+                "type": "asset",
+                "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+                "bytes": 25014754,
+                "downloadMs": 54.69999980926514
+              }
+            ],
+            "ortVersion": "1.24.3",
+            "version": "0.4.2",
+            "threads": 1,
+            "worker": true,
+            "metrics": {
+              "detMs": 55.89999961853027,
+              "recMs": 128.10000038146973,
+              "totalMs": 186.30000019073486,
+              "detectedBoxes": 2,
+              "recognizedCount": 2
+            },
+            "providers": {
+              "requestedBackend": "wasm",
+              "detProvider": "wasm",
+              "recProvider": "wasm",
+              "webgpuAvailable": false
+            }
+          }
+        }
+      ],
+      "status": "success",
+      "isDuplicate": false,
+      "confirmed": false,
+      "timings": {
+        "captureMs": 2.5,
+        "preprocessMs": 13.699999809265137,
+        "totalMs": 1571.3000001907349,
+        "visibleMs": 1596.2000007629395
+      },
+      "frameSize": {
+        "width": 1100,
+        "height": 240
+      },
+      "transform": {
+        "rotation": 0,
+        "grayscale": false,
+        "threshold": false,
+        "contrast": 1,
+        "maxEdge": 1600
+      },
+      "processedSize": {
+        "width": 1100,
+        "height": 240
+      },
+      "frameId": "1100x240:e281e902cb16aa52d73e83da302076954007afff42839845c538ffd17f233eb3"
+    }
+  ],
+  "errors": [],
+  "camera": {
+    "settings": {
+      "aspectRatio": 1.7777777777777777,
+      "frameRate": 5,
+      "height": 360,
+      "resizeMode": "none",
+      "width": 640
+    },
+    "inline": true,
+    "ready": 4,
+    "ocrRawText": "SERIAL: 0010-I1S5-8B\nMODEL: QX-007\n"
+  },
+  "matrix": [
+    {
+      "fixture": "serial-clean",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "19017acf240fbbccae0ced0aa2fac76f4fb8723507676d64873b851bbab35d9a",
+      "engine": "tesseract",
+      "rawText": "SERIAL: 0010-I1S5-8B\nMODEL: QX-007\n",
+      "inferenceMs": 92.59999942779541,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 0010-I1S5-8B\n",
+          "confidence": 91,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 38,
+            "y": 43,
+            "width": 595,
+            "height": 33
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007\n",
+          "confidence": 89,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 35,
+            "y": 123,
+            "width": 385,
+            "height": 38
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "serial-clean",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "19017acf240fbbccae0ced0aa2fac76f4fb8723507676d64873b851bbab35d9a",
+      "engine": "paddle",
+      "rawText": "SERIAL:  001O-I1S5-8B\nMODEL: QX-007",
+      "inferenceMs": 194.60000038146973,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL:  001O-I1S5-8B",
+          "confidence": 0.9461624792643956,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 36,
+              "y": 41
+            },
+            {
+              "x": 633,
+              "y": 41
+            },
+            {
+              "x": 633,
+              "y": 86
+            },
+            {
+              "x": 36,
+              "y": 86
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007",
+          "confidence": 0.9630251343433673,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 31,
+              "y": 114
+            },
+            {
+              "x": 425,
+              "y": 114
+            },
+            {
+              "x": 425,
+              "y": 171
+            },
+            {
+              "x": 31,
+              "y": 171
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 61.29999923706055,
+          "recMs": 130.9000005722046,
+          "totalMs": 193.5,
+          "detectedBoxes": 2,
+          "recognizedCount": 2
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "dense-lpn",
+      "expected": "LPN: 0000123401\nLOCATION: A-01-005\nSERIAL: 0O-1I-5S-8B",
+      "pngSha256": "38dc518d67d0be1797a56f2c9bb8d21182e3c1787bd2517cdb9c8ba7d5e6cab4",
+      "engine": "tesseract",
+      "rawText": "LPN: 0000123401\n\nLOCATION: A-01-005\n\nSERIAL: 00-1I-5S5-8B\n",
+      "inferenceMs": 58.5,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "LPN: 0000123401\n\n",
+          "confidence": 96,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 36,
+            "y": 57,
+            "width": 248,
+            "height": 18
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "LOCATION: A-01-005\n\n",
+          "confidence": 88,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 36,
+            "y": 115,
+            "width": 299,
+            "height": 18
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 00-1I-5S5-8B\n",
+          "confidence": 79,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 37,
+            "y": 173,
+            "width": 316,
+            "height": 19
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "dense-lpn",
+      "expected": "LPN: 0000123401\nLOCATION: A-01-005\nSERIAL: 0O-1I-5S-8B",
+      "pngSha256": "38dc518d67d0be1797a56f2c9bb8d21182e3c1787bd2517cdb9c8ba7d5e6cab4",
+      "engine": "paddle",
+      "rawText": "LPN:0000123401\nLOCATION:A-01-005\nSERIAL:0O-1I-5S-8B",
+      "inferenceMs": 220.30000019073486,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "LPN:0000123401",
+          "confidence": 0.9827946892806462,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 33,
+              "y": 53
+            },
+            {
+              "x": 286,
+              "y": 53
+            },
+            {
+              "x": 286,
+              "y": 78
+            },
+            {
+              "x": 33,
+              "y": 78
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "LOCATION:A-01-005",
+          "confidence": 0.9605780103627373,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 30,
+              "y": 108
+            },
+            {
+              "x": 337,
+              "y": 106
+            },
+            {
+              "x": 338,
+              "y": 136
+            },
+            {
+              "x": 30,
+              "y": 138
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL:0O-1I-5S-8B",
+          "confidence": 0.9758368962340884,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 33,
+              "y": 167
+            },
+            {
+              "x": 356,
+              "y": 167
+            },
+            {
+              "x": 356,
+              "y": 197
+            },
+            {
+              "x": 33,
+              "y": 197
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 35.30000019073486,
+          "recMs": 183.80000019073486,
+          "totalMs": 219.60000038146973,
+          "detectedBoxes": 3,
+          "recognizedCount": 3
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "shadow",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "85b1e7f312a81dd6032b8482d33b5ebb7379d69203297fe82955a35a4ea7ff8e",
+      "engine": "tesseract",
+      "rawText": "",
+      "inferenceMs": 10.09999942779541,
+      "detections": [],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "shadow",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "85b1e7f312a81dd6032b8482d33b5ebb7379d69203297fe82955a35a4ea7ff8e",
+      "engine": "paddle",
+      "rawText": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "inferenceMs": 139.89999961853027,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 001O-I1S5-8B",
+          "confidence": 0.9482498794794083,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 31,
+              "y": 37
+            },
+            {
+              "x": 636,
+              "y": 41
+            },
+            {
+              "x": 636,
+              "y": 92
+            },
+            {
+              "x": 31,
+              "y": 88
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007",
+          "confidence": 0.9349707227486831,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 31,
+              "y": 120
+            },
+            {
+              "x": 425,
+              "y": 120
+            },
+            {
+              "x": 425,
+              "y": 171
+            },
+            {
+              "x": 31,
+              "y": 171
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 27.200000762939453,
+          "recMs": 111.19999980926514,
+          "totalMs": 139,
+          "detectedBoxes": 2,
+          "recognizedCount": 2
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "glare",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "5bbb09ae5eb4cc64c4842bd912a7cb4c7beba20c26392201ca635a76f8abc8f7",
+      "engine": "tesseract",
+      "rawText": "SERIAL: 001c\nMODEL: QX-0(\n",
+      "inferenceMs": 34,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 001c\n",
+          "confidence": 85,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 38,
+            "y": 43,
+            "width": 341,
+            "height": 33
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-0(\n",
+          "confidence": 86,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 35,
+            "y": 123,
+            "width": 344,
+            "height": 38
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "glare",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "5bbb09ae5eb4cc64c4842bd912a7cb4c7beba20c26392201ca635a76f8abc8f7",
+      "engine": "paddle",
+      "rawText": "SERIAL:  001O-I1S5-8B\nMODEL: QX-007",
+      "inferenceMs": 140.39999961853027,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL:  001O-I1S5-8B",
+          "confidence": 0.8694085535548982,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 34,
+              "y": 38
+            },
+            {
+              "x": 634,
+              "y": 36
+            },
+            {
+              "x": 634,
+              "y": 81
+            },
+            {
+              "x": 34,
+              "y": 83
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007",
+          "confidence": 0.9520531938626215,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 33,
+              "y": 116
+            },
+            {
+              "x": 425,
+              "y": 116
+            },
+            {
+              "x": 425,
+              "y": 167
+            },
+            {
+              "x": 33,
+              "y": 167
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 25.800000190734863,
+          "recMs": 113.30000019073486,
+          "totalMs": 139.70000076293945,
+          "detectedBoxes": 2,
+          "recognizedCount": 2
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "angle",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "137b41f2796d21417229a44dba5d3edbf6278d5caf628f52affd8964a8d51c25",
+      "engine": "tesseract",
+      "rawText": "SERIAL: 0010-1155_g5\nMODEL, ; 0X-007\n",
+      "inferenceMs": 39.39999961853027,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 0010-1155_g5\n",
+          "confidence": 33,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 77,
+            "y": 59,
+            "width": 593,
+            "height": 82
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL, ; 0X-007\n",
+          "confidence": 53,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 66,
+            "y": 134,
+            "width": 386,
+            "height": 68
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "angle",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "137b41f2796d21417229a44dba5d3edbf6278d5caf628f52affd8964a8d51c25",
+      "engine": "paddle",
+      "rawText": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "inferenceMs": 150.60000038146973,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 001O-I1S5-8B",
+          "confidence": 0.9543554455041885,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 75,
+              "y": 48
+            },
+            {
+              "x": 673,
+              "y": 100
+            },
+            {
+              "x": 669,
+              "y": 148
+            },
+            {
+              "x": 71,
+              "y": 96
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007",
+          "confidence": 0.9554608051593487,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 65,
+              "y": 128
+            },
+            {
+              "x": 457,
+              "y": 162
+            },
+            {
+              "x": 453,
+              "y": 212
+            },
+            {
+              "x": 61,
+              "y": 178
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 37.90000057220459,
+          "recMs": 111.39999961853027,
+          "totalMs": 149.89999961853027,
+          "detectedBoxes": 2,
+          "recognizedCount": 2
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "small-low-light",
+      "expected": "LPN: 0000123401\nMODEL: QX-007",
+      "pngSha256": "84574a692de8d9c7bafa4298c8496f5207f0a2613fd276820b55662e4d36e4d4",
+      "engine": "tesseract",
+      "rawText": "LPN: 0000123401\n\nMODEL: QX-007\n",
+      "inferenceMs": 27.199999809265137,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "LPN: 0000123401\n\n",
+          "confidence": 96,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 35,
+            "y": 62,
+            "width": 178,
+            "height": 13
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007\n",
+          "confidence": 91,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 35,
+            "y": 112,
+            "width": 154,
+            "height": 16
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "small-low-light",
+      "expected": "LPN: 0000123401\nMODEL: QX-007",
+      "pngSha256": "84574a692de8d9c7bafa4298c8496f5207f0a2613fd276820b55662e4d36e4d4",
+      "engine": "paddle",
+      "rawText": "LPN: 0000123401\nMODEL: QX-007",
+      "inferenceMs": 119.20000076293945,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "LPN: 0000123401",
+          "confidence": 0.9583223938941956,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 34,
+              "y": 57
+            },
+            {
+              "x": 214,
+              "y": 57
+            },
+            {
+              "x": 214,
+              "y": 77
+            },
+            {
+              "x": 34,
+              "y": 77
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007",
+          "confidence": 0.9429696248127863,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 33,
+              "y": 106
+            },
+            {
+              "x": 191,
+              "y": 106
+            },
+            {
+              "x": 191,
+              "y": 128
+            },
+            {
+              "x": 33,
+              "y": 128
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 31.399999618530273,
+          "recMs": 87.20000076293945,
+          "totalMs": 118.80000019073486,
+          "detectedBoxes": 2,
+          "recognizedCount": 2
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "damage",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "70df6a7fb16bb0a34735a301a762c1de7c185ea7683d8b4b6a1d56a0779d85a2",
+      "engine": "tesseract",
+      "rawText": "SERIAL: 0010-I1S5-8B\nMODEL: QX-007\n",
+      "inferenceMs": 43.79999923706055,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 0010-I1S5-8B\n",
+          "confidence": 86,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 38,
+            "y": 43,
+            "width": 595,
+            "height": 33
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007\n",
+          "confidence": 89,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 35,
+            "y": 123,
+            "width": 385,
+            "height": 38
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "damage",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "70df6a7fb16bb0a34735a301a762c1de7c185ea7683d8b4b6a1d56a0779d85a2",
+      "engine": "paddle",
+      "rawText": "SERIAL:  001O-I1S5-8B\nMODEL: QX-007",
+      "inferenceMs": 135.69999980926514,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL:  001O-I1S5-8B",
+          "confidence": 0.9440135757128397,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 36,
+              "y": 41
+            },
+            {
+              "x": 631,
+              "y": 41
+            },
+            {
+              "x": 631,
+              "y": 86
+            },
+            {
+              "x": 36,
+              "y": 86
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007",
+          "confidence": 0.9670901390222403,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 31,
+              "y": 118
+            },
+            {
+              "x": 424,
+              "y": 114
+            },
+            {
+              "x": 425,
+              "y": 170
+            },
+            {
+              "x": 31,
+              "y": 175
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 26.399999618530273,
+          "recMs": 108.10000038146973,
+          "totalMs": 135.10000038146973,
+          "detectedBoxes": 2,
+          "recognizedCount": 2
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "motion",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "91dd29cbebf2dd814e430b268a69211d88796acba27270d0097327581eb130e7",
+      "engine": "tesseract",
+      "rawText": "SERIAL: 0010-I1S5-8B\nMODEL: QX-007\n",
+      "inferenceMs": 43.10000038146973,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 0010-I1S5-8B\n",
+          "confidence": 88,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 37,
+            "y": 42,
+            "width": 597,
+            "height": 35
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007\n",
+          "confidence": 87,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 35,
+            "y": 122,
+            "width": 386,
+            "height": 40
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "motion",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "91dd29cbebf2dd814e430b268a69211d88796acba27270d0097327581eb130e7",
+      "engine": "paddle",
+      "rawText": "SERIAL:001O-I1S5-8B\nMODEL:\nQX-007",
+      "inferenceMs": 172.29999923706055,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL:001O-I1S5-8B",
+          "confidence": 0.9602565734009993,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 36,
+              "y": 38
+            },
+            {
+              "x": 633,
+              "y": 38
+            },
+            {
+              "x": 633,
+              "y": 81
+            },
+            {
+              "x": 36,
+              "y": 81
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL:",
+          "confidence": 0.9350045124689738,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 33,
+              "y": 116
+            },
+            {
+              "x": 225,
+              "y": 116
+            },
+            {
+              "x": 225,
+              "y": 161
+            },
+            {
+              "x": 33,
+              "y": 161
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "QX-007",
+          "confidence": 0.9944538275400797,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 235,
+              "y": 116
+            },
+            {
+              "x": 425,
+              "y": 116
+            },
+            {
+              "x": 425,
+              "y": 163
+            },
+            {
+              "x": 235,
+              "y": 163
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 24.800000190734863,
+          "recMs": 146.30000019073486,
+          "totalMs": 171.60000038146973,
+          "detectedBoxes": 3,
+          "recognizedCount": 3
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    },
+    {
+      "fixture": "curved",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "81c5c9ed98ef059a366680fb17b28e9ba00837293f34be918f3a4dc7f81dafe6",
+      "engine": "tesseract",
+      "rawText": "SERIAL; 0010-118578B\n\nMODEL: gx-007\n",
+      "inferenceMs": 33.30000019073486,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL; 0010-118578B\n\n",
+          "confidence": 13,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 39,
+            "y": 38,
+            "width": 604,
+            "height": 72
+          }
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: gx-007\n",
+          "confidence": 40,
+          "confidenceScale": "0-100",
+          "boundingBox": {
+            "x": 35,
+            "y": 139,
+            "width": 388,
+            "height": 57
+          }
+        }
+      ],
+      "runtime": {
+        "backend": "WASM",
+        "worker": true,
+        "language": "eng",
+        "downloads": [
+          {
+            "path": "/scan-lab/vendor/tesseract/lang/eng.traineddata.gz",
+            "bytes": 10923060,
+            "downloadMs": 14.5
+          }
+        ],
+        "version": "7.0.0"
+      }
+    },
+    {
+      "fixture": "curved",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "pngSha256": "81c5c9ed98ef059a366680fb17b28e9ba00837293f34be918f3a4dc7f81dafe6",
+      "engine": "paddle",
+      "rawText": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "inferenceMs": 111.40000057220459,
+      "detections": [
+        {
+          "kind": "ocr",
+          "rawText": "SERIAL: 001O-I1S5-8B",
+          "confidence": 0.9253494799137115,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 23,
+              "y": 47
+            },
+            {
+              "x": 652,
+              "y": 16
+            },
+            {
+              "x": 656,
+              "y": 100
+            },
+            {
+              "x": 27,
+              "y": 131
+            }
+          ]
+        },
+        {
+          "kind": "ocr",
+          "rawText": "MODEL: QX-007",
+          "confidence": 0.9453071493368882,
+          "confidenceScale": "0-1",
+          "points": [
+            {
+              "x": 22,
+              "y": 126
+            },
+            {
+              "x": 434,
+              "y": 122
+            },
+            {
+              "x": 435,
+              "y": 201
+            },
+            {
+              "x": 23,
+              "y": 205
+            }
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "wasm",
+        "detProvider": "wasm",
+        "recProvider": "wasm",
+        "assets": [
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520
+          },
+          {
+            "url": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440
+          }
+        ],
+        "downloads": [
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_det.tar",
+            "bytes": 4843520,
+            "downloadMs": 16.09999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/paddle/PP-OCRv5_mobile_rec.tar",
+            "bytes": 16701440,
+            "downloadMs": 38.59999942779541
+          },
+          {
+            "type": "asset",
+            "path": "/scan-lab/vendor/ort/ort-wasm-simd-threaded.jsep.wasm",
+            "bytes": 25014754,
+            "downloadMs": 30.90000057220459
+          }
+        ],
+        "ortVersion": "1.24.3",
+        "version": "0.4.2",
+        "threads": 1,
+        "worker": true,
+        "metrics": {
+          "detMs": 32.20000076293945,
+          "recMs": 78,
+          "totalMs": 110.70000076293945,
+          "detectedBoxes": 2,
+          "recognizedCount": 2
+        },
+        "providers": {
+          "requestedBackend": "wasm",
+          "detProvider": "wasm",
+          "recProvider": "wasm",
+          "webgpuAvailable": false
+        }
+      }
+    }
+  ],
+  "qualification": {
+    "unitTests": {
+      "passed": 13,
+      "failed": 0
+    },
+    "browserChecks": {
+      "passed": 17,
+      "failed": 0
+    },
+    "conditionMatrix": {
+      "frames": 9,
+      "engines": 2,
+      "inferences": 18
+    },
+    "typescript": "5.9.3 strict PASS",
+    "lint": "ESLint scoped PASS (React detect environment warning only)",
+    "nextBuild": "Next.js 16.4.3 webpack optimized isolated component app PASS; full TemcoTools build/auth/deploy remains coordinator-owned",
+    "physicalDeviceAcceptance": "PENDING",
+    "platformAdminDenial": "PENDING coordinator integration",
+    "deployment": "NOT performed by implementation helper"
+  },
+  "sourceHashes": {
+    "components/scan-lab/CameraPreview.tsx": "5746a66634159f0ad138a7a797d4fe02173e89ae2c52329b8ca5dcf29d42dd38",
+    "components/scan-lab/ScanLabClient.tsx": "bcdd636c47af6910fc0bda0d16554f1182bb7f0a2833eddc9e569fb1c3da5dec",
+    "components/scan-lab/scan-lab.module.css": "c40f30abd70ace118b29997db9d08bb9a0f9bdf254c7237727012865df422619",
+    "lib/scan-lab/camera.ts": "2117d22962d3fc6c017ff91e63b80f001d21ede7fea11a68deb2c0b264e595b9",
+    "lib/scan-lab/capture.ts": "b6dfb727a2046f7582d1eee9bb739bf43d8fcfe9a519ec2766bfbd49c81f016f",
+    "lib/scan-lab/css.d.ts": "e15bcdb25192ec0b8086fa65f0d0e6b5ccac7874f6f3afc513e382bd6445e69e",
+    "lib/scan-lab/geometry.ts": "bf8e6d09a551a0e7db44d0d2dfcde185aa7ef0560b83214493cd30db7527be03",
+    "lib/scan-lab/recognizers.ts": "3c1118b9c29c42e27432814b14250f101ed3f98b77bed4ff7197586a161e29a3",
+    "lib/scan-lab/results.ts": "9d511609fc0e2617eff0257e34f435354275bcbc25d8c519865a81d895543c59",
+    "lib/scan-lab/runtime/paddle.mjs": "bd16ff18e39668d58f10eba164a55e9aca226f5aa628eed5ebd4d4e17507a310",
+    "lib/scan-lab/runtime/tesseract.mjs": "fbc824d860974182526468077433dde12c7d880c53aeaf6308a5389bad4fc7ab",
+    "lib/scan-lab/runtime/zxing.mjs": "53ff6c04d27965dcb0a1e64faf8586fb3e67155d3ff6c54dfc55422f8c538044",
+    "lib/scan-lab/scheduler.ts": "06528b4563f6c125e5e2e89c3ae7cd189361b4de9467ef4f04f7496c0a1953e4",
+    "lib/scan-lab/types.ts": "039584d73443b8ef5ca4ed39322c14ae04943e2e004ba7020fde0d18488408db",
+    "public/scan-lab/ocr-host.mjs": "3c5b903b2ab189b33ef5ed57c439bbb36f6e8258d764cce1177995f2dfea788d",
+    "public/scan-lab/paddle-host.mjs": "d8193bd3cb2c8ab42a451c915c2f298e26d8ffc2e84fb2e34c8d63d26daa40b4",
+    "public/scan-lab/tesseract-host.js": "3a45e12d6c34643ac39f8e961eb7b55cd1337694c9bad3d024299b1ac940a62d"
+  },
+  "harnessSha256": "82fa6b9b193b9b2310ff432a3ad0daa57ec11daa43a4ce508bef668151b9298c",
+  "evidenceDirectory": "/Volumes/MacDev/ProjectArchive/Development/Qualification/temcoscan-lab-20261103/evidence/2026-11-03T19-56-54-821Z",
+  "checkLogHashes": {
+    "next-build-final.log": "08c7651ccad84da6f34c59173a0de54c170179934fbd18af584c7bb720a15b9e",
+    "unit-tests-final.log": "8e553d0c7c262a1b5f93c85fc2db0ac97e80a8b299a90588ef545a3280e64d11",
+    "lint-final.log": "272e4c2b0e16e307699713ad6b529510bfa6a765ef48eba689f6f501a403e27f"
+  }
+}
