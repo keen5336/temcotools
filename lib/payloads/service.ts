@@ -56,8 +56,8 @@ export async function listPayloads(principal: Principal) {
 export async function getBuiltinPayloadSources(principal: Principal, fallbackOrigin?: string) {
   await prisma.$transaction(tx => currentAdmin(tx, principal));
   const origin = new URL(process.env.NEXT_PUBLIC_APP_URL || process.env.API_RELAY_PUBLIC_ORIGIN || fallbackOrigin || "http://localhost:3000").origin;
-  const { builtinDmpSource, builtinMarsLabelSource, builtinRoutePlannerSource } = await import("./builtin");
-  return { builtinDmp: builtinDmpSource(origin), builtinMarsLabel: builtinMarsLabelSource(origin), builtinRoutePlanner: builtinRoutePlannerSource(origin) };
+  const { builtinDmpSource, builtinMarsLabelSource, builtinRoutePlannerSource, builtinIntegrationSource } = await import("./builtin");
+  return { builtinDmp: builtinDmpSource(origin), builtinMarsLabel: builtinMarsLabelSource(origin), builtinRoutePlanner: builtinRoutePlannerSource(origin), builtinIntegration: builtinIntegrationSource(origin) };
 }
 export async function getPayload(principal: Principal, payloadId: string) {
   admin(principal);

@@ -6,6 +6,7 @@ export type Tool = { id: string; name: string; href: string; description: string
 // presentation only; each tool still enforces its own server authorization.
 export const TOOLS: readonly Tool[] = [
   { id: "workflows", capability: "workflow.read", name: "Workflows", href: "/tools/workflows", description: "Run local Receiving practice and manage versioned declarative workflows." },
+  { id: "platform-templates", capability: "workflow.read", name: "Templates & Defaults", href: "/management/templates", description: "Published platform templates, pinned warehouse overrides and local selection defaults." },
   { id: "connections", capability: "account.self", name: "Connections & Actions", href: "/management/connections", description: "Inspect entitled providers, device links, explicit grants and approved action versions." },
   { id: "scan-lab", capability: "platform.manage", adminOnly: true, name: "TemcoScan Lab", href: "/tools/scan-lab", description: "Experimental local camera, barcode and WASM OCR comparison. No warehouse writes.", roles: ["admin"] },
   { id: "warehouse-settings", capability: "sites.configure", name: "Warehouse Settings", href: "/management/warehouse", description: "Manage this warehouse's configuration, memberships and capability bundles." },

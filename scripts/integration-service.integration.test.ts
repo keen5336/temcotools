@@ -75,7 +75,7 @@ test("configured integration services enforce current warehouse, immutable appro
     await t.test("status is own-person or explicit current share, never site-wide estate", async () => {
       const shared = await as(receiver, () => s.getConnectionStatus(receiver)); assert.deepEqual(shared.providers.map(p => p.id), [providerId]); assert.equal(shared.providers[0].ready, false);
       const own = await as(manager, () => s.getConnectionStatus(manager)); assert.equal(own.providers.length, 2); assert.equal(own.providers.every(p => p.access === "owner_status_only"), true);
-      assert.equal(requests.every(r => r.action === "connections" && r.owner.siteId === sites[0].id), true);
+      assert.equal(requests.every(r => ["connections", "provider.list"].includes(r.action) && r.owner.siteId === sites[0].id), true);
       await as(manager, () => s.revokeProviderAccess(manager, { operationId: op(), providerId, grantId })); assert.equal((await as(receiver, () => s.getConnectionStatus(receiver))).providers.length, 0);
     });
     await t.test("device links and pinned routing create no action authority and revoke linked grants", async () => {

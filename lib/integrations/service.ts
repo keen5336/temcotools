@@ -1,3 +1,4 @@
+import { getTemplateSelectionDefaults } from "@/lib/templates/service";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Prisma, IntegrationActionRecord, IntegrationActionVersion, ProviderConnection, ProviderAccessGrant } from "@prisma/client";
@@ -71,7 +72,7 @@ export async function listIntegrationActions(p: Principal) {
   return prisma.$transaction(async tx => {
     const actor = await current(tx, p), records = await tx.integrationActionRecord.findMany({ orderBy: { updatedAt: "desc" }, take: 100 });
     const versions = await tx.integrationActionVersion.findMany({ where: { actionId: { in: records.map(r => r.id) } }, orderBy: { version: "desc" }, take: 500 });
-    return { siteId: actor.siteId, isPlatformAdmin: actor.isPlatformAdmin === true, actions: records.map(record => ({ ...record, versions: versions.filter(v => v.actionId === record.id) })), liveDispatchAvailable: false, limitation: "Configured actions are preview/simulation only. Use the established DMP relay for its existing named reads; generic live adapters need separately qualified transport/identity/warehouse contracts." };
+    return { siteId: actor.siteId, isPlatformAdmin: actor.isPlatformAdmin === true, actions: records.map(record => ({ ...record, versions: versions.filter(v => v.actionId === record.id) })), liveDispatchAvailable: false, limitation: "Approved versions can be pinned to explicitly activated providers after actual identity/warehouse contract qualification. Draft preview/simulation sends nothing; existing DMP named reads retain their independent relay and grants." };
   });
 }
 export async function saveIntegrationActionDraft(p: Principal, raw: unknown) {
@@ -198,14 +199,20 @@ export async function getConnectionStatus(p: Principal) {
     const roleIds = membership?.isActive ? membership.roles.filter(r => r.role.isActive && (r.role.siteId === null || r.role.siteId === actor.siteId)).map(r => r.roleId) : [];
     const allGrants = await tx.providerAccessGrant.findMany({ where: { revokedAt: null, expiresAt: { gt: new Date() }, OR: [{ issuerUserId: actor.userId }, { grantee: { path: ["userId"], equals: actor.userId } }, ...roleIds.map(roleId => ({ grantee: { path: ["roleId"], equals: roleId } }))] }, orderBy: { createdAt: "desc" }, take: 501 });
     const providers = await tx.providerConnection.findMany({ where: { OR: [{ ownerUserId: actor.userId }, { id: { in: allGrants.map(g => g.providerId) } }] }, orderBy: { createdAt: "desc" }, take: 201 });
-    const visible: Array<ProviderConnection & { access: string; ready: false; readinessReason: string }> = [];
+    const visible: Array<ProviderConnection & { access: string; ready: boolean; readinessReason: string }> = [];
     for (const provider of providers.slice(0, 200)) { const own = provider.ownerUserId === actor.userId; let shared = false; if (!own) for (const grant of allGrants.filter(g => g.providerId === provider.id)) if (await grantMatches(tx, grant, actor, provider)) { shared = true; break; } if (!own && !shared) continue; const ownerActive = await sessionPrincipal(tx, provider.ownerSessionId, siteOf(actor)); visible.push({ ...provider, upstreamIdentity: null, upstreamWarehouse: null, access: own ? "owner_status_only" : "explicit_share", ready: false, readinessReason: provider.revokedAt ? "Provider revoked." : !ownerActive ? "The original owning session ended or lost warehouse access. Reconnect that device." : provider.expiresAt.getTime() <= Date.now() ? "Provider lease expired. Reconnect the original device." : "Configured provider only. Transport, actual identity, upstream warehouse and named-action readiness are not qualified; no live adapter is dispatched." }); }
     const links = await tx.connectedDeviceLink.findMany({ where: { userId: actor.userId }, orderBy: { createdAt: "desc" }, take: 100 });
-    return { siteId: actor.siteId, truncated: providers.length > 200 || allGrants.length > 500, canManage: actor.capabilities.includes("integrations.manage"), canRegister: actor.capabilities.includes("providers.manage"), isPlatformAdmin: actor.isPlatformAdmin === true, providers: visible, grants: allGrants.filter(g => visible.some(v => v.id === g.providerId && v.ownerUserId === actor.userId)), links, legacyEligible: actor.capabilities.includes("workflow.read") };
+    const defaults = await getTemplateSelectionDefaults(tx, actor);
+    return { defaults, siteId: actor.siteId, truncated: providers.length > 200 || allGrants.length > 500, canManage: actor.capabilities.includes("integrations.manage"), canRegister: actor.capabilities.includes("providers.manage"), isPlatformAdmin: actor.isPlatformAdmin === true, providers: visible, grants: allGrants.filter(g => visible.some(v => v.id === g.providerId && v.ownerUserId === actor.userId)), links, legacyEligible: actor.capabilities.includes("workflow.read") };
   });
   let dmp: unknown = null, dmpError: string | null = null;
   if (stored.legacyEligible) try { dmp = await getDmpStatus(p); } catch { dmpError = "Existing DMP relay status is unavailable. Open DMP connection setup and reconnect; no other provider was selected."; }
-  return { ...stored, dmp, dmpError, reconnectUrl: "/tools/api-relay", liveGenericDispatchAvailable: false };
+  let active: Array<{providerId:string; authenticated:boolean; actionReady:boolean; identity: {subject:string;warehouse:string}|null; lastHeartbeatAt:number; leaseExpiresAt:number; blockedReason:string|null}> = [], genericError: string | null = null;
+  try { const { genericProviderControl } = await import("./dispatch"); const live = await genericProviderControl(p, "list"); active = Array.isArray(live.connections) ? live.connections : []; }
+  catch { genericError = "Approved-provider transport is unavailable. Reconnect the original tab; no queued work was rerouted."; }
+  const providers = stored.providers.map(provider => { const actual = active.find(c => c.providerId === provider.id); return actual ? { ...provider, transportState: "connected", authenticationState: actual.authenticated ? "verified" : "checking", upstreamIdentity: actual.identity ? {subject:actual.identity.subject} : null, upstreamWarehouse: actual.identity ? {warehouse:actual.identity.warehouse} : null, heartbeatAt: new Date(actual.lastHeartbeatAt), expiresAt: new Date(actual.leaseExpiresAt), ready: actual.actionReady, readinessReason: actual.blockedReason || (actual.actionReady ? "Actual identity and warehouse verified; dispatch still rechecks the exact named action and current grant." : "Transport connected; identity or named-action readiness is pending. No action was authorized by status alone.") } : { ...provider, ready:false, transportState:"disconnected", readinessReason: provider.revokedAt ? "Provider revoked." : provider.runtimeConfigurationId ? (genericError || "Original upstream tab is disconnected or its lease ended. Run Connect on that exact approved page.") : provider.readinessReason }; });
+  return { ...stored, providers, dmp, dmpError, genericError, reconnectUrl: "/tools/api-relay", liveGenericDispatchAvailable: providers.some(p => p.ready) };
+
 }
 export async function simulateConfiguredAction(p: Principal, raw: unknown) {
   const data = connectionSimulateInput.parse(raw);

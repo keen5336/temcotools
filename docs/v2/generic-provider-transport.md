@@ -1,8 +1,10 @@
 # Generic browser-provider transport core
 
 This package supplies an executable, bounded transport, independently qualified
-with synthetic WebSocket/HTTP fixtures. **It is not connected to the deployed
-broker, UI/provider registry, payload resolver, public proxy or MCP actions.** It
+with synthetic WebSocket/HTTP fixtures. The post7d source integration adds the scoped
+Prisma bridge, shared UI/MCP commands, explicit human popup and pilot-only broker
+entrypoint. **Deployment/current pins are recorded in build-status.md; the standalone
+core tests do not qualify those integration seams or a live upstream adapter.** It
 qualifies no Route Planner/MARS/WMS identity or endpoint. Existing DMP transport
 and grants are untouched. The coordinator must supply the bridge below before
 any generic live provider can become available.
@@ -21,7 +23,7 @@ operations must remain internal and authenticated.
 `createBrowserProviderExecutor({expected, send, fetch, location, parseIdentity,
 onStatus, clock})`, plus portable strict origin/path/request/binding validators
 and the bounded JSON identity parser `readProviderIdentity`. The executor exposes
-`handle(message)`, `stop()` and `busy()`. Its caller owns explicit human
+`handle(message)`, `stop()` and `busy()`. An established original socket heartbeat may renew only its current owner lease and request a separately correlated approved identity refresh; it creates no business intent. Its caller owns explicit human
 activation, socket creation and pagehide/socket-close cleanup. It never logs in,
 approves sharing, reconnects automatically, stores a token, captures DOM, invokes
 a camera, evaluates code or selects a different provider.

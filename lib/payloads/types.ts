@@ -1,4 +1,4 @@
-export const PAYLOAD_PURPOSES = ["dmp_relay", "mars_label_helper", "route_planner_relay"] as const;
+export const PAYLOAD_PURPOSES = ["dmp_relay", "mars_label_helper", "route_planner_relay", "integration_relay"] as const;
 export const DEFAULT_DMP_PAYLOAD_ID = "dmp-relay";
 export const MAX_PAYLOAD_BYTES = 128 * 1024;
 export function sourceChanges(before: string, after: string) {

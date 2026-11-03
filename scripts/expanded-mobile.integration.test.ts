@@ -7,7 +7,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { chromium, expect } from "@playwright/test";
+import { chromium, expect, type Page } from "@playwright/test";
 import { hashPassword } from "../lib/auth/passwords";
 import { resolve } from "node:path";
 const url = process.env.WAREHOUSE_SCOPE_TEST_DATABASE_URL;
@@ -41,6 +41,7 @@ test("integrated mobile warehouse context, platform-only scanner, local workers 
       await signIn(1); await page.goto(`${origin}/tools/scan-lab`); assert.notEqual(new URL(page.url()).pathname, "/tools/scan-lab");
       await expect(page.getByRole("link",{name:"TemcoScan Lab",exact:true})).toHaveCount(0);
     });
+    await t.test("mobile management surfaces expose approved provider and template controls without upstream contact", async () => { await signIn(0); await verifyManagementUi(page, origin); });
     await t.test("old tab navigation and API stay pinned after another tab selects a warehouse", async () => {
       await signIn(0); await page.goto(origin); await expect(page.getByRole("complementary", {name:"Current warehouse"})).toContainText(sites[0].name);
       const second = await context.newPage(); await second.goto(origin); await second.getByRole("combobox", {name:"Warehouse",exact:true}).selectOption(sites[1].id); await expect(second.getByRole("complementary", {name:"Current warehouse"})).toContainText(sites[1].name);
@@ -112,6 +113,7 @@ else{const users=await db.user.findMany({where:{username:{startsWith:prefix}},se
       await page.goto(origin+"/tools/scan-lab"); await expect(page).toHaveURL(origin+"/signin");
       await signIn(1); await page.goto(origin+"/tools/scan-lab"); assert.notEqual(new URL(page.url()).pathname,"/tools/scan-lab"); await expect(page.getByRole("link", {name:"TemcoScan Lab",exact:true})).toHaveCount(0);
     });
+    await t.test("deployed management surfaces serve the actual generic executor and template editor", async () => { await signIn(0); await verifyManagementUi(page, origin); });
     await t.test("deployed old tab keeps its warehouse through another tab switch and RSC navigation", async () => {
       await signIn(0); const second=await context.newPage(); await second.goto(origin); await second.getByRole("combobox",{name:"Warehouse",exact:true}).selectOption(data.sites[1].id); await expect(second.getByRole("complementary",{name:"Current warehouse"})).toContainText(data.sites[1].name);
       await page.getByRole("link",{name:"Open workflows",exact:true}).click(); await expect(page).toHaveURL(origin+"/tools/workflows"); assert.equal(await page.evaluate(()=>window.__temcoUiContextV1?.siteId),data.sites[0].id); await expect(page.locator("main").last()).toContainText(data.sites[0].name); await second.close();
@@ -123,4 +125,12 @@ else{const users=await db.user.findMany({where:{username:{startsWith:prefix}},se
       console.log(JSON.stringify({publicOrigin:origin,runtimeHead:head,realChrome:true,viewport:390,tesseractRaw:await page.getByLabel("tesseract raw text",{exact:true}).textContent(),paddleRaw:await page.getByLabel("paddle raw text",{exact:true}).textContent(),externalOcrRequests:0,physicalDevice:false}));
     });
   } finally { await browser.close(); const cleanup=fixture("cleanup"); assert.deepEqual(cleanup,{syntheticPeopleRemaining:0,syntheticSessionsRemaining:0,syntheticSitesRemaining:0,operationalEffects:0}); console.log(JSON.stringify({publicSyntheticCleanup:cleanup,ownerUsed:false})); }
+}
+
+async function verifyManagementUi(page: Page, origin: string) {
+  await page.goto(origin+"/management/connections"); await expect(page.getByRole("heading",{name:"Approved provider activation and named operations",exact:true})).toBeVisible();
+  await page.goto(origin+"/management/templates"); await expect(page.getByRole("heading",{name:"Platform defaults and warehouse overrides",exact:true})).toBeVisible();
+  await page.goto(origin+"/admin/payloads"); const load=page.getByRole("button",{name:"Load generic approved-provider executor",exact:true}); await expect(load).toBeEnabled(); await load.click();
+  await expect(page.getByLabel("Payload source",{exact:true})).toHaveValue(/createBrowserProviderExecutor/); await expect(page.getByLabel("Payload source",{exact:true})).toHaveValue(/startGenericProvider/);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
 }

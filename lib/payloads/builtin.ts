@@ -29,3 +29,14 @@ export function builtinRoutePlannerSource(appOrigin: string) {
   // fetch or mutation. Publication/mapping still require explicit admin intent.
   return { targetOrigins: ["https://routeplannerui.homedepot.com"], source: `(()=>{if(document.getElementById('temco-rp-review')){alert('Temco Route Planner review is already open.');return;}const host=document.createElement('div');host.id='temco-rp-review';host.style.cssText='position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:280px;padding:16px;background:white;color:#17202a;border:1px solid #888;border-radius:8px;font:14px system-ui';const title=document.createElement('strong');title.textContent='Temco Route Planner — review only';const status=document.createElement('p');status.textContent='Live identity and operations are not qualified. No data was read or sent. Use manual XML intake in Temco.';const open=document.createElement('button');open.textContent='Open manual XML intake';open.onclick=()=>window.open(${JSON.stringify(reviewPage)},'_blank','noopener,noreferrer');const close=document.createElement('button');close.textContent='Close';close.onclick=()=>host.remove();host.append(title,status,open,document.createTextNode(' '),close);document.body.append(host);})();` };
 }
+
+// Exact supported targets are chosen by the publishing platform administrator.
+// This builder embeds no upstream endpoint, login or automatic activation.
+export function builtinIntegrationSource(appOrigin: string) {
+  const base = new URL(process.env.API_RELAY_PUBLIC_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || appOrigin);
+  const ws = new URL("/api/integration-relay/ws", base); ws.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+  if (process.env.NODE_ENV !== "production") ws.port = process.env.API_RELAY_PUBLIC_PORT || "3003";
+  const executor = readFileSync(join(process.cwd(), "lib/integrations/browser-executor.mjs"), "utf8").replace(/^export /gm, "");
+  const bootstrap = readFileSync(join(process.cwd(), "lib/integrations/browser-bootstrap.mjs"), "utf8").replace(/^export /gm, "");
+  return { source: `${SITE_PROFILE_BINDING_DIRECTIVE}\n(()=>{${executor}\n${bootstrap}\nstartGenericProvider(${JSON.stringify({ temcoOrigin: base.origin, wsUrl: ws.href })},TEMCO_PAYLOAD);})();`, targetOrigins: [] as string[] };
+}

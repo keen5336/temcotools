@@ -11,7 +11,8 @@ test("published 31-migration identity upgrades without changing credentials, fac
   const pool = new pg.Pool({ connectionString: url });
   const scratch = await mkdtemp(join(tmpdir(), "warehouse-upgrade-")), root = process.cwd();
   const baseline = join(scratch, "migrations"); await mkdir(baseline);
-  const names = (await readdir(join(root, "prisma/migrations"))).filter(n => /^\d/.test(n) && n < "20261103"); assert.equal(names.length, 31);
+  const allMigrations = (await readdir(join(root, "prisma/migrations"))).filter(n => /^\d/.test(n));
+  const names = allMigrations.filter(n => n < "20261103"); assert.equal(names.length, 31);
   for (const name of names) { await mkdir(join(baseline, name)); await copyFile(join(root, "prisma/migrations", name, "migration.sql"), join(baseline, name, "migration.sql")); }
   await copyFile(join(root, "prisma/migrations/migration_lock.toml"), join(baseline, "migration_lock.toml"));
   const config = join(scratch, "prisma.config.mjs");
@@ -35,6 +36,6 @@ test("published 31-migration identity upgrades without changing credentials, fac
     const before = await snapshot(); migrate([]); assert.deepEqual(await snapshot(), before);
     assert.deepEqual((await pool.query('SELECT username,"isPlatformAdmin" FROM "User" ORDER BY username')).rows, [{ username: "adam", isPlatformAdmin: true }, { username: "local", isPlatformAdmin: false }]);
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM "WarehouseMembership"')).rows[0].n, 2);
-    assert.equal((await pool.query('SELECT count(*)::int AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')).rows[0].n, 34);
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM "_prisma_migrations" WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')).rows[0].n, allMigrations.length);
   } finally { await pool.end(); }
 });

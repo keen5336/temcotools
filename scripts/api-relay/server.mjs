@@ -12,9 +12,9 @@ const send = (ws, message) => { if (ws.readyState === WebSocket.OPEN) ws.send(JS
 const fault = (message, status = 400) => Object.assign(new Error(message), { status });
 
 /**
- * @param {{ secret: string, audience?: string, allowedOrigins?: string[], heartbeatMs?: number, leaseMs?: number, pairMs?: number, maxConcurrent?: number, maxQueue?: number, authorize?: (owner: Record<string, unknown>, context: Record<string, unknown>) => Promise<boolean> }} options
+ * @param {{ secret: string, audience?: string, allowedOrigins?: string[], heartbeatMs?: number, leaseMs?: number, pairMs?: number, maxConcurrent?: number, maxQueue?: number, authorize?: (owner: Record<string, unknown>, context: Record<string, unknown>) => Promise<boolean>, genericProviderHub?: any }} options
  */
-export function createApiRelayServer({ secret, audience = process.env.API_RELAY_AUDIENCE || "", allowedOrigins = [], heartbeatMs = 10000, leaseMs = LEASE_MS, pairMs = 90000, maxConcurrent = MAX_CONCURRENT, maxQueue = MAX_QUEUE, authorize = async () => false }) {
+export function createApiRelayServer({ secret, audience = process.env.API_RELAY_AUDIENCE || "", allowedOrigins = [], heartbeatMs = 10000, leaseMs = LEASE_MS, pairMs = 90000, maxConcurrent = MAX_CONCURRENT, maxQueue = MAX_QUEUE, authorize = async () => false, genericProviderHub = null }) {
   const key = controlKey(secret, audience);
   const tokens = new Map();
   const connections = new Map();
@@ -101,6 +101,14 @@ export function createApiRelayServer({ secret, audience = process.env.API_RELAY_
     try {
       const { action, owner, ...data } = await read(req);
       if (!owner || typeof owner.userId !== "string" || !owner.userId || typeof owner.sessionId !== "string" || !owner.sessionId) throw fault("Authenticated owner is required.", 401);
+      // The internal control key authenticates this server-to-server transport;
+      // the independent hub re-loads current identity/site/action authority.
+      // No DMP lease or grant is accepted as generic integration authority.
+      if (typeof action === "string" && action.startsWith("provider.")) {
+        const method = action.slice("provider.".length);
+        if (!genericProviderHub || !["pair", "renew", "list", "disconnect", "prepare", "claim", "cancel", "revoke"].includes(method)) throw fault("Named provider control is unavailable.", 404);
+        json(res, 200, await genericProviderHub[method]({ ...data, actor: owner })); return;
+      }
       if (action === "revoke") {
         leases.delete(leaseKey(owner));
         for (const [hash, t] of tokens) if (leaseKey(t.owner) === leaseKey(owner)) tokens.delete(hash);
@@ -174,6 +182,9 @@ export function createApiRelayServer({ secret, audience = process.env.API_RELAY_
   });
   server.on("upgrade", (req, socket, head) => {
     socket.on("error", () => {});
+    if (req.url === "/api/integration-relay/ws" && genericProviderHub) {
+      genericProviderHub.handleUpgrade(req, socket, head); return;
+    }
     // DMP has no Temco cookie. Ownership is established by a one-use token in
     // the first frame, never in a URL, browser storage, or Origin alone.
     if (req.url !== "/api/api-relay/ws" || !allowedOrigins.includes(req.headers.origin) || wss.clients.size >= 1024) {
@@ -239,20 +250,24 @@ export function createApiRelayServer({ secret, audience = process.env.API_RELAY_
     for (const c of [...connections.values()]) { clearTimeout(c.identityTimer); disconnect(c); }
     for (const ws of wss.clients) ws.terminate();
     wss.close();
-    return new Promise((resolve) => server.close(resolve));
+    return Promise.all([genericProviderHub?.close(), new Promise((resolve) => server.close(resolve))]);
   } };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export function createDmpAuthorizationCallback() {
   const appUrl = new URL("/api/internal/api-relay-authorization", process.env.API_RELAY_APP_URL || "http://127.0.0.1:3000");
   const key = controlKey(process.env.SESSION_SECRET);
-  const authorize = async (owner, context) => {
+  return async (owner, context) => {
     if (!owner.authSessionId || !Number.isSafeInteger(owner.authVersion) || !context.operation) return false;
     const response = await fetch(appUrl, {method:"POST",headers:{"Content-Type":"application/json","X-Api-Relay-Key":key,Origin:process.env.API_RELAY_APP_ORIGIN || appUrl.origin},body:JSON.stringify({authorizationProtocol:3,owner,connectionOwner:context.connectionOwner,origin:context.origin,payloadGrant:context.payloadGrant,operation:context.operation,requestMethod:context.requestMethod,share:context.share}),redirect:"error",signal:AbortSignal.timeout(5000)});
     if (!response.ok) return false;
     const result = await response.json();
     return result.authorized === true && result.authorizationProtocol === 3;
   };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const authorize = createDmpAuthorizationCallback();
   const relay = createApiRelayServer({ secret: process.env.SESSION_SECRET, allowedOrigins: (process.env.DMP_ORIGINS ?? "https://dmp.extapps.homedepot.com").split(",").map((s) => s.trim()).filter(Boolean), authorize });
   relay.server.listen(Number(process.env.API_RELAY_PORT || 3003), process.env.API_RELAY_HOST || "127.0.0.1", () => console.log("API relay listening"));
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => { void relay.close().then(() => process.exit(0)); });

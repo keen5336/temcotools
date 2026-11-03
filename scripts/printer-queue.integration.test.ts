@@ -81,6 +81,19 @@ test("PostgreSQL printer gate coordinates actual LabelIssuance rows without phys
       await as(principals[1], () => issuanceService.reconcileLabelIssuance(principals[1], { issuanceId: second, outcome: "not_printed", reason: "Synthetic native result explicitly reconciled; no printer was contacted" }));
       assert.equal((await nativeClaim(2, f.devices[0], third)).dispatch, true);
     });
+    await t.test("the same configured destination cannot overlap across warehouses or expose sibling data", async () => {
+      const f = await fixture(), original = await prepare(0, f.devices[0], f.printer.id, 1), claimA = await claim(2, f.devices[0], original);
+      await owner.labelTemplate.create({ data: { siteId: sites[1].id, name: `Synthetic other-site label ${ns}`, kind: "pick_wave", zpl: "^XA^FD{{lpn}}^FS^XZ" } });
+      const remotePrinter = await owner.labelPrinter.create({ data: { siteId: sites[1].id, name: `Synthetic same physical endpoint ${ns}`, endpoint: f.printer.endpoint } });
+      const device = await as(otherSiteProvider, () => deviceService.registerPrintingDevice(otherSiteProvider, { deviceId: randomUUID(), name: "Synthetic other site", mode: "relay", printerIds: [remotePrinter.id] }));
+      const prepared = await as(otherSiteProvider, () => issuanceService.prepareLabelIssuance(otherSiteProvider, { operationId: randomUUID(), purpose: "legacy_manual", printerId: remotePrinter.id, mode: "relay", deviceId: device.device.id, legacyZpl: "^XA^FDSYNTHETIC-OTHER-SITE^FS^XZ" }));
+      const native = () => as(otherSiteProvider, () => issuanceService.claimLabelDispatch(otherSiteProvider, { issuanceId: prepared.issuance.id, deviceId: device.device.id, deviceToken: device.deviceToken }));
+      const blocked = await native(); assert.equal(blocked.dispatch, false); assert.ok(!JSON.stringify(blocked).includes(original));
+      await report(2, f.devices[0], original, claimA.reportToken, "unknown"); assert.equal((await native()).dispatch, false);
+      await as(principals[0], () => issuanceService.reconcileLabelIssuance(principals[0], { issuanceId: original, outcome: "not_printed", reason: "Synthetic known destination verified no output; no physical printer contacted" }));
+      const claimed = await native(); assert.equal(claimed.dispatch, true);
+      assert.equal(await as(otherSiteProvider, () => prisma.labelIssuance.findUnique({ where: { id: original } })), null);
+    });
     await t.test("two requesters/providers on one printer preserve FIFO and never overlap concurrent claims", async () => {
       const f = await fixture(), first = await prepare(0, f.devices[0], f.printer.id, 1), second = await prepare(1, f.devices[1], f.printer.id, 2);
       const [later, earlier] = await Promise.all([claim(3, f.devices[1], second), claim(2, f.devices[0], first)]);

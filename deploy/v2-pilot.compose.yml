@@ -76,18 +76,15 @@ services:
       retries: 5
 
   api-relay:
-    image: ${PILOT_APP_IMAGE}
+    # Reuse the full application service image for scoped Prisma callbacks.
+    # The production composition and its legacy DMP entrypoint are unchanged.
+    image: ${PILOT_MCP_IMAGE}
     pull_policy: never
     restart: "no"
-    command: [node, scripts/api-relay/server.mjs]
+    command: [node, --import, tsx, scripts/api-relay/runtime.ts]
     ports: ["127.0.0.1:43103:3003"]
     environment:
-      NODE_ENV: production
-      TEMCO_PILOT_MODE: read_only_dmp
-      TEMCO_SESSION_COOKIE_NAME: temco_v2_pilot_${PILOT_SLUG}
-      API_RELAY_AUDIENCE: pilot:${PILOT_SLUG}
-      SESSION_SECRET: ${PILOT_SESSION_SECRET}
-      DMP_ORIGINS: ${PILOT_DMP_ORIGINS}
+      <<: *pilot-environment
       API_RELAY_HOST: "0.0.0.0"
       API_RELAY_PORT: "3003"
       API_RELAY_APP_URL: http://app:3000

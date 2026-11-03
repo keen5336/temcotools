@@ -1564,6 +1564,8 @@ model IntegrationActionVersion {
   @@unique([actionId, version])
 }
 model ProviderConnection {
+  runtimeConfigurationId String?
+  runtimeActivationId String?
   siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id String @id @default(cuid())
   integrationId String
@@ -1676,4 +1678,109 @@ model WorkflowIntentRecord {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@unique([runId, stepId, attempt])
+}
+
+model ProviderRuntimeConfiguration {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  providerId String
+  integrationId String
+  audience String
+  configuration Json
+  contentHash String
+  reviewedByUserId String
+  createdAt DateTime @default(now())
+  @@unique([id, providerId])
+  @@index([siteId, providerId])
+}
+model ProviderActivation {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  providerId String
+  configurationId String
+  ownerUserId String
+  ownerSessionId String
+  ownerAuthVersion Int
+  deviceId String
+  tabId String
+  audience String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([id, providerId])
+  @@index([siteId, providerId])
+}
+model IntegrationOperation {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  operationId String
+  providerId String
+  activationId String
+  actorUserId String
+  actorSessionId String
+  actorGrantId String?
+  actionVersionId String
+  fingerprint String
+  snapshot Json
+  reportTokenHash String
+  state String
+  revision Int @default(1)
+  requestId String?
+  result Json?
+  settledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([siteId, operationId])
+  @@index([siteId, providerId, state])
+}
+model IntegrationOperationEvidence {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  operationRecordId String
+  dedupeKey String
+  evidence Json
+  createdAt DateTime @default(now())
+  @@unique([operationRecordId, dedupeKey])
+  @@index([siteId, operationRecordId])
+}
+
+
+// Protected platform source; current-site adoption is separate and never a grant.
+model PlatformTemplateRecord {
+  id String @id @default(cuid())
+  kind String
+  name String
+  draft Json
+  revision Int @default(1)
+  enabled Boolean @default(true)
+  publishedVersionId String?
+  createdByUserId String
+  updatedByUserId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model PlatformTemplateVersion {
+  id String @id @default(cuid())
+  templateId String
+  version Int
+  payload Json
+  contentHash String
+  createdByUserId String
+  createdAt DateTime @default(now())
+  @@unique([templateId, version])
+}
+model SiteTemplateBinding {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  templateId String
+  versionId String
+  overrides Json @default("{}")
+  materialized Json
+  revision Int @default(1)
+  enabled Boolean @default(true)
+  createdByUserId String
+  updatedByUserId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([siteId, templateId])
 }

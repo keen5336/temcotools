@@ -33,7 +33,7 @@ function binding(id, integrationId, siteId, origin, mode) {
   const actions = { [identity.versionId]: identity, [`${id}-read-v1`]: action("read", "read", request("/fixture/business", "POST", "value=SYNTHETIC")), [`${id}-write-v1`]: action("write", "write", request("/fixture/business", "GET")), [`${id}-print-v1`]: action("print", "print", request("/fixture/business", "POST", "kind=print")) };
   return { providerId: id, audience: "temco-pilot-generic-test", integrationId, siteId, origin, pagePathPrefix: "/fixture/portal", owner: { userId: "owner", sessionId: "owner-session", deviceId: "work-device", tabId: id, authVersion: 1 }, configurationVersion: "config-v1", profileVersion: "profile-v1", adapterVersion: "adapter-v1", payloadVersionId: "payload-v1", payloadHash: "b".repeat(64), actionVersionIds: Object.keys(actions), identity: { action: identity, format: "json", subjectPath: ["subject"], warehousePath: ["warehouse"], expectedWarehouse: `UPSTREAM-${siteId}`, contractId: `${id}-identity-v1`, warehouseContractId: `${id}-warehouse-v1` }, actions };
 }
-async function fixture({ mode = "synthetic", maxQueue = 2, leaseMs = 120000 } = {}) {
+async function fixture({ mode = "synthetic", maxQueue = 2, leaseMs = 120000, heartbeatMs = 20 } = {}) {
   const operations = await fileOperations(), records = new Map(), calls = [], authorityCalls = [], revoked = new Set(), shares = new Set(); let clock = Date.now(), hub;
   const approvalMode = mode === "synthetic" ? "synthetic" : "live";
   for (const value of [binding("rp-a", "route-planner", "site-a", "https://rp-a.synthetic.invalid", approvalMode), binding("mars-a", "mars", "site-a", "https://mars-a.synthetic.invalid", approvalMode), binding("rp-b", "route-planner", "site-b", "https://rp-b.synthetic.invalid", approvalMode)]) records.set(value.providerId, value);
@@ -53,7 +53,7 @@ async function fixture({ mode = "synthetic", maxQueue = 2, leaseMs = 120000 } = 
     if (context.actionVersionId) { const selected = actions[context.actionVersionId]; if (!selected || Object.keys(context.input ?? {}).some(key => key !== "value")) return { allowed: false }; result.action = copy(selected); if (result.action.request.method === "POST" && context.input?.value) { if (typeof context.input.value !== "string" || context.input.value.length > 80) return { allowed: false }; result.action.request.body = new URLSearchParams({ value: context.input.value }).toString(); } }
     return result;
   };
-  const options = { audience: "temco-pilot-generic-test", mode, operations, authorize, now: () => clock, heartbeatMs: 20, leaseMs, maxQueue };
+  const options = { audience: "temco-pilot-generic-test", mode, operations, authorize, now: () => clock, heartbeatMs, leaseMs, maxQueue };
   hub = createGenericProviderHub(options); const server = createServer((req, res) => { res.writeHead(404); res.end(); }); server.on("upgrade", (req, socket, head) => hub.handleUpgrade(req, socket, head)); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve)); const socketUrl = `ws://127.0.0.1:${server.address().port}/api/integration-relay/ws`;
   const actor = id => { const b = records.get(id); return { ...b.owner, siteId: b.siteId }; };
   const sockets = new Set();
@@ -119,4 +119,16 @@ test("actual page navigation and duplicate request frames cannot repeat a comple
 
 test("a missing correlated response times out durably without dispatching its queued sibling", async () => {
   const f = await fixture(); try { f.records.get("rp-a").actions["rp-a-read-v1"].request.timeoutMs = 100; const c = await f.connect("rp-a", { auto: false }); await c.ready(); const a = await prepared(f), b = await prepared(f); await f.hub.claim({ actor: a.actor, providerId: "rp-a", operationId: a.operationId, expectedRevision: 1 }); await until(() => f.operations.get(key(a.operationId)), row => row.state === "unknown"); assert.equal((await f.operations.get(key(b.operationId))).state, "queued"); assert.equal(c.messages.filter(m => m.type === "request").length, 1); } finally { await f.close(); }
+});
+
+test("an established original socket renews its current lease and refreshes only the approved identity read", async () => {
+  const f = await fixture({ heartbeatMs: 20000 }); try {
+    const c = await f.connect("rp-a"); await c.ready(); const before = f.calls.length;
+    f.advance(31_000); c.ws.send(JSON.stringify({ type: "heartbeat" }));
+    await until(() => c.messages.filter(m => m.type === "ready").length, value => value === 2);
+    assert.ok(f.calls.length > before); assert.ok(f.calls.slice(before).every(call => call.path === "/fixture/identity"));
+    assert.equal((await f.hub.list({ actor: f.actor("rp-a") })).connections[0].authenticated, true);
+    f.revoked.add("rp-a"); c.ws.send(JSON.stringify({ type: "heartbeat" })); await once(c.ws, "close");
+    assert.equal((await f.hub.list({ actor: f.actor("rp-a") })).connections.length, 0);
+  } finally { await f.close(); }
 });

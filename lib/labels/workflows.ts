@@ -1,3 +1,4 @@
+import { assertTemplateLabelWrite } from "@/lib/templates/service";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -20,6 +21,7 @@ export const labelPreviewInput = labelDraftInput.extend({ fields: z.record(z.str
 export const labelEvaluationInput = z.object({ purpose: purposeSchema, unitId: z.string().min(1).max(100), fields: z.record(z.string(), z.string().max(2000)).default({}).describe("Compatibility input only; identified-unit evaluation uses current authoritative warehouse context."), dispatchDay: dispatchDay.optional(), wmsScope: z.string().trim().min(1).max(100).default("warehouse") });
 const versionSummary = { id: true, version: true, name: true, contentHash: true, publishedAt: true, publishedByUserId: true, note: true } as const;
 async function lockedWorkflow(tx: Prisma.TransactionClient, purpose: string, expected: number) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`label-workflow:${purpose}`}, 810))`;
   await tx.$queryRaw`SELECT purpose FROM "LabelWorkflow" WHERE purpose = ${purpose} FOR UPDATE`;
   const current = await tx.labelWorkflow.findFirst({ where: { purpose } });
   if (!current || current.revision !== expected) throw new LabelError("The label workflow changed. Reload its current revision.", 409);
@@ -54,8 +56,10 @@ export async function saveLabelWorkflow(principal: Principal, input: unknown) {
   const envelope = labelWorkflowSaveInput.parse(input);
   const draft = validateLabelDraft(input);
   return prisma.$transaction(async tx => {
-    await assertCurrentPrincipal(tx, principal, "labels.manage");
+    const actor = await assertCurrentPrincipal(tx, principal, "labels.manage");
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`label-workflow:${draft.purpose}`}, 810))`;
+    await tx.$queryRaw`SELECT purpose FROM "LabelWorkflow" WHERE purpose=${draft.purpose} FOR UPDATE`;
+    await assertTemplateLabelWrite(tx, actor, draft.purpose);
     const current = await tx.labelWorkflow.findFirst({ where: { purpose: draft.purpose } });
     if ((current?.revision ?? 0) !== envelope.expectedRevision) throw new LabelError("The label workflow changed. Reload before saving.", 409);
     const data = { name: draft.name, draftZpl: draft.zpl, requiredFields: draft.requiredFields, rules: draft.rules as unknown as Prisma.InputJsonValue, widthMm: draft.widthMm, heightMm: draft.heightMm, dpi: draft.dpi, updatedByUserId: principal.userId };
@@ -67,8 +71,9 @@ export async function saveLabelWorkflow(principal: Principal, input: unknown) {
 export async function publishLabelWorkflow(principal: Principal, input: unknown) {
   const data = labelWorkflowPublishInput.parse(input);
   return prisma.$transaction(async tx => {
-    await assertCurrentPrincipal(tx, principal, "labels.manage", true);
+    const actor = await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     const current = await lockedWorkflow(tx, data.purpose, data.expectedRevision);
+    await assertTemplateLabelWrite(tx, actor, data.purpose);
     const draft = validateLabelDraft({ purpose: current.purpose, name: current.name, zpl: current.draftZpl, requiredFields: current.requiredFields, rules: current.rules, widthMm: current.widthMm, heightMm: current.heightMm, dpi: current.dpi });
     const latest = await tx.labelWorkflowVersion.findFirst({ where: { purpose: data.purpose }, orderBy: { version: "desc" }, select: { version: true } });
     const published = await tx.labelWorkflowVersion.create({ data: { ...draft, purpose: data.purpose, rules: draft.rules as unknown as Prisma.InputJsonValue, version: (latest?.version ?? 0) + 1, contentHash: labelVersionHash(draft), publishedByUserId: principal.userId, note: data.note } });
@@ -80,8 +85,9 @@ export async function publishLabelWorkflow(principal: Principal, input: unknown)
 export async function rollbackLabelWorkflow(principal: Principal, input: unknown) {
   const data = labelWorkflowRollbackInput.parse(input);
   return prisma.$transaction(async tx => {
-    await assertCurrentPrincipal(tx, principal, "labels.manage", true);
+    const actor = await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     await lockedWorkflow(tx, data.purpose, data.expectedRevision);
+    await assertTemplateLabelWrite(tx, actor, data.purpose);
     const version = await tx.labelWorkflowVersion.findFirst({ where: { id: data.versionId, purpose: data.purpose } });
     if (!version) throw new LabelError("Choose a published version of this label purpose.", 404);
     const workflow = await tx.labelWorkflow.update({ where: { siteId_purpose: { siteId: principal.siteId!, purpose: data.purpose } }, data: { publishedVersionId: version.id, revision: { increment: 1 }, updatedByUserId: principal.userId } });
@@ -92,8 +98,9 @@ export async function rollbackLabelWorkflow(principal: Principal, input: unknown
 export async function setLabelWorkflowEnabled(principal: Principal, input: unknown) {
   const data = labelWorkflowEnabledInput.parse(input);
   return prisma.$transaction(async tx => {
-    await assertCurrentPrincipal(tx, principal, "labels.manage", true);
+    const actor = await assertCurrentPrincipal(tx, principal, "labels.manage", true);
     await lockedWorkflow(tx, data.purpose, data.expectedRevision);
+    await assertTemplateLabelWrite(tx, actor, data.purpose);
     const workflow = await tx.labelWorkflow.update({ where: { siteId_purpose: { siteId: principal.siteId!, purpose: data.purpose } }, data: { enabled: data.enabled, revision: { increment: 1 }, updatedByUserId: principal.userId } });
     await tx.labelWorkflowAudit.create({ data: { purpose: data.purpose, actorUserId: principal.userId, action: data.enabled ? "enabled" : "disabled", revision: workflow.revision, note: data.note } });
     return workflow;

@@ -14,7 +14,8 @@ https://REPLACE-WITH-APPROVED-PILOT-HOST.example.invalid {
         # Preserve incoming public Host. The MCP server rejects another host.
         reverse_proxy 127.0.0.1:43104
     }
-    handle /api/api-relay/ws {
+    @browser_relays path /api/api-relay/ws /api/integration-relay/ws
+    handle @browser_relays {
         reverse_proxy 127.0.0.1:43103
     }
     handle /api/label-relay/ws {

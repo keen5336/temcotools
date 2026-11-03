@@ -18,7 +18,7 @@ const viewOf = (binding, action) => ({ binding, ...(action ? { action } : {}) })
  * operations callbacks are REQUIRED durable storage, never this hub's maps. enqueue/claim
  * must invoke recheck(tx) inside their atomic writer, after locking original records.
  */
-export function createGenericProviderHub({ audience, mode = "read_only_dmp", authorize, operations, verifyIdentity = async (result, binding) => readProviderIdentity(result, binding.identity), now = Date.now, pairMs = 90000, leaseMs = 120000, heartbeatMs = 10000, maxQueue = 8, maxProviders = 128 }) {
+export function createGenericProviderHub({ audience, mode = "read_only_dmp", authorize, operations, observe = async (event) => { void event; }, verifyIdentity = async (result, binding) => readProviderIdentity(result, binding.identity), now = Date.now, pairMs = 90000, leaseMs = 120000, heartbeatMs = 10000, maxQueue = 8, maxProviders = 128 }) {
   if (typeof audience !== "string" || !audience || audience.length > 200 || !["read_only_dmp", "live", "synthetic"].includes(mode) || typeof authorize !== "function" || !operations || ["get", "enqueue", "claim", "settle", "appendEvidence"].some(name => typeof operations[name] !== "function") || pairMs < 100 || pairMs > 90000 || leaseMs < 100 || leaseMs > 120000 || heartbeatMs < 10 || heartbeatMs > 30000 || !Number.isSafeInteger(maxQueue) || maxQueue < 1 || maxQueue > 32 || !Number.isSafeInteger(maxProviders) || maxProviders < 1 || maxProviders > 1024) throw fault("A bounded audience, current-authority bridge and durable operation callbacks are required.", 400);
   const tokens = new Map(), connections = new Map();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4 * 1024 * 1024 * 6 + 65536, perMessageDeflate: false });
@@ -65,6 +65,7 @@ export function createGenericProviderHub({ audience, mode = "read_only_dmp", aut
     if (closed || !decision.binding || !same(decision.binding, binding) || connections.has(binding.providerId)) throw fault("Pairing pins changed or this provider already has an original socket.", 409);
     const connection = { binding, nonce: randomUUID(), socket, ready: false, identity: null, challengeId: randomUUID(), leaseExpiresAt: now() + leaseMs, lastHeartbeatAt: now(), pending: new Map(), claiming: false, blockedOperationId: null };
     connections.set(binding.providerId, connection);
+    try { await observe({ stage: "attach", binding: clone(binding), connectionNonce: connection.nonce, leaseExpiresAt: connection.leaseExpiresAt }); } catch (error) { await end(connection, "Current provider observation could not be retained."); throw error; }
     connection.identityTimer = setTimeout(() => { if (!connection.ready) void end(connection, "Qualified identity probe timed out.").catch(() => {}); }, binding.identity.action.request.timeoutMs + 1000); connection.identityTimer.unref?.();
     send(socket, { type: "paired", challengeId: connection.challengeId, binding: { ...clone(binding), connectionNonce: connection.nonce } });
     return { providerId: binding.providerId, connectionNonce: connection.nonce, siteId: binding.siteId };
@@ -78,6 +79,8 @@ export function createGenericProviderHub({ audience, mode = "read_only_dmp", aut
     if (!identity || typeof identity.subject !== "string" || !identity.subject || identity.subject.length > 200 || identity.warehouse !== connection.binding.identity.expectedWarehouse) throw fault("The qualified actual identity/warehouse binding did not match.");
     const decision = await approved("identity", { actor: ownerOf(connection.binding), binding: clone(connection.binding), identity, providerId: connection.binding.providerId });
     if (!decision.binding || !same(decision.binding, connection.binding)) throw fault("Identity contract changed before readiness.", 409);
+    if (connection.identity && !same(connection.identity, identity)) throw fault("Actual upstream identity changed. Reconnect explicitly.");
+    await observe({ stage: "identity", binding: clone(connection.binding), identity: clone(identity), connectionNonce: connection.nonce, leaseExpiresAt: connection.leaseExpiresAt });
     available(connection, false); connection.identity = clone(identity); connection.identityVerifiedAt = now(); connection.ready = true; clearTimeout(connection.identityTimer);
     send(connection.socket, { type: "ready", identity: clone(identity) }); return true;
   }
@@ -85,7 +88,12 @@ export function createGenericProviderHub({ audience, mode = "read_only_dmp", aut
     const c = connections.get(providerId); if (!c || !sameOwner(actor, c.binding)) throw fault("Only the original human owner can renew this provider lease.");
     available(c, false); const decision = await approved("renew", { actor, binding: clone(c.binding), providerId });
     if (!decision.binding || !same(decision.binding, c.binding)) throw fault("Original provider pins changed.", 409);
-    available(c, false); c.leaseExpiresAt = now() + leaseMs; return { expiresAt: c.leaseExpiresAt };
+    available(c, false); c.leaseExpiresAt = now() + leaseMs;
+    await observe({ stage: "renew", binding: clone(c.binding), connectionNonce: c.nonce, leaseExpiresAt: c.leaseExpiresAt });
+    // Only the already approved identity read is refreshed in the background.
+    // No business operation is enqueued or retried by this heartbeat.
+    if (c.ready && !c.pending.size && now() - c.identityVerifiedAt > 30000) { c.ready = false; c.challengeId = randomUUID(); c.identityTimer = setTimeout(() => { if (!c.ready) void end(c, "Identity refresh timed out.").catch(() => {}); }, c.binding.identity.action.request.timeoutMs + 1000); c.identityTimer.unref?.(); send(c.socket, { type: "identity-challenge", challengeId: c.challengeId }); }
+    return { expiresAt: c.leaseExpiresAt };
   }
   async function list({ actor }) {
     if (!validActor(actor)) throw fault("Current authenticated individual required."); const visible = [];
@@ -158,7 +166,7 @@ export function createGenericProviderHub({ audience, mode = "read_only_dmp", aut
     if (connections.get(c.binding.providerId) === c) connections.delete(c.binding.providerId);
     c.ready = false; clearTimeout(c.identityTimer);
     for (const job of [...c.pending.values()]) await unknown(c, job, reason);
-    c.socket.close(1000, "Original provider ended");
+    try { await observe({ stage: "end", binding: clone(c.binding), connectionNonce: c.nonce, reason }); } finally { c.socket.close(1000, "Original provider ended"); }
   }
   async function disconnect({ actor, providerId }) { const c = connections.get(providerId); if (!c || !sameOwner(actor, c.binding)) throw fault("Only the original owner can disconnect this provider."); await approved("disconnect", { actor, providerId, binding: clone(c.binding) }); await end(c, "Original provider disconnected after dispatch."); return { disconnected: true }; }
   async function revoke({ actor, providerId }) { const decision = await approved("revoke", { actor, providerId }); for (const [id, ticket] of tokens) if (ticket.binding.providerId === providerId) tokens.delete(id); const c = connections.get(providerId); if (c) await end(c, "Current provider authority was revoked after dispatch."); return { revoked: decision.allowed === true }; }
@@ -168,7 +176,7 @@ export function createGenericProviderHub({ audience, mode = "read_only_dmp", aut
     wss.handleUpgrade(req, socket, head, ws => {
       let attached = null, serial = Promise.resolve(); const originalConnection = () => { const c = attached && connections.get(attached.providerId); return c?.nonce === attached?.connectionNonce ? c : null; }; const timer = setTimeout(() => ws.close(1008, "Pairing timed out"), 5000); timer.unref?.();
       ws.on("error", () => {}); ws.on("pong", () => { const c = attached && connections.get(attached.providerId); if (c?.nonce === attached.connectionNonce) c.lastHeartbeatAt = now(); });
-      ws.on("message", (raw, binary) => { serial = serial.then(async () => { if (binary) throw fault("JSON frames required."); const message = JSON.parse(raw.toString()); if (!attached) { if (message.type !== "pair") throw fault("Pairing required."); attached = await attach(ws, { ...message, origin: req.headers.origin }); clearTimeout(timer); return; } const c = originalConnection(); if (message.type === "identity-result" || message.type === "identity-failed") { if (c) await identityResult(c, message); } else if (message.type === "result") await result(attached, { ...message, siteId: c?.binding.siteId }); else throw fault("Unknown provider frame."); }).catch(async () => { const c = originalConnection(); if (c) await end(c, "Provider protocol/identity failed after dispatch."); else ws.close(1008, "Invalid pairing"); }); });
+      ws.on("message", (raw, binary) => { serial = serial.then(async () => { if (binary) throw fault("JSON frames required."); const message = JSON.parse(raw.toString()); if (!attached) { if (message.type !== "pair") throw fault("Pairing required."); attached = await attach(ws, { ...message, origin: req.headers.origin }); clearTimeout(timer); return; } const c = originalConnection(); if (message.type === "identity-result" || message.type === "identity-failed") { if (c) await identityResult(c, message); } else if (message.type === "heartbeat") { if (!c) throw fault("Original provider ended."); await renew({ actor: ownerOf(c.binding), providerId: c.binding.providerId }); } else if (message.type === "result") await result(attached, { ...message, siteId: c?.binding.siteId }); else throw fault("Unknown provider frame."); }).catch(async () => { const c = originalConnection(); if (c) await end(c, "Provider protocol/identity failed after dispatch."); else ws.close(1008, "Invalid pairing"); }); });
       ws.on("close", () => { clearTimeout(timer); void serial.finally(() => { const c = attached && connections.get(attached.providerId); if (c?.nonce === attached.connectionNonce) return end(c, "Original provider socket closed after dispatch."); }).catch(() => {}); });
     });
   }

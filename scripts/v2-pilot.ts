@@ -95,7 +95,7 @@ export function validatePilotComposition(input: unknown, env: Record<string, str
   }
   requireGuard(record(net.labels)["com.temcotools.pilot.project"] === identity.project, "Pilot network ownership label is required.");
   const databaseUrl = `postgresql://temco_pilot:${env.PILOT_POSTGRES_PASSWORD}@db:5432/${identity.database}`;
-  const expectedImages: Record<string, string> = { db: PILOT_POSTGRES_IMAGE, "storage-init": env.PILOT_APP_IMAGE, app: env.PILOT_APP_IMAGE, "api-relay": env.PILOT_APP_IMAGE, "mcp-http": env.PILOT_MCP_IMAGE, migrate: env.PILOT_MIGRATE_IMAGE };
+  const expectedImages: Record<string, string> = { db: PILOT_POSTGRES_IMAGE, "storage-init": env.PILOT_APP_IMAGE, app: env.PILOT_APP_IMAGE, "api-relay": env.PILOT_MCP_IMAGE, "mcp-http": env.PILOT_MCP_IMAGE, migrate: env.PILOT_MIGRATE_IMAGE };
   const allowedMounts: Record<string, string[]> = { db: ["db_data:/var/lib/postgresql/data"], "storage-init": ["admin_files:/data/admin-files"], app: ["admin_files:/data/admin-files"], "api-relay": [], "mcp-http": ["admin_files:/data/admin-files"], migrate: [] };
   for (const [name, entry] of Object.entries(services)) {
     const service = record(entry);
@@ -104,7 +104,7 @@ export function validatePilotComposition(input: unknown, env: Record<string, str
     requireGuard(service.entrypoint == null, "Pilot image entrypoints must not be overridden.");
     if (name !== "storage-init") requireGuard(service.user === undefined, "Pilot program/database image users must not be overridden.");
     if (["app", "db", "migrate"].includes(name)) requireGuard(service.command == null, "Default application/database/migration commands must not be overridden.");
-    if (name === "api-relay") requireGuard(JSON.stringify(service.command) === JSON.stringify(["node", "scripts/api-relay/server.mjs"]), "Only the DMP API relay command is allowed.");
+    if (name === "api-relay") requireGuard(JSON.stringify(service.command) === JSON.stringify(["node", "--import", "tsx", "scripts/api-relay/runtime.ts"]), "Only the current-authority DMP/generic relay runtime command is allowed.");
     if (name === "mcp-http") requireGuard(JSON.stringify(service.command) === JSON.stringify(["node", "--import", "tsx", "scripts/mcp-http-server.ts"]), "Only the authenticated MCP HTTP command is allowed.");
     const mounts = (service.volumes ?? []) as unknown[];
     requireGuard(Array.isArray(mounts), "Malformed service mounts.");
@@ -125,8 +125,8 @@ export function validatePilotComposition(input: unknown, env: Record<string, str
     if (["app", "api-relay", "mcp-http"].includes(name)) {
       for (const [key, value] of Object.entries({ TEMCO_PILOT_MODE: "read_only_dmp", TEMCO_SESSION_COOKIE_NAME: identity.cookieName, API_RELAY_AUDIENCE: identity.relayAudience, SESSION_SECRET: env.PILOT_SESSION_SECRET, DMP_ORIGINS: env.PILOT_DMP_ORIGINS })) requireGuard(vars[key] === value, "Pilot identity/mode/secret/relay isolation environment differs.");
     }
-    if (["app", "mcp-http", "migrate"].includes(name)) requireGuard(vars.DATABASE_URL === databaseUrl, "Pilot database URL must reference only the dedicated internal database.");
-    if (["app", "mcp-http"].includes(name)) {
+    if (["app", "api-relay", "mcp-http", "migrate"].includes(name)) requireGuard(vars.DATABASE_URL === databaseUrl, "Pilot database URL must reference only the dedicated internal database.");
+    if (["app", "api-relay", "mcp-http"].includes(name)) {
       for (const [key, value] of Object.entries({ NEXT_PUBLIC_APP_URL: identity.publicOrigin, MCP_ISSUER_URL: `${identity.publicOrigin}/`, MCP_RESOURCE_URL: `${identity.publicOrigin}/mcp`, API_RELAY_PUBLIC_ORIGIN: identity.publicOrigin, API_RELAY_INTERNAL_URL: "http://api-relay:3003", MFA_ENCRYPTION_KEY: env.PILOT_MFA_ENCRYPTION_KEY, ADMIN_FILE_MANAGER_ROOT: "/data/admin-files", DMP_API_OPERATIONS: env.PILOT_DMP_API_OPERATIONS, DMP_IDENTITY_PATH: env.PILOT_DMP_IDENTITY_PATH, DMP_IDENTITY_SUBJECT_PATH: env.PILOT_DMP_IDENTITY_SUBJECT_PATH })) requireGuard(vars[key] === value, "Pilot public origin, OAuth resource, relay, file root or DMP configuration differs.");
     }
     if (name === "api-relay") requireGuard(vars.API_RELAY_APP_URL === "http://app:3000" && vars.API_RELAY_APP_ORIGIN === identity.publicOrigin, "Relay callback must remain within the pilot.");

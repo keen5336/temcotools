@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { SITE_TABLES } from "../lib/sites/tables";
 import { decryptMfaSecret } from "../lib/auth/mfa-crypto";
 import { hasColumn, inventoryRepairCounts, maintenanceClient, maintenanceFailure, maintenanceTarget, migrationState, printMaintenance, tableExists, MaintenanceError } from "./v2-preflight-support";
 
@@ -13,6 +14,17 @@ export async function inspectV2Readiness(prisma: PrismaClient, phase: "migrate" 
     if (migrations.failed.length) blockers.push("An unfinished migration requires investigation; do not mark it applied blindly.");
     if (migrations.checksumMismatch.length || migrations.unknownApplied.length) blockers.push("Applied migration history differs from this checkout.");
     if (migrations.pending.length && phase === "launch") blockers.push("Apply the reviewed pending migrations before launch.");
+    let warehouseRuntime = null;
+    if (await tableExists(tx, "WarehouseSite")) {
+      const roles = await tx.$queryRaw<Array<{ restricted: boolean }>>`SELECT NOT rolsuper AND NOT rolbypassrls AND NOT rolcreaterole AND NOT rolcreatedb AS restricted FROM pg_roles WHERE rolname='temco_runtime'`;
+      const tables = await tx.$queryRaw<Array<{name:string; forced:boolean}>>`SELECT c.relname AS name,c.relrowsecurity AND c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'`;
+      const missingOrUnscopedTables = SITE_TABLES.filter(name => !tables.some(table => table.name === name && table.forced));
+      const functions = await tx.$queryRaw<Array<{name:string; securityDefiner:boolean; privilegedOwner:boolean; fixedSearchPath:boolean}>>`SELECT p.proname AS name,p.prosecdef AS "securityDefiner",r.rolsuper OR r.rolbypassrls AS "privilegedOwner",coalesce(array_to_string(p.proconfig,','),'') LIKE '%search_path=%' AS "fixedSearchPath" FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace JOIN pg_roles r ON r.oid=p.proowner WHERE n.nspname='public' AND p.proname IN ('temco_site_authorized','temco_integration_report','temco_printer_destination_busy','temco_platform_template_writer')`;
+      const invalidFunctions = ["temco_site_authorized","temco_integration_report","temco_printer_destination_busy","temco_platform_template_writer"].filter(name => !functions.some(fn => fn.name === name && fn.securityDefiner && fn.privilegedOwner && fn.fixedSearchPath));
+      warehouseRuntime = { restrictedRuntimeRole: roles[0]?.restricted === true, forcedOperationalTables: SITE_TABLES.length - missingOrUnscopedTables.length, expectedOperationalTables: SITE_TABLES.length, missingOrUnscopedTables, boundedSecurityDefinerFunctionsReady: invalidFunctions.length === 0, invalidFunctions };
+      if (!warehouseRuntime.restrictedRuntimeRole) blockers.push("The operational runtime role must not bypass row security or administer database roles.");
+      if (missingOrUnscopedTables.length || invalidFunctions.length) (phase === "launch" ? blockers : warnings).push("Apply/repair the reviewed warehouse row-security and bounded report/coordination function ownership before admission; do not widen the ordinary runtime role.");
+    }
     let identity = null;
     if (await hasColumn(tx, "User", "passwordHash") && await tableExists(tx, "UserMfa") && await tableExists(tx, "RoleBundle")) {
       const warehouseRoles = await tableExists(tx, "WarehouseMembership");
@@ -65,7 +77,7 @@ export async function inspectV2Readiness(prisma: PrismaClient, phase: "migrate" 
     if (dmpStates.some(row => row.state === "unknown" && row.count > BigInt(0))) warnings.push("Preserve uncertain DMP intents and reconcile upstream separately; a restored database must not replay them.");
     if (marsStates.some(row => row.state === "in_progress" && row.count > BigInt(0))) (phase === "launch" ? blockers : warnings).push("Reconcile in-progress human MARS handoffs before the cutover snapshot; local intent state is not proof of upstream completion.");
     if (marsStates.some(row => row.state === "unknown" && row.count > BigInt(0))) warnings.push("Preserve uncertain MARS intents and their original evidence; inspect the external outcome without automatically resubmitting.");
-    return { phase, migrations, identity, inventory, labelStates, dmpStates, marsStates, blockers, warnings, limits: ["Aggregate database inspection does not establish live relay quiescence, operator/device acceptance, upstream mapping, backup restoration, secret custody or production authorization.", "No source rows, identifiers, customer data, tokens, hashes or connection URLs are emitted."] };
+    return { phase, migrations, warehouseRuntime, identity, inventory, labelStates, dmpStates, marsStates, blockers, warnings, limits: ["Aggregate database inspection does not establish live relay quiescence, operator/device acceptance, upstream mapping, backup restoration, secret custody or production authorization.", "No source rows, identifiers, customer data, tokens, hashes or connection URLs are emitted."] };
   }, { isolationLevel: "RepeatableRead", timeout: 60_000 });
 }
 

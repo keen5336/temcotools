@@ -1,3 +1,4 @@
+import { getTemplateSelectionDefaults } from "@/lib/templates/service";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -45,9 +46,11 @@ export async function getManagedLabelConfiguration(principal: Principal) {
 export async function getOperatorLabelConfiguration(principal: Principal, input: unknown) {
   const { kind } = operatorLabelConfigurationInput.parse(input);
   return prisma.$transaction(async tx => {
-    await assertCurrentPrincipal(tx, principal, "labels.read"); await ensureBuiltInLabelTemplates(tx);
+    const current = await assertCurrentPrincipal(tx, principal, "labels.read"); await ensureBuiltInLabelTemplates(tx);
     const [printers, templates] = await Promise.all([tx.labelPrinter.findMany({ where: { isActive: true }, select: { id: true, name: true, endpoint: true, contentType: true }, orderBy: { name: "asc" } }), tx.labelTemplate.findMany({ where: { kind, isActive: true }, select: { id: true, name: true, zpl: true, isDefault: true }, orderBy: [{ isDefault: "desc" }, { name: "asc" }] })]);
-    return { printers, templates };
+    const defaults = await getTemplateSelectionDefaults(tx, current);
+    printers.sort((a,b) => Number(b.id === defaults.defaultPrinterId) - Number(a.id === defaults.defaultPrinterId));
+    return { printers, templates, defaults };
   });
 }
 export async function createPrinter(principal: Principal, input: unknown) {

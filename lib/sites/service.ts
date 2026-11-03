@@ -1,3 +1,4 @@
+import { assertTemplateSiteConfiguration } from "@/lib/templates/service";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
@@ -74,8 +75,10 @@ export async function saveSiteConfiguration(p: Principal, input: unknown) {
   return prisma.$transaction(async tx => {
     const current = await assertCurrentPrincipal(tx, p, "sites.configure", true), siteId = siteOf(current);
     return localCommandReceipt(tx, current, "sites.configuration.save", data.operationId, data, async () => {
+      await tx.$queryRaw`SELECT id FROM "WarehouseSite" WHERE id=${siteId} FOR UPDATE`;
+      await assertTemplateSiteConfiguration(tx, current, data.configuration);
       // A default is a reference, never authority to access another site's device/run.
-      if (data.configuration.defaultPrinterId && !await tx.printingDevice.findUnique({ where: { id: data.configuration.defaultPrinterId } })) throw new AuthorizationError("Choose a printer from this warehouse.");
+      if (data.configuration.defaultPrinterId && !await tx.labelPrinter.findUnique({ where: { id: data.configuration.defaultPrinterId } })) throw new AuthorizationError("Choose a printer from this warehouse.");
       if (data.configuration.defaultWorkflowId && !await tx.labelWorkflow.findFirst({ where: { purpose: data.configuration.defaultWorkflowId } })) throw new AuthorizationError("Choose a workflow from this warehouse.");
       const saved = await tx.warehouseSite.updateMany({ where: { id: siteId, revision: data.expectedRevision }, data: { name: data.name, configuration: data.configuration, revision: { increment: 1 } } });
       if (!saved.count) throw conflict();

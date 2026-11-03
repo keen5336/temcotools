@@ -1,3 +1,4 @@
+import { assertTemplateWorkflowWrite } from "@/lib/templates/service";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
@@ -196,6 +197,7 @@ export async function saveWorkflowDraft(p: Principal, input: unknown) {
   const data = workflowSaveInput.parse(input); assertWorkflowJson(data.definition);
   return prisma.$transaction(async tx => { const actor = await current(tx, p, true); return localCommandReceipt(tx, actor, "workflows.save", data.operationId, data, async () => {
     await lockedDefinition(tx, actor, data.id, data.expectedRevision);
+    await assertTemplateWorkflowWrite(tx, actor, data.id);
     const result = await tx.workflowDefinitionRecord.updateMany({ where: { id: data.id, siteId: siteOf(actor), revision: data.expectedRevision }, data: { name: data.name, draft: asJson(data.definition), updatedByUserId: actor.userId, revision: { increment: 1 } } }); if (!result.count) throw conflict(); await audit(tx, actor, "workflow_draft_saved", `${data.id}; revision ${data.expectedRevision + 1}`); return tx.workflowDefinitionRecord.findUniqueOrThrow({ where: { id: data.id } });
   }); });
 }
@@ -218,7 +220,9 @@ export async function testWorkflowDraft(p: Principal, input: unknown) {
 export async function publishWorkflow(p: Principal, input: unknown) {
   const data = workflowPublishInput.parse(input);
   return prisma.$transaction(async tx => { const actor = await current(tx, p, true, true); return localCommandReceipt(tx, actor, "workflows.publish", data.operationId, data, async () => {
-    const record = await lockedDefinition(tx, actor, data.id, data.expectedRevision), draft = validateWorkflowDefinition(record.draft), previous = await tx.workflowDefinitionVersion.findFirst({ where: { definitionId: record.id, siteId: siteOf(actor) }, orderBy: { version: "desc" } });
+    const record = await lockedDefinition(tx, actor, data.id, data.expectedRevision);
+    await assertTemplateWorkflowWrite(tx, actor, data.id);
+    const draft = validateWorkflowDefinition(record.draft), previous = await tx.workflowDefinitionVersion.findFirst({ where: { definitionId: record.id, siteId: siteOf(actor) }, orderBy: { version: "desc" } });
     const id = randomUUID(), version = (previous?.version ?? 0) + 1, definition = validateWorkflowDefinition({ ...draft, id: record.id, versionId: id, version, name: record.name });
     const published = await tx.workflowDefinitionVersion.create({ data: { id, siteId: siteOf(actor), definitionId: record.id, version, definition: asJson(definition), contentHash: hash(definition), createdByUserId: actor.userId } });
     await tx.workflowDefinitionRecord.update({ where: { id: record.id }, data: { publishedVersionId: id, revision: { increment: 1 }, updatedByUserId: actor.userId } }); await audit(tx, actor, "workflow_published", `${record.id}; ${id}; ${data.note}`); return { id: record.id, published };
@@ -227,14 +231,16 @@ export async function publishWorkflow(p: Principal, input: unknown) {
 export async function rollbackWorkflow(p: Principal, input: unknown) {
   const data = workflowRollbackInput.parse(input);
   return prisma.$transaction(async tx => { const actor = await current(tx, p, true, true); return localCommandReceipt(tx, actor, "workflows.rollback", data.operationId, data, async () => {
-    await lockedDefinition(tx, actor, data.id, data.expectedRevision); const target = await tx.workflowDefinitionVersion.findFirst({ where: { id: data.versionId, definitionId: data.id, siteId: siteOf(actor) } }); if (!target || hash(target.definition) !== target.contentHash) throw notFound();
+    await lockedDefinition(tx, actor, data.id, data.expectedRevision);
+    await assertTemplateWorkflowWrite(tx, actor, data.id); const target = await tx.workflowDefinitionVersion.findFirst({ where: { id: data.versionId, definitionId: data.id, siteId: siteOf(actor) } }); if (!target || hash(target.definition) !== target.contentHash) throw notFound();
     const result = await tx.workflowDefinitionRecord.update({ where: { id: data.id }, data: { publishedVersionId: target.id, revision: { increment: 1 }, updatedByUserId: actor.userId } }); await audit(tx, actor, "workflow_rolled_back", `${data.id}; ${target.id}; ${data.note}`); return result;
   }); });
 }
 export async function setWorkflowEnabled(p: Principal, input: unknown) {
   const data = workflowEnabledInput.parse(input);
   return prisma.$transaction(async tx => { const actor = await current(tx, p, true, true); return localCommandReceipt(tx, actor, "workflows.enabled", data.operationId, data, async () => {
-    await lockedDefinition(tx, actor, data.id, data.expectedRevision); const result = await tx.workflowDefinitionRecord.update({ where: { id: data.id }, data: { enabled: data.enabled, revision: { increment: 1 }, updatedByUserId: actor.userId } }); await audit(tx, actor, "workflow_availability_changed", `${data.id}; enabled=${data.enabled}; ${data.note}`); return result;
+    await lockedDefinition(tx, actor, data.id, data.expectedRevision);
+    await assertTemplateWorkflowWrite(tx, actor, data.id); const result = await tx.workflowDefinitionRecord.update({ where: { id: data.id }, data: { enabled: data.enabled, revision: { increment: 1 }, updatedByUserId: actor.userId } }); await audit(tx, actor, "workflow_availability_changed", `${data.id}; enabled=${data.enabled}; ${data.note}`); return result;
   }); });
 }
 async function practiceTemplate(tx: Prisma.TransactionClient, p: Principal, template: "synthetic_receiving" | "warehouse_presence") {
