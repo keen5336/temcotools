@@ -1,0 +1,19 @@
+{
+  "name": "temcoscan-lab-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@paddleocr/paddleocr-js": "0.4.2",
+    "@techstark/opencv-js": "4.10.0-release.1",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@zxing/browser": "0.2.1",
+    "@zxing/library": "0.23.0",
+    "clipper-lib": "6.4.2",
+    "esbuild": "0.25.12",
+    "js-yaml": "4.3.2",
+    "onnxruntime-web": "1.24.3",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0"
+  }
+}

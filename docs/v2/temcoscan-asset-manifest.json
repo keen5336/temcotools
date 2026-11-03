@@ -1,0 +1,165 @@
+{
+  "runtime": {
+    "@paddleocr/paddleocr-js": "0.4.2",
+    "@techstark/opencv-js": "4.10.0-release.1",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@zxing/browser": "0.2.1",
+    "@zxing/library": "0.23.0",
+    "clipper-lib": "6.4.2",
+    "esbuild": "0.25.12",
+    "js-yaml": "4.3.2",
+    "onnxruntime-web": "1.24.3",
+    "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0"
+  },
+  "models": [
+    {
+      "path": "paddle/PP-OCRv5_mobile_det.tar",
+      "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_mobile_det_onnx_infer.tar",
+      "sha256": "781056046c9ed77a15c94681605db6a0f62317c2e9cce6931c71da2478d4bc30",
+      "bytes": 4843520,
+      "license": "Apache-2.0",
+      "model": "PP-OCRv5_mobile_det"
+    },
+    {
+      "path": "paddle/PP-OCRv5_mobile_rec.tar",
+      "url": "https://paddle-model-ecology.bj.bcebos.com/paddlex/official_inference_model/paddle3.0.0/PP-OCRv5_mobile_rec_onnx_infer.tar",
+      "sha256": "f7e792bc836f36e7ef895ad47c426d75b0b75b1650caa6d63fe9418441ffba8c",
+      "bytes": 16701440,
+      "license": "Apache-2.0",
+      "model": "PP-OCRv5_mobile_rec"
+    }
+  ],
+  "files": [
+    {
+      "path": "chunk-WVOQBBD4.mjs",
+      "bytes": 800,
+      "sha256": "6290d9f63097074876503fa52e1d48e282692f2b211a7dfd95122f7b96163db0"
+    },
+    {
+      "path": "licenses/OpenCV-COPYRIGHT.txt",
+      "bytes": 733,
+      "sha256": "bba849c98da85a2b27b86113284a90812c959b1c1fc4ed67de9355475d1e6831"
+    },
+    {
+      "path": "licenses/PaddleOCR-APACHE-2.0.txt",
+      "bytes": 11376,
+      "sha256": "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e"
+    },
+    {
+      "path": "licenses/tessdata-APACHE-2.0.txt",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "ort.wasm.min-RXKISGCB.mjs",
+      "bytes": 49434,
+      "sha256": "94f94d841fae47dbacf6fa39a8d3171b935f1a3e02f76d6fccb21d39e616d53c"
+    },
+    {
+      "path": "ort.wasm.min-RXKISGCB.mjs.LEGAL.txt",
+      "bytes": 211,
+      "sha256": "ce65bb476d20e5b8b9a832d4409dc335be3f1180a88c0ecc88add701ee3bb8cf"
+    },
+    {
+      "path": "ort/ort-wasm-simd-threaded.jsep.mjs",
+      "bytes": 46595,
+      "sha256": "9a99acd12acc495184c9ea4d458ac9424f8180aacfbc7b8371ed64f9351e4a81"
+    },
+    {
+      "path": "ort/ort-wasm-simd-threaded.jsep.wasm",
+      "bytes": 25014754,
+      "sha256": "2e0a3d0e3f6b7c13ecfaba38c13691fd19c9ed470e72f9d7d8416ca59ab6dbcd"
+    },
+    {
+      "path": "ort/ort-wasm-simd-threaded.mjs",
+      "bytes": 24274,
+      "sha256": "5687566b1bc1c8cf628d76c2ddb16b2a3b81a7997273d4666564880495088e57"
+    },
+    {
+      "path": "ort/ort-wasm-simd-threaded.wasm",
+      "bytes": 12361745,
+      "sha256": "be0e129949062ad50290ef94683fac8be5bb6156f709e030b7a5f1661a2f6c17"
+    },
+    {
+      "path": "paddle-worker.mjs",
+      "bytes": 10870349,
+      "sha256": "b6b8329fb732ec975dbc0399f054322effdc58834df0f7e7486ecb3c9b73b8c4"
+    },
+    {
+      "path": "paddle-worker.mjs.LEGAL.txt",
+      "bytes": 2494,
+      "sha256": "72be3950e2a0759360efc055d56efff9a4b5fb500cedd21db704449c5d257796"
+    },
+    {
+      "path": "paddle.mjs",
+      "bytes": 10485729,
+      "sha256": "dd1c7f1ded4c89e1743ee23e2ff76db9a15ed88bf7b3f153b0f02b0bb74683a9"
+    },
+    {
+      "path": "paddle/PP-OCRv5_mobile_det.tar",
+      "bytes": 4843520,
+      "sha256": "781056046c9ed77a15c94681605db6a0f62317c2e9cce6931c71da2478d4bc30"
+    },
+    {
+      "path": "paddle/PP-OCRv5_mobile_rec.tar",
+      "bytes": 16701440,
+      "sha256": "f7e792bc836f36e7ef895ad47c426d75b0b75b1650caa6d63fe9418441ffba8c"
+    },
+    {
+      "path": "tesseract.mjs",
+      "bytes": 17513,
+      "sha256": "ff805cb53db3b8603ed01102c869023154b9921c120dd4de49bc0e0dcc9576a4"
+    },
+    {
+      "path": "tesseract/core/tesseract-core-lstm.wasm.js",
+      "bytes": 3896484,
+      "sha256": "eef5f8b2f8e20e150680b20adaec4a60babafee3adbe8a94583c81fee46e8680"
+    },
+    {
+      "path": "tesseract/core/tesseract-core-relaxedsimd-lstm.wasm.js",
+      "bytes": 3905767,
+      "sha256": "861a536cf9ef8e63cb644d57bab39c388f37f7d6b6f60024b741c5f6b39a59b3"
+    },
+    {
+      "path": "tesseract/core/tesseract-core-relaxedsimd.wasm.js",
+      "bytes": 4697227,
+      "sha256": "843074aa5bad1cc6421b74a86201768ced9f244795e4d81435435a61a40ce535"
+    },
+    {
+      "path": "tesseract/core/tesseract-core-simd-lstm.wasm.js",
+      "bytes": 3899472,
+      "sha256": "c58b46a4c796c0b8afccf77591d5b875b6896b45d402bbce8caa6f5362447b38"
+    },
+    {
+      "path": "tesseract/core/tesseract-core-simd.wasm.js",
+      "bytes": 4690932,
+      "sha256": "6b61ef4e911b5cf57e656bbfe983d6e2b3711a02dd164154ddda064566e8e09d"
+    },
+    {
+      "path": "tesseract/core/tesseract-core.wasm.js",
+      "bytes": 4687944,
+      "sha256": "0bc6ce3e5fbbd0cd89706cf2fd70960e3372f4f01ee24265b26990808aaeb286"
+    },
+    {
+      "path": "tesseract/lang/eng.traineddata.gz",
+      "bytes": 10923060,
+      "sha256": "ed350f3752f81ee8f38769edc14d92d997dababe23b565c59879372cc46a2468"
+    },
+    {
+      "path": "tesseract/worker.min.js",
+      "bytes": 111307,
+      "sha256": "576b7df7e3393e137e51849357c9adb53fe7ac1bb69bfa06cf3d61520f182c6d"
+    },
+    {
+      "path": "THIRD-PARTY-NOTICES.txt",
+      "bytes": 52768,
+      "sha256": "af7ef548ed89692f6e7429cab6ab5a6ac905d8e377cd6806b549a005600e85fc"
+    },
+    {
+      "path": "zxing.mjs",
+      "bytes": 485590,
+      "sha256": "4e957582ad1507cf07a99e5e5bc04c69ba98e1df67f29d114916654af5854c73"
+    }
+  ]
+}

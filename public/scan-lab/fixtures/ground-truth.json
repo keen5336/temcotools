@@ -1,0 +1,71 @@
+{
+  "origin": "Generated locally by scripts/scan-lab-browser.mjs --fixtures; synthetic, no customer data",
+  "license": "CC0-1.0",
+  "fixtures": [
+    {
+      "file": "serial-clean.png",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "condition": "serial-clean"
+    },
+    {
+      "file": "dense-lpn.png",
+      "expected": "LPN: 0000123401\nLOCATION: A-01-005\nSERIAL: 0O-1I-5S-8B",
+      "condition": "dense-lpn"
+    },
+    {
+      "file": "shadow.png",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "condition": "shadow"
+    },
+    {
+      "file": "glare.png",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "condition": "glare"
+    },
+    {
+      "file": "angle.png",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "condition": "angle"
+    },
+    {
+      "file": "small-low-light.png",
+      "expected": "LPN: 0000123401\nMODEL: QX-007",
+      "condition": "small-low-light"
+    },
+    {
+      "file": "damage.png",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "condition": "damage"
+    },
+    {
+      "file": "motion.png",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "condition": "motion"
+    },
+    {
+      "file": "curved.png",
+      "expected": "SERIAL: 001O-I1S5-8B\nMODEL: QX-007",
+      "condition": "curved"
+    }
+  ],
+  "barcodes": [
+    {
+      "file": "code128.png",
+      "expected": "001234567890",
+      "format": "CODE_128"
+    },
+    {
+      "file": "qr.png",
+      "expected": "TEMCO-LAB-00001",
+      "format": "QR_CODE"
+    },
+    {
+      "file": "code128-and-qr.png",
+      "expected": [
+        "001234567890",
+        "TEMCO-LAB-00001"
+      ],
+      "note": "ZXing returns one barcode per crop; crop the left/right half to compare both"
+    }
+  ]
+}
