@@ -41,7 +41,7 @@ test("native Office refresh covers all observed units with resumable receipts an
       assert.ok(await prisma.officeCase.count({ where: { unitId: { in: ids }, reason: "warehouse_over_20_days" } }) < ids.length);
       const before = await prisma.warehousePhysicalObservation.count({ where: { userId: user.id } });
       const batch = await accept(businessDay(now)); assert.ok(batch.officeRefresh); assert.equal(batch.officeRefreshError, null);
-      const source = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: `${prefix}-SOURCE`.toUpperCase() } }); allIds.push(source.unitId!);
+      const source = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: `${prefix}-SOURCE`.toUpperCase() } }); allIds.push(source.unitId!);
       assert.equal(batch.officeRefresh.coverage, "incomplete");
       const finished = await completePass(); assert.equal(finished.status.coverage, "fresh", JSON.stringify({ reasons: finished.status.staleReasons, watermark: finished.receipt.watermark })); assert.ok(finished.receipt.processed >= 112);
       assert.equal(await prisma.officeCase.count({ where: { unitId: { in: ids }, reason: "warehouse_over_20_days" } }), ids.length);
@@ -79,7 +79,7 @@ test("native Office refresh covers all observed units with resumable receipts an
     });
     await t.test("changed WMS receipt date clears a weaker source-aging case without asserting physical departure", async () => {
       const oldDay = businessDay(new Date(now.getTime() - 35 * day)); const old = `${oldDay.slice(5, 7)}/${oldDay.slice(8, 10)}/${oldDay.slice(0, 4)}`; await accept(old);
-      const source = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: `${prefix}-SOURCE`.toUpperCase() } });
+      const source = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: `${prefix}-SOURCE`.toUpperCase() } });
       await fixtureObservation(source.unitId!, "presence");
       const changedDuringPass = await completePass(); assert.equal(changedDuringPass.status.coverage, "stale");
       await completePass();

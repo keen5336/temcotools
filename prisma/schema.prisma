@@ -669,7 +669,7 @@ enum LabelTemplateKind {
 model InventoryAuditItem {
   siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id               String   @id @default(cuid())
-  lpn              String   @unique
+  lpn              String
   status           String
   orderNumber      String
   vendor           String
@@ -689,6 +689,7 @@ model InventoryAuditItem {
   unit             WarehouseUnit? @relation(fields: [unitId], references: [id], onDelete: Restrict)
   sourceRevisions  InventorySourceRevision[]
 
+  @@unique([siteId, lpn])
   @@index([archivedAt, sourceChangedAt, lpn])
   @@index([verifiedAt])
 }
@@ -965,6 +966,100 @@ model WarehouseUnit {
   dispatchAllocations DispatchAllocation[]
   marsSubmissionIntents MarsSubmissionIntent[]
   notes WarehouseUnitNote[]
+  origins WarehouseUnitOrigin[]
+  siteParticipations WarehouseUnitSite[]
+  sharedAliases WarehouseUnitAlias[]
+  custodyTransfers WarehouseUnitTransfer[]
+}
+
+// The existing WarehouseUnit.id stays the physical identity. Compatibility
+// creation fields on WarehouseUnit are cleared by the database into this record.
+model WarehouseUnitOrigin {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  unitId String @id
+  unit WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  createdByUserId String?
+  creationEvidence String?
+  creationFingerprint String?
+  createdAt DateTime @default(now())
+}
+model WarehouseUnitSite {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  unitId String
+  unit WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  phase String @default("unestablished")
+  holdsCustody Boolean @default(false)
+  revision Int @default(1)
+  transferId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@id([siteId, unitId])
+}
+// Only minimal identifier facts are shared. The existing WarehouseIdentifier
+// keeps raw values, office evidence and attribution under its original site RLS.
+model WarehouseUnitAlias {
+  id String @id
+  unitId String
+  unit WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  kind String
+  namespace String
+  value String
+  revokedAt DateTime?
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  visibility WarehouseUnitAliasVisibility[]
+  @@index([kind, namespace, value, revokedAt])
+}
+model WarehouseUnitAliasVisibility {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  aliasId String
+  alias WarehouseUnitAlias @relation(fields: [aliasId], references: [id], onDelete: Restrict)
+  transferId String?
+  createdAt DateTime @default(now())
+  @@id([siteId, aliasId])
+}
+model WarehouseUnitTransfer {
+  id String @id @default(cuid())
+  unitId String
+  unit WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  sourceSiteId String
+  destinationSiteId String
+  state String @default("proposed")
+  revision Int @default(1)
+  aliasIds Json
+  handoff Json
+  proposedByUserId String
+  acceptedByUserId String?
+  departedByUserId String?
+  checkedInByUserId String?
+  cancelledByUserId String?
+  departureObservationId String?
+  checkInObservationId String?
+  acceptedAt DateTime?
+  departedAt DateTime?
+  checkedInAt DateTime?
+  cancelledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  events WarehouseUnitTransferEvent[]
+  @@index([sourceSiteId, state, createdAt])
+  @@index([destinationSiteId, state, createdAt])
+}
+model WarehouseUnitTransferEvent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  transferId String
+  transfer WarehouseUnitTransfer @relation(fields: [transferId], references: [id], onDelete: Restrict)
+  actorUserId String
+  actorSessionId String
+  operationId String
+  kind String
+  fingerprint String
+  detail Json
+  result Json
+  createdAt DateTime @default(now())
+  @@unique([siteId, actorUserId, operationId])
+  @@index([siteId, transferId, createdAt])
 }
 
 model WarehouseUnitNote {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, type Capability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
+import { assertUnitOperationalCustodyInTransaction } from "@/lib/warehouse/custody";
 import { recordWorkflowObservation, resolveWarehouseIdentifierInTransaction } from "@/lib/warehouse/units";
 import { currentOfficeDispatchRestrictions, reviewWorkflowOfficeObservation } from "@/lib/office/service";
 import { DispatchError, dispatchDay, dispatchHash, dispatchId, dispatchLine, dispatchOperation, dispatchPlain, dispatchReason, dispatchSlot, dispatchSourceNotice, dispatchStamp, expandDispatchLines, type DispatchSlot } from "./model";
@@ -124,6 +125,7 @@ export async function allocateDispatchUnit(principal: Principal, raw: unknown) {
     const unitId = input.unitId ?? (match.state === "ready" ? match.candidateUnitIds[0] : null);
     if (!unitId) throw new DispatchError("Resolve the missing, ambiguous or conflicting match before automatic allocation.", 409);
     if (!await tx.warehouseUnit.findUnique({ where: { id: unitId }, select: { id: true } })) throw new DispatchError("Physical unit not found.", 404);
+    await assertUnitOperationalCustodyInTransaction(tx, principal, unitId);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dispatch-unit:${unitId}`},0))`;
     if (await tx.dispatchReservation.findUnique({ where: { unitId } })) throw new DispatchError("This physical unit is already reserved by active dispatch work.", 409);
     const allocation = await tx.dispatchAllocation.create({ data: { snapshotId: snapshot.id, slotKey: slot.slotKey, unitId, matchEvidence: asJson({ evidence: input.evidence, identityMatch: match, manualUnitDecision: Boolean(input.unitId), stockPresenceClaim: false }), createdByUserId: principal.userId } });
@@ -244,7 +246,7 @@ export async function generateDispatchPickWave(principal: Principal, raw: unknow
   const input = generateDispatchPickWaveInputSchema.parse(raw);
   return dispatchCommand(principal, input.operationId, "generate_pick_wave", input, "dispatch.allocate", async (tx) => {
     const snapshot = await currentSnapshot(tx, input.snapshotId, input.expectedHeadId); const slots = slotsOf(snapshot.slots);
-    const allocations = await tx.dispatchAllocation.findMany({ where: { snapshotId: snapshot.id, releasedAt: null }, include: { waveItem: true, unit: { include: { identifiers: { where: { revokedAt: null }, orderBy: { id: "asc" } }, inventoryRows: { orderBy: { lpn: "asc" } } } } }, orderBy: { slotKey: "asc" } });
+    const allocations = await tx.dispatchAllocation.findMany({ where: { snapshotId: snapshot.id, releasedAt: null }, include: { waveItem: true, unit: { include: { sharedAliases: { where: { revokedAt: null }, orderBy: { id: "asc" } }, inventoryRows: { orderBy: { lpn: "asc" } } } } }, orderBy: { slotKey: "asc" } });
     const pending = allocations.filter((allocation) => !allocation.waveItem);
     const existingWaveIds = [...new Set(allocations.flatMap((allocation) => allocation.waveItem ? [allocation.waveItem.pickWaveId] : []))];
     if (!pending.length) return { created: false, waveIds: existingWaveIds, allocated: allocations.length, missingSlots: slots.length - allocations.length, sourceNotice: dispatchSourceNotice };
@@ -252,8 +254,8 @@ export async function generateDispatchPickWave(principal: Principal, raw: unknow
     const mappings = new Map<string, string>();
     for (let index = 0; index < pending.length; index++) {
       const allocation = pending[index]; const slot = slots.find((item) => item.slotKey === allocation.slotKey)!;
-      const lpn = allocation.unit.identifiers.find((alias) => alias.kind === "lpn")?.value ?? null;
-      const serial = allocation.unit.identifiers.find((alias) => alias.kind === "serial")?.value ?? null;
+      const lpn = allocation.unit.sharedAliases.find((alias) => alias.kind === "lpn")?.value ?? null;
+      const serial = allocation.unit.sharedAliases.find((alias) => alias.kind === "serial")?.value ?? null;
       const item = await tx.pickWaveItem.create({ data: { pickWaveId: wave.id, rowNumber: index + 2, routeNumber: slot.route, orderNumber: slot.orderReference || null, lpn, serialNumber: serial, partNumber: slot.partNumber || null, description: slot.description || allocation.unit.inventoryRows[0]?.description || null } });
       await tx.dispatchWaveItem.create({ data: { allocationId: allocation.id, pickWaveId: wave.id, pickWaveItemId: item.id, unitId: allocation.unitId, snapshotId: snapshot.id } });
       mappings.set(slot.route, slot.lane);
@@ -310,7 +312,7 @@ export async function recordFinalsScan(principal: Principal, raw: unknown) {
       const slot = allocation ? slots.find((item) => item.slotKey === allocation!.slotKey) : null;
       expectedLane = slot?.lane ?? null;
       if (!allocation || !slot) {
-        const aliases = await tx.warehouseIdentifier.findMany({ where: { unitId, revokedAt: null } });
+        const aliases = await tx.warehouseUnitAlias.findMany({ where: { unitId, revokedAt: null } });
         const potential = slots.filter((item) => (!item.expectedUnit.unitId || item.expectedUnit.unitId === unitId) && (item.expectedUnit.unitId || item.expectedUnit.identifiers.length) && item.expectedUnit.identifiers.every((reference) => aliases.some((alias) => alias.kind === reference.kind && alias.value === reference.value && (!reference.namespace || alias.namespace === reference.namespace))));
         if (potential.length === 1) { expectedLane = potential[0].lane; outcome = input.lane !== expectedLane ? "wrong_lane" : "allocation_required"; message = input.lane !== expectedLane ? `WRONG LANE / MOVE TO LANE ${expectedLane}. Office allocation and destination confirmation are still required.` : "Known requirement candidate; office must allocate this exact unit before lane fulfillment."; }
         else if (potential.length > 1) { outcome = "ambiguous_requirement"; message = "This unit could match multiple quantity slots. Office must resolve the exact allocation."; }
@@ -392,7 +394,7 @@ export async function reviewFinalsException(principal: Principal, raw: unknown) 
         const oldAllocation = await tx.dispatchAllocation.findFirst({ where: { snapshotId: origin.snapshotId, unitId }, orderBy: { createdAt: "desc" } });
         const currentSlots = slotsOf(session.snapshot.slots);
         const currentAllocations = await tx.dispatchAllocation.findMany({ where: { snapshotId: session.snapshotId, releasedAt: null }, select: { slotKey: true, unitId: true } });
-        const aliases = await tx.warehouseIdentifier.findMany({ where: { unitId, revokedAt: null }, select: { kind: true, namespace: true, value: true } });
+        const aliases = await tx.warehouseUnitAlias.findMany({ where: { unitId, revokedAt: null }, select: { kind: true, namespace: true, value: true } });
         const mayStillBeRequired = currentSlots.some((slot) => {
           const allocated = currentAllocations.find((item) => item.slotKey === slot.slotKey);
           if (allocated) return allocated.unitId === unitId;

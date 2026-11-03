@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, type Capability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
+import { assertUnitOperationalCustodyInTransaction } from "@/lib/warehouse/custody";
 import { classifyMarsUnit } from "@/lib/mars/classification";
 import { businessDay, calendarDays, deriveCustody, fingerprint, iso, OfficeError, plain, type PhysicalFact } from "./domain";
 
@@ -156,10 +157,10 @@ async function evaluateUnit(tx: Prisma.TransactionClient, principal: Principal, 
     // Expiry removes authority; it does not establish presence, qualify a scan,
     // reopen an earlier departed stay, or undo an already-linked submission.
     if (!pendingRtv || !data.custody.warehouseEvidence || departedEpisode) continue;
-    const aliases = await tx.warehouseIdentifier.findMany({ where: { unitId, kind: "submission", revokedAt: null }, select: { value: true } });
+    const aliases = await tx.warehouseUnitAlias.findMany({ where: { unitId, kind: "submission", revokedAt: null }, select: { value: true } });
     let linkedSubmission = false;
     for (const alias of aliases) {
-      const units = await tx.warehouseIdentifier.findMany({ where: { kind: "submission", value: alias.value, revokedAt: null }, distinct: ["unitId"], select: { unitId: true } });
+      const units = await tx.warehouseUnitAlias.findMany({ where: { kind: "submission", value: alias.value, revokedAt: null }, distinct: ["unitId"], select: { unitId: true } });
       if (units.length === 1 && units[0].unitId === unitId) { linkedSubmission = true; break; }
     }
     if (linkedSubmission) continue;
@@ -394,6 +395,7 @@ export async function recordOfficeDispositionExecution(principal: Principal, raw
     await tx.$executeRaw`SELECT id FROM "OfficeDisposition" WHERE id=${data.dispositionId} FOR UPDATE`;
     const disposition = await tx.officeDisposition.findUnique({ where: { id: data.dispositionId }, include: { executions: true } });
     if (!disposition || !["active", "triggered"].includes(disposition.status) || !disposition.authorizedByUserId || !disposition.expiresAt || disposition.expiresAt <= new Date()) throw new OfficeError("A current exact-unit RTV authorization is required.", 409);
+    await assertUnitOperationalCustodyInTransaction(tx, principal, disposition.unitId);
     const observation = await tx.warehousePhysicalObservation.findUnique({ where: { id: data.observationId }, include: { corrections: { orderBy: { revision: "desc" }, take: 1 } } });
     const actualUnitId = observation?.corrections[0] ? observation.corrections[0].unitId : observation?.unitId;
     if (!observation || observation.userId !== principal.userId || actualUnitId !== disposition.unitId || observation.type !== "placement" || !observation.location || !disposition.authorizedAt || observation.capturedAt < disposition.authorizedAt || (disposition.triggerAt && observation.capturedAt < disposition.triggerAt)) throw new OfficeError("Confirm actual placement of this exact authorized unit with your own qualifying scan.");
@@ -409,7 +411,7 @@ export async function recordOfficeDispositionExecution(principal: Principal, raw
   });
 }
 
-export const officeEvaluationCandidateWhere: Prisma.WarehouseUnitWhereInput = { OR: [{ officeSchedules: { some: {} } }, { officeDispositions: { some: {} } }, { returnExpectations: { some: {} } }, { observations: { some: {} } }, { observationCorrections: { some: {} } }, { identifiers: { some: { kind: "submission", revokedAt: null } } }] };
+export const officeEvaluationCandidateWhere: Prisma.WarehouseUnitWhereInput = { OR: [{ officeSchedules: { some: {} } }, { officeDispositions: { some: {} } }, { returnExpectations: { some: {} } }, { observations: { some: {} } }, { observationCorrections: { some: {} } }, { sharedAliases: { some: { kind: "submission", revokedAt: null } } }] };
 async function candidateUnits(tx: Prisma.TransactionClient, input: { unitIds?: string[]; limit?: number; afterUnitId?: string; throughUnitId?: string }) {
   const limit = input.limit ?? 100;
   const units = await tx.warehouseUnit.findMany({ where: { ...(input.unitIds ? {} : officeEvaluationCandidateWhere), id: { ...(input.unitIds ? { in: input.unitIds } : {}), gt: input.afterUnitId ?? "", ...(input.throughUnitId ? { lte: input.throughUnitId } : {}) } }, orderBy: { id: "asc" }, take: limit + 1, select: { id: true } });
@@ -475,10 +477,10 @@ async function unitReturnWork(tx: Prisma.TransactionClient, unitId: string, now:
   const data = await facts(tx, unitId, now);
   const items: ReturnWorkItem[] = [];
   for (const expectation of data.expectations.filter((item) => item.status === "expected" && item.expectedAt && item.expectedAt <= now && !data.checkedIn(item.activatedAt))) items.push({ key: `expected:${expectation.id}`, kind: "expected_return_not_checked_in", unitId, expectationId: expectation.id, why: expectation.evidence, trailStopsAt: "Expected movement has no qualifying check-in confirmation.", physicalEvidenceAt: iso(data.custody.last?.capturedAt), certainty: "expected_not_physically_confirmed" });
-  const aliases = await tx.warehouseIdentifier.findMany({ where: { unitId, kind: "submission", revokedAt: null }, select: { value: true } });
+  const aliases = await tx.warehouseUnitAlias.findMany({ where: { unitId, kind: "submission", revokedAt: null }, select: { value: true } });
   const validValues: string[] = [];
   for (const alias of aliases) {
-    const linked = await tx.warehouseIdentifier.findMany({ where: { kind: "submission", value: alias.value, revokedAt: null }, select: { unitId: true }, distinct: ["unitId"] });
+    const linked = await tx.warehouseUnitAlias.findMany({ where: { kind: "submission", value: alias.value, revokedAt: null }, select: { unitId: true }, distinct: ["unitId"] });
     if (linked.length === 1) validValues.push(alias.value.toLowerCase());
     else items.push({ key: `submission-ambiguous:${unitId}:${alias.value}`, kind: "ambiguous_submission_link", unitId, submissionNumber: alias.value, why: "This submission identifier is linked to several distinct physical units.", trailStopsAt: "Resolve physical identity before asserting submission status or creating another return.", physicalEvidenceAt: iso(data.custody.last?.capturedAt), certainty: "ambiguous_link_not_resolved_identity" });
   }

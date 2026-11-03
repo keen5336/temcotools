@@ -4,6 +4,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
+import { getUnitOriginInTransaction, listSharedWarehouseAliasesInTransaction } from "./custody";
+import { WAREHOUSE_IDENTITY_IMPORT_LOCK } from "./source-history";
 
 export const IDENTIFIER_KINDS = ["lpn", "msn", "serial", "submission"] as const;
 export type WarehouseIdentifierKind = (typeof IDENTIFIER_KINDS)[number];
@@ -58,12 +60,9 @@ function parseIdentifier(input: WarehouseIdentifierInput) {
 }
 
 async function resolveInTransaction(tx: Prisma.TransactionClient, input: ReturnType<typeof parseIdentifier>) {
-  const aliases = await tx.warehouseIdentifier.findMany({
-    where: { value: input.value, revokedAt: null, ...(input.kind === "auto" ? {} : { kind: input.kind }), ...(input.namespace ? { namespace: input.namespace } : {}) },
-    orderBy: [{ unitId: "asc" }, { id: "asc" }],
-    include: { unit: { include: { inventoryRows: { select: { lpn: true, orderNumber: true, description: true, status: true } } } } },
-    take: 101,
-  });
+  // Shared aliases contain only approved identifiers. Their evidence and each
+  // unit's source rows remain scoped to this warehouse by independent RLS.
+  const aliases = await listSharedWarehouseAliasesInTransaction(tx, { value: input.value, kind: input.kind, ...(input.namespace ? { namespace: input.namespace } : {}) });
   const unitMap = new Map(aliases.map((alias) => [alias.unitId, { unitId: alias.unitId, lpns: alias.unit.inventoryRows.map((row) => row.lpn), reportedRows: alias.unit.inventoryRows, createdAt: alias.unit.createdAt.toISOString() }]));
   const candidates = [...unitMap.values()];
   // An over-limit lookup cannot safely claim a unique resolution.
@@ -74,7 +73,7 @@ async function resolveInTransaction(tx: Prisma.TransactionClient, input: ReturnT
 export async function resolveWarehouseIdentifier(principal: Principal, input: WarehouseIdentifierInput) {
   assertCapability(principal, "inventory.read");
   const identifier = parseIdentifier(input);
-  const resolved = await prisma.$transaction((tx) => resolveInTransaction(tx, identifier), { isolationLevel: "RepeatableRead" });
+  const resolved = await prisma.$transaction(async (tx) => { await assertCurrentPrincipal(tx, principal, "inventory.read"); return resolveInTransaction(tx, identifier); }, { isolationLevel: "RepeatableRead" });
   return { ...resolved, identifier, physicalPresence: "not_determined" as const };
 }
 
@@ -146,7 +145,8 @@ export async function createWarehouseUnit(principal: Principal, input: { operati
     const fingerprint = hash({ evidence, actor: principal.userId });
     const existing = await tx.warehouseUnit.findUnique({ where: { id } });
     if (existing) {
-      if (existing.creationFingerprint !== fingerprint) throw new WarehouseCommandError("This operation ID was already used for different identity evidence.", 409);
+      const origin = await getUnitOriginInTransaction(tx, id);
+      if (origin?.creationFingerprint !== fingerprint) throw new WarehouseCommandError("This operation ID was already used for different identity evidence or another warehouse.", 409);
       return { unitId: id, createdAt: existing.createdAt.toISOString(), replayed: true };
     }
     const unit = await tx.warehouseUnit.create({ data: { id, createdByUserId: principal.userId, creationEvidence: evidence, creationFingerprint: fingerprint } });
@@ -165,6 +165,7 @@ export async function linkWarehouseIdentifier(principal: Principal, input: { uni
   const namespace = identifier.namespace ?? ({ lpn: "wms", msn: "dmp", serial: "", submission: "mars" })[identifier.kind];
   return prisma.$transaction(async (tx) => {
     await assertCurrentPrincipal(tx, principal, "inventory.identify");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WAREHOUSE_IDENTITY_IMPORT_LOCK})`;
     if (!await tx.warehouseUnit.findUnique({ where: { id: unitId }, select: { id: true } })) throw new WarehouseCommandError("Physical unit not found.", 404);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`warehouse-alias:${identifier.kind}:${namespace}:${identifier.value}`}, 0))`;
     const existing = await tx.warehouseIdentifier.findFirst({ where: { unitId, kind: identifier.kind, namespace, value: identifier.value, revokedAt: null } });
@@ -181,6 +182,7 @@ export async function unlinkWarehouseIdentifier(principal: Principal, input: { i
   const reason = text(input.reason, "Correction reason", 2000);
   return prisma.$transaction(async (tx) => {
     await assertCurrentPrincipal(tx, principal, "inventory.identify");
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WAREHOUSE_IDENTITY_IMPORT_LOCK})`;
     const link = await tx.warehouseIdentifier.findUnique({ where: { id: identifierId } });
     if (!link) throw new WarehouseCommandError("Identifier link not found.", 404);
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`warehouse-alias:${link.kind}:${link.namespace}:${link.value}`}, 0))`;
@@ -222,8 +224,11 @@ export async function getWarehouseUnit(principal: Principal, input: { unitId: st
   input = commandInput(warehouseUnitInput, input);
   const unitId = text(input.unitId, "Physical unit ID", 200);
   const read = async (tx: Prisma.TransactionClient) => {
+    await assertCurrentPrincipal(tx, principal, "inventory.read");
     const unit = await tx.warehouseUnit.findUnique({ where: { id: unitId }, include: { identifiers: { orderBy: [{ createdAt: "desc" }, { id: "desc" }] }, inventoryRows: { include: { sourceRevisions: { orderBy: { revision: "desc" }, take: 20, include: { memberships: { include: { importBatch: true }, orderBy: [{ importBatch: { createdAt: "desc" } }, { id: "desc" }], take: 5 } } } } } } });
     if (!unit) throw new WarehouseCommandError("Physical unit not found.", 404);
+    const origin = await getUnitOriginInTransaction(tx, unitId);
+    const sharedIdentifiers = await tx.warehouseUnitAlias.findMany({ where: { unitId, id: { notIn: unit.identifiers.map(alias => alias.id) } }, select: { id: true, kind: true, namespace: true, value: true, revokedAt: true }, orderBy: { id: "asc" }, take: 100 });
     const rawObservations = await tx.warehousePhysicalObservation.findMany({ where: { OR: [{ unitId }, { corrections: { some: { unitId } } }] }, orderBy: [{ capturedAt: "desc" }, { id: "desc" }], take: 200, include: { corrections: { orderBy: { revision: "desc" } } } });
     const observations = rawObservations.map((item) => ({ ...observationReceipt(item), effectiveUnitId: item.corrections[0] ? item.corrections[0].unitId : item.unitId, associationCurrent: (item.corrections[0] ? item.corrections[0].unitId : item.unitId) === unitId, correctionRevision: item.corrections[0]?.revision ?? 0, corrections: item.corrections.map((correction) => ({ correctionId: correction.id, unitId: correction.unitId, reason: correction.reason, userId: correction.userId, revision: correction.revision, correctedAt: correction.createdAt.toISOString() })) }));
     const latestPhysical = await tx.$queryRaw<{ id: string; type: string; location: string | null; capturedAt: Date; receivedAt: Date }[]>`
@@ -236,7 +241,8 @@ export async function getWarehouseUnit(principal: Principal, input: { unitId: st
     const conflicting = latestPhysical.some((item) => item.type !== last?.type || item.location !== last?.location);
     const oldestShown = rawObservations.at(-1);
     return {
-      unitId, createdAt: unit.createdAt.toISOString(), identityEvidence: unit.creationEvidence,
+      unitId, createdAt: unit.createdAt.toISOString(), identityEvidence: origin?.creationEvidence ?? null,
+      sharedIdentifiers: sharedIdentifiers.map(alias => ({ identifierId: alias.id, kind: alias.kind, namespace: alias.namespace, value: alias.value, revokedAt: alias.revokedAt?.toISOString() ?? null })),
       identifiers: unit.identifiers.map((link) => ({ identifierId: link.id, kind: link.kind, namespace: link.namespace, value: link.value, evidence: link.evidence, createdByUserId: link.createdByUserId, linkedAt: link.createdAt.toISOString(), revokedAt: link.revokedAt?.toISOString() ?? null, revokedByUserId: link.revokedByUserId, revocationReason: link.revocationReason })),
       reportedRows: unit.inventoryRows.map((row) => ({ inventoryRecordId: row.id, lpn: row.lpn, reportedStatus: row.status, orderNumber: row.orderNumber, description: row.description, revision: row.revision, sourceData: row.sourceData, archivedAt: row.archivedAt?.toISOString() ?? null, sourceHistory: row.sourceRevisions.map((revision) => ({ sourceRevisionId: revision.id, revision: revision.revision, sourceData: revision.sourceData, recordedAt: revision.recordedAt.toISOString(), migrationSnapshot: revision.migrationSnapshot, reports: revision.memberships.map((membership) => ({ importId: membership.importId, scope: membership.importBatch.scope, coverage: membership.importBatch.coverage, importedAt: membership.importBatch.createdAt.toISOString(), sourceAsOf: membership.importBatch.sourceAsOf?.toISOString() ?? null })) })) })),
       observations,

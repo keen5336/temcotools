@@ -78,13 +78,13 @@ async function summaries(tx: Prisma.TransactionClient, ids: string[], asOf: Date
 
 async function contexts(tx: Prisma.TransactionClient, ids: string[], asOf: Date, needle: string) {
   return tx.$queryRaw<Context[]>`
-    SELECT u.id AS "unitId",left(u."creationEvidence",500) AS "identityEvidence",
-      (SELECT count(*) FROM "WarehouseIdentifier" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf})::bigint AS "aliasCount",
-      (SELECT count(*) FROM "WarehouseIdentifier" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf} AND a."revokedAt"<=${asOf})::bigint AS "historicalAliasCount",
-      EXISTS(SELECT 1 FROM "WarehouseIdentifier" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf} AND a."revokedAt"<=${asOf} AND a.value ILIKE ${needle}) AS "historicalAliasMatch",
+    SELECT u.id AS "unitId",(SELECT left(origin."creationEvidence",500) FROM "WarehouseUnitOrigin" origin WHERE origin."unitId"=u.id) AS "identityEvidence",
+      (SELECT count(*) FROM "WarehouseUnitAlias" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf})::bigint AS "aliasCount",
+      (SELECT count(*) FROM "WarehouseUnitAlias" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf} AND a."revokedAt"<=${asOf})::bigint AS "historicalAliasCount",
+      EXISTS(SELECT 1 FROM "WarehouseUnitAlias" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf} AND a."revokedAt"<=${asOf} AND a.value ILIKE ${needle}) AS "historicalAliasMatch",
       coalesce((SELECT jsonb_agg(a.row) FROM (
         SELECT jsonb_build_object('identifierId',a.id,'kind',a.kind,'namespace',a.namespace,'value',left(a.value,500),'revokedAt',CASE WHEN a."revokedAt"<=${asOf} THEN to_char(a."revokedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') END,'textTruncated',length(a.value)>500) AS row
-        FROM "WarehouseIdentifier" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf}
+        FROM "WarehouseUnitAlias" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf}
         ORDER BY (a."revokedAt" IS NULL OR a."revokedAt">${asOf}) DESC,a."createdAt" DESC,a.id DESC LIMIT 5
       )a),'[]'::jsonb) AS aliases,
       (SELECT count(*) FROM "InventoryAuditItem" i WHERE i."unitId"=u.id)::bigint AS "sourceRowCount",
@@ -107,8 +107,8 @@ async function readPage(principal: Principal, input: Filters): Promise<PhysicalS
   return readSnapshot(async tx => {
     await assertCurrentPrincipal(tx, principal, "inventory.read");
     const candidates = await tx.$queryRaw<{ id: string }[]>`SELECT u.id FROM "WarehouseUnit" u WHERE u."createdAt"<=${asOf} AND (${input.cursor ?? null}::text IS NULL OR u.id>${input.cursor ?? null})
-      AND (${input.search}='' OR u.id ILIKE ${needle} OR u."creationEvidence" ILIKE ${needle}
-        OR EXISTS(SELECT 1 FROM "WarehouseIdentifier" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf} AND a.value ILIKE ${needle})
+      AND (${input.search}='' OR u.id ILIKE ${needle} OR EXISTS(SELECT 1 FROM "WarehouseUnitOrigin" origin WHERE origin."unitId"=u.id AND origin."creationEvidence" ILIKE ${needle})
+        OR EXISTS(SELECT 1 FROM "WarehouseUnitAlias" a WHERE a."unitId"=u.id AND a."createdAt"<=${asOf} AND a.value ILIKE ${needle})
         OR EXISTS(SELECT 1 FROM "InventoryAuditItem" i WHERE i."unitId"=u.id AND (i.lpn ILIKE ${needle} OR i."orderNumber" ILIKE ${needle} OR i.description ILIKE ${needle})))
       ORDER BY u.id LIMIT ${input.scanLimit+1}`;
     const window = candidates.slice(0,input.scanLimit), ids = window.map(unit => unit.id);

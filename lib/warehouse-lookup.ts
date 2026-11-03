@@ -151,7 +151,7 @@ async function databaseRepository(): Promise<WarehouseLookupRepository> {
       let identifierResolution: WarehouseLookupSnapshot["identifierResolution"];
       let resolvedUnitId: string | null = null;
       if (input.kind === "lpn") {
-        const aliases = await tx.warehouseIdentifier.findMany({ where: { kind: "lpn", namespace: "wms", value: input.value, revokedAt: null }, select: { unitId: true }, take: 101 });
+        const aliases = await tx.warehouseUnitAlias.findMany({ where: { kind: "lpn", namespace: "wms", value: input.value, revokedAt: null }, select: { unitId: true }, take: 101 });
         const unitIds = [...new Set(aliases.map((alias) => alias.unitId))];
         identifierResolution = unitIds.length === 0 ? "unresolved" : unitIds.length > 1 || aliases.length > 100 ? "ambiguous" : "resolved";
         resolvedUnitId = identifierResolution === "resolved" ? unitIds[0] : null;

@@ -4,7 +4,7 @@ import { pilotCapabilityAllowed } from "../../scripts/pilot-policy.mjs";
 export type UserRole = "admin" | "manager" | "user";
 
 export const CAPABILITIES = [
-  "inventory.read", "inventory.write", "inventory.identify", "workflow.read", "workflow.execute",
+  "inventory.read", "inventory.write", "inventory.identify", "inventory.custody", "workflow.read", "workflow.execute",
   "labels.read", "labels.print", "labels.manage", "users.manage",
   "files.manage", "payloads.manage", "diagnostics.use",
   "office.decide", "office.authorize_rtv",

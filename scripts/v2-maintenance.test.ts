@@ -51,7 +51,7 @@ test("cutover enrollment, conservative backfill and recovery on the dedicated sy
     return { ...principal, sessionId: session.id, strongAuthenticatedAt: session.lastStrongAuthenticatedAt.getTime(), mfaVerifiedAt: session.mfaVerifiedAt?.getTime() };
   }
   async function seedRow(suffix: string, unitId?: string) {
-    const row = await prisma.inventoryAuditItem.create({ data: { id: `${prefix}-${suffix}`, lpn: `${prefix}-${suffix}`, unitId, status: "Stored", orderNumber: "SYNTHETIC-ORDER", vendor: "Synthetic vendor", receivedDate: "2026-10-01", description: "Synthetic appliance", customerName: "Synthetic recipient", sourceData: { synthetic: suffix }, contentHash: `synthetic-${suffix}` } });
+    const row = await prisma.inventoryAuditItem.create({ data: { siteId: "warehouse-initial", id: `${prefix}-${suffix}`, lpn: `${prefix}-${suffix}`, unitId, status: "Stored", orderNumber: "SYNTHETIC-ORDER", vendor: "Synthetic vendor", receivedDate: "2026-10-01", description: "Synthetic appliance", customerName: "Synthetic recipient", sourceData: { synthetic: suffix }, contentHash: `synthetic-${suffix}` } });
     inventoryIds.push(row.id); return row;
   }
   try {
@@ -104,14 +104,14 @@ test("cutover enrollment, conservative backfill and recovery on the dedicated sy
 
     await suite.test("backfill resumes safely, preserves corrections/scans and refuses immutable conflicts", async () => {
       const missing = await seedRow("MISSING"); unitIds.push(`wms-unit:${missing.id}`);
-      const existingUnit = await prisma.warehouseUnit.create({ data: {} }); unitIds.push(existingUnit.id);
+      const existingUnit = await prisma.warehouseUnit.create({ data: { siteId: "warehouse-initial" } }); unitIds.push(existingUnit.id);
       const linked = await seedRow("LINKED", existingUnit.id);
       const revoked = await seedRow("REVOKED", existingUnit.id);
       const disputed = await seedRow("DISPUTED", existingUnit.id);
-      const otherUnit = await prisma.warehouseUnit.create({ data: {} }); unitIds.push(otherUnit.id);
-      const revokedAlias = await prisma.warehouseIdentifier.create({ data: { unitId: existingUnit.id, kind: "lpn", namespace: "wms", value: revoked.lpn, rawValue: revoked.lpn, evidence: "Synthetic correction", revokedAt: new Date(), revocationReason: "Synthetic owner correction" } });
-      await prisma.warehouseIdentifier.create({ data: { unitId: otherUnit.id, kind: "lpn", namespace: "wms", value: disputed.lpn, rawValue: disputed.lpn, evidence: "Synthetic conflict" } });
-      await prisma.inventoryAuditScan.create({ data: { sourceScanId: prefix, pickWaveId: prefix, pickWaveName: "Synthetic retained wave", scannedValue: missing.lpn, lpn: missing.lpn, matchedPickWave: false, duplicateInWave: false, scannedAt: new Date("2026-10-30T10:00:00Z") } });
+      const otherUnit = await prisma.warehouseUnit.create({ data: { siteId: "warehouse-initial" } }); unitIds.push(otherUnit.id);
+      const revokedAlias = await prisma.warehouseIdentifier.create({ data: { siteId: "warehouse-initial", unitId: existingUnit.id, kind: "lpn", namespace: "wms", value: revoked.lpn, rawValue: revoked.lpn, evidence: "Synthetic correction", revokedAt: new Date(), revocationReason: "Synthetic owner correction" } });
+      await prisma.warehouseIdentifier.create({ data: { siteId: "warehouse-initial", unitId: otherUnit.id, kind: "lpn", namespace: "wms", value: disputed.lpn, rawValue: disputed.lpn, evidence: "Synthetic conflict" } });
+      await prisma.inventoryAuditScan.create({ data: { siteId: "warehouse-initial", sourceScanId: prefix, pickWaveId: prefix, pickWaveName: "Synthetic retained wave", scannedValue: missing.lpn, lpn: missing.lpn, matchedPickWave: false, duplicateInWave: false, scannedAt: new Date("2026-10-30T10:00:00Z") } });
       const beforeScans = await prisma.inventoryAuditScan.count(), beforeObservations = await prisma.warehousePhysicalObservation.count(), beforeMemberships = await prisma.inventoryImportMembership.count();
       const dry = await backfillV2Inventory(prisma, { apply: false }); assert.equal(dry.before.missingUnits, 1);
       assert.equal((await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { id: missing.id } })).unitId, null);
@@ -133,6 +133,7 @@ test("cutover enrollment, conservative backfill and recovery on the dedicated sy
 
     await suite.test("launch inspection preserves MARS custody and distinguishes a handoff from an unknown result", async () => {
       const intent = await prisma.marsSubmissionIntent.create({ data: {
+        siteId: "warehouse-initial",
         unitId: unitIds[0], authorizedByUserId: adminId, preparedByUserId: adminId,
         authorizationExpiresAt: new Date(Date.now() + 60_000), evidence: "Synthetic local handoff; no upstream request made",
       } });
@@ -158,7 +159,7 @@ test("cutover enrollment, conservative backfill and recovery on the dedicated sy
       const base = { username, create: false, enrollExisting: false, recoverEnrolledAdmin: true, apply: false };
       assert.equal((await bootstrapV2Administrator(prisma, base)).mode, "dry-run");
       assert.ok((await prisma.userMfa.findUniqueOrThrow({ where: { userId: adminId } })).enabledAt);
-      const grant = await prisma.appAccessGrant.create({ data: { tokenHash: `${prefix}-hash`, userId: adminId, sessionId: claim.sessionId, authVersion: old.authVersion, clientName: "Synthetic recovery client", scopes: ["inventory.read"], expiresAt: new Date(Date.now() + 60_000) } });
+      const grant = await prisma.appAccessGrant.create({ data: { siteId: "warehouse-initial", tokenHash: `${prefix}-hash`, userId: adminId, sessionId: claim.sessionId, authVersion: old.authVersion, clientName: "Synthetic recovery client", scopes: ["inventory.read"], expiresAt: new Date(Date.now() + 60_000) } });
       const deliveryFile = join(privateDir, "emergency-recovery");
       await bootstrapV2Administrator(prisma, { ...base, apply: true, reason, deliveryFile });
       assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: adminId } })).passwordHash, null);

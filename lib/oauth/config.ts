@@ -18,7 +18,7 @@ export function oauthConfig(input: { issuerUrl?: string; resourceUrl?: string; a
   return { issuerUrl, resourceUrl, appUrl };
 }
 
-export const PRIVILEGED_OAUTH_SCOPES: readonly Capability[] = ["users.manage", "payloads.manage", "labels.manage", "files.manage", "diagnostics.use", "inventory.identify", "office.decide", "office.authorize_rtv", "dispatch.allocate", "dispatch.signoff", "account.self"];
+export const PRIVILEGED_OAUTH_SCOPES: readonly Capability[] = ["users.manage", "payloads.manage", "labels.manage", "files.manage", "diagnostics.use", "inventory.identify", "inventory.custody", "office.decide", "office.authorize_rtv", "dispatch.allocate", "dispatch.signoff", "account.self"];
 export function isPrivilegedOAuthScope(scopes: readonly string[]) { return scopes.some((scope) => PRIVILEGED_OAUTH_SCOPES.includes(scope as Capability)); }
 export function knownOAuthScopes(scopes: readonly string[]): scopes is Capability[] {
   return scopes.length > 0 && scopes.length <= CAPABILITIES.length && scopes.every((scope) => CAPABILITIES.includes(scope as Capability)) && new Set(scopes).size === scopes.length;

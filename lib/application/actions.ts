@@ -22,6 +22,7 @@ import { listOAuthGrants, revokeOAuthGrant } from "@/lib/oauth/service";
 import { getToolFavorites, saveToolFavorites } from "@/lib/tool-favorites-store";
 import { parseFavoriteChange, favoriteChangeInput } from "@/lib/tool-favorites";
 import { labelActions } from "./label-actions";
+import { custodyActions } from "./custody-actions";
 import { adminActions } from "./admin-actions";
 import { pickActions } from "./pick-actions";
 import { inventoryActions } from "./inventory-actions";
@@ -117,6 +118,7 @@ export const applicationActions = {
   "sites.membership.save": { capability: "sites.members.manage", description: "Manage local membership within current delegation without changing global identity", inputSchema: warehouses.saveMembershipInput, run: warehouses.saveMembership },
   "sites.role.save": { capability: "sites.members.manage", description: "Create or update a delegated local role; platform templates stay protected", inputSchema: warehouses.saveSiteRoleInput, run: warehouses.saveSiteRole },
   ...labelActions,
+  ...custodyActions,
   ...adminActions,
   ...pickActions,
   ...inventoryActions,

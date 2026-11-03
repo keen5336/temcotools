@@ -66,14 +66,14 @@ test("Inventory Audit keeps historical inventory and reconciles complete, repeat
     await t.test("first import links prior scans and retains unmatched evidence", async () => {
       const result = await importRows([row("A1"), row("C3", { Status: "Stored" }), row("A1")]);
       assert.equal(result.insertedCount, 2); assert.equal(result.duplicateCount, 1);
-      const a = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: "A1" } });
+      const a = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: "A1" } });
       assert.ok(a.verifiedAt); assert.ok(a.lastScannedAt); assert.equal(a.lastScanWaveName, wave.name);
       const unknown = await getInventoryAudit(parseAuditFilters(new URLSearchParams({ view: "unmatched" })));
       assert.equal(unknown.total, 2); assert.ok(unknown.scans.some((scan) => scan.lpn === null));
     });
     let oldA: Awaited<ReturnType<typeof prisma.inventoryAuditItem.findUniqueOrThrow>>;
     await t.test("unchanged imports leave every inventory field and archive state untouched; missing rows are retained", async () => {
-      const a = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: "A1" } });
+      const a = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: "A1" } });
       await archiveAuditItems([a.id], true);
       oldA = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { id: a.id } });
       const result = await importRows([row("a1")]);
@@ -84,22 +84,22 @@ test("Inventory Audit keeps historical inventory and reconciles complete, repeat
     await t.test("any source column change restores an archived row and requires fresh scan evidence", async () => {
       const result = await importRows([row("A1", { Location: "B7" })]);
       assert.equal(result.changedCount, 1);
-      const a = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: "A1" } });
+      const a = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: "A1" } });
       assert.equal(a.archivedAt, null); assert.equal(a.verifiedAt, null); assert.equal(a.revision, 2);
       assert.equal(a.firstSeenAt.getTime(), oldA.firstSeenAt.getTime());
       assert.equal(a.lastScannedAt?.getTime(), oldA.lastScannedAt?.getTime());
       assert.equal((await exportPickWaveToAudit(wave.id)).newScanCount, 0);
-      assert.equal((await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: "A1" } })).verifiedAt, null);
+      assert.equal((await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: "A1" } })).verifiedAt, null);
       await prisma.pickWaveScan.create({ data: { pickWaveId: wave.id, itemId: item.id, scannedValue: "SERIAL-A", matched: true, createdAt: oldA.firstSeenAt } });
       await exportPickWaveToAudit(wave.id);
-      assert.equal((await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: "A1" } })).verifiedAt, null, "Old scans do not verify changed inventory.");
+      assert.equal((await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: "A1" } })).verifiedAt, null, "Old scans do not verify changed inventory.");
       await prisma.pickWaveScan.create({ data: { pickWaveId: wave.id, itemId: item.id, scannedValue: "SERIAL-A", matched: true, createdAt: new Date(a.sourceChangedAt.getTime() + 1) } });
       assert.equal((await exportPickWaveToAudit(wave.id)).newScanCount, 1);
-      assert.ok((await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: "A1" } })).verifiedAt);
+      assert.ok((await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: "A1" } })).verifiedAt);
     });
     await t.test("late reports match earlier unknown LPNs, and deleting the source wave preserves scan evidence", async () => {
       await importRows([row("B2")]);
-      assert.ok((await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: "B2" } })).verifiedAt);
+      assert.ok((await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: "B2" } })).verifiedAt);
       assert.equal((await getInventoryAudit(parseAuditFilters(new URLSearchParams({ view: "unmatched" })))).total, 1);
       await prisma.pickWave.delete({ where: { id: wave.id } });
       assert.equal(await prisma.inventoryAuditScan.count(), 32);

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, AuthorizationError, CAPABILITIES, type Capability, type Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
+import { assertUnitOperationalCustodyInTransaction } from "@/lib/warehouse/custody";
 import { currentPrintingDevice, hashDeviceToken, printingDeviceAuthorityInput } from "./devices";
 import { fingerprint, LabelError, renderLabelVersion, matchesApprovedLegacyTemplate } from "./model";
 import { dispatchDay } from "@/lib/dispatch/model";
@@ -65,6 +66,7 @@ export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionCl
     if (data.reprintOf) throw new LabelError("Use the explicit original-snapshot reprint action with its receipt and reason.", 409);
     let contextBinding: { unitId: string; dispatchDay?: string; wmsScope: string; observationId?: string; pickWaveItemId?: string } | undefined;
     if (data.unitId && !await tx.warehouseUnit.findUnique({ where: { id: data.unitId }, select: { id: true } })) throw new LabelError("Choose an identified warehouse unit.", 404);
+    if (data.unitId) await assertUnitOperationalCustodyInTransaction(tx, current, data.unitId);
     let zpl: string, contentFingerprint: string, workflowVersionId: string | undefined, ruleId: string | null = null;
     if (data.purpose === "legacy_manual") {
       if (data.automatic || !data.legacyZpl) throw new LabelError("Legacy labels require an explicit manual content snapshot.");
@@ -136,6 +138,7 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
       await event(tx, cancelled, principal.userId, "authorization_ended_before_dispatch", "Requester/session/client permission ended before the device received a print claim.", device.id);
       return { dispatch: false, issuance: receipt(cancelled) };
     }
+    if (row.unitId) await assertUnitOperationalCustodyInTransaction(tx, requester, row.unitId);
     if (row.workflowVersionId) {
       await tx.$queryRaw`SELECT purpose FROM "LabelWorkflow" WHERE purpose=${row.purpose} FOR SHARE`;
       const workflow = await tx.labelWorkflow.findFirst({ where: { purpose: row.purpose }, select: { enabled: true, publishedVersionId: true } });
@@ -265,6 +268,7 @@ export async function reprintLabelIssuance(principal: Principal, input: unknown)
     if (existing) { if (existing.inputFingerprint !== inputFingerprint) throw new LabelError("This operation ID belongs to a different label intent.", 409); return { created: false, issuance: receipt(existing) }; }
     const original = await lockIssuance(tx, data.issuanceId);
     canRead(current, original);
+    if (original.unitId) await assertUnitOperationalCustodyInTransaction(tx, current, original.unitId);
     const printerId = data.printerId ?? original.printerId;
     const printer = await tx.labelPrinter.findUnique({ where: { id: printerId }, select: { isActive: true } });
     if (!printer?.isActive) throw new LabelError("Choose an active managed printer.", 409);

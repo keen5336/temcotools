@@ -22,7 +22,7 @@ export function assertUnitContextScopes(principal: Principal) { assertCapability
 export async function deriveUnitLabelContext(tx: Prisma.TransactionClient, raw: unknown, now = new Date()) {
   const input = unitLabelContextInput.parse(raw), day = input.dispatchDay ?? businessDay(now), issues: ContextIssue[] = [], evidence: FieldEvidence[] = [], fields: LabelFields = { unitId: input.unitId, identityResolved: "true", today: businessDay(now) };
   const unit = await tx.warehouseUnit.findUnique({ where: { id: input.unitId }, include: {
-    identifiers: { where: { revokedAt: null }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] },
+    sharedAliases: { where: { revokedAt: null }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] },
     inventoryRows: { select: { id: true, lpn: true, status: true, vendor: true, orderNumber: true, receivedDate: true, description: true, sourceChangedAt: true, archivedAt: true } },
     officeSchedules: { orderBy: [{ sourceAsOf: "desc" }, { recordedAt: "desc" }, { id: "desc" }], take: 101 },
     officeDispositions: { include: { executions: true }, orderBy: { createdAt: "desc" } },
@@ -50,8 +50,8 @@ export async function deriveUnitLabelContext(tx: Prisma.TransactionClient, raw: 
     if (unique.length === 1) put(field, unique[0], source, nonempty.map(item => item.id), sourceAsOf, recordedAt, qualification);
     else if (unique.length > 1) issues.push({ code: `conflicting_${field}`, detail: `Several stored ${field} values apply to this unit; no arbitrary value was selected.`, blocksAutomatic: true });
   }
-  const allAliases = unit.identifiers.length ? await tx.warehouseIdentifier.findMany({ where: { revokedAt: null, value: { in: [...new Set(unit.identifiers.map(alias => alias.value))] } }, select: { unitId: true, kind: true, namespace: true, value: true } }) : [];
-  const safeAliases = unit.identifiers.filter(alias => {
+  const allAliases = unit.sharedAliases.length ? await tx.warehouseUnitAlias.findMany({ where: { revokedAt: null, value: { in: [...new Set(unit.sharedAliases.map(alias => alias.value))] } }, select: { unitId: true, kind: true, namespace: true, value: true } }) : [];
+  const safeAliases = unit.sharedAliases.filter(alias => {
     const linked = allAliases.filter(other => other.value === alias.value && other.kind === alias.kind && other.namespace === alias.namespace);
     const unique = new Set(linked.map(other => other.unitId)).size === 1;
     if (!unique) issues.push({ code: "ambiguous_identifier_link", detail: `${alias.kind} ${alias.value} is linked to more than one physical unit in its namespace.`, blocksAutomatic: true });

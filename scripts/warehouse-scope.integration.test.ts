@@ -97,7 +97,7 @@ test("warehouse isolation is enforced for retained ORM/raw SQL paths and current
       const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
       const base = await resolvePrincipal({ userId: user.id, sessionId: session.id, authVersion: 1, issuedAt: session.createdAt.getTime(), expiresAt: expiry.getTime() }, id => owner.user.findUnique({ where: { id }, select: CURRENT_USER_SELECT }), Date.now(), sites[0].id); assert.ok(base);
       const p = { ...base, sessionId: session.id, strongAuthenticatedAt: now.getTime(), mfaVerifiedAt: now.getTime() };
-      const grant = await withPrincipalSite(p, () => createAccessGrant(p, { clientName: "Synthetic expanded SDK", scopes: ["workflow.read", "account.self"], lifetimeMinutes: 5 }));
+      const grant = await withPrincipalSite(p, () => createAccessGrant(p, { clientName: "Synthetic expanded SDK", scopes: ["workflow.read", "inventory.read", "account.self"], lifetimeMinutes: 5 }));
       const client = new Client({ name: "synthetic-expanded-sdk", version: "1" }), server = createApplicationMcpServer(() => authenticateAccessGrant(grant.token));
       const [a,b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]);
       const read = (v: unknown) => JSON.parse((v as { content: { text: string }[] }).content[0].text);
@@ -111,6 +111,8 @@ test("warehouse isolation is enforced for retained ORM/raw SQL paths and current
         const started = await client.callTool({ name: "application_action", arguments: { action: "workflows.start", input: { operationId: randomUUID(), template: "synthetic_receiving" } } }); assert.equal(started.isError, undefined);
         const run = read(started).run; assert.equal(run.siteId, sites[0].id);
         const looked = await client.callTool({ name: "application_action", arguments: { action: "workflows.run", input: { runId: run.id } } }); assert.equal(read(looked).run.id, run.id);
+        const custody = await client.callTool({ name: "application_action", arguments: { action: "custody.unit", input: { unitId: units[0].id } } }); assert.equal(custody.isError, undefined); assert.equal(read(custody).unit.id, units[0].id); assert.equal(read(custody).participation.siteId, sites[0].id);
+        const forbiddenCustody = await client.callTool({ name: "application_action", arguments: { action: "custody.propose", input: { operationId: randomUUID(), unitId: units[0].id, destinationSiteId: sites[1].id, aliasIds: ["not-an-authorized-alias"], handoff: {}, note: "Scoped client cannot authorize custody" } } }); assert.equal(forbiddenCustody.isError, true);
         const denied = await client.callTool({ name: "application_action", arguments: { action: "sites.create", input: { operationId: randomUUID(), slug: "sdk-denied", name: "Denied" } } }); assert.equal(denied.isError, true);
       } finally { await client.close(); await server.close(); }
     });

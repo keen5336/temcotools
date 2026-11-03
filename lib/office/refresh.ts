@@ -28,7 +28,7 @@ async function sourceWatermark(tx: Prisma.TransactionClient): Promise<Watermark>
     (SELECT COUNT(*)::text || ':' || COALESCE(MAX("recordedAt")::text,'') FROM "OfficeScheduleFact") AS schedule,
     (SELECT COUNT(*)::text || ':' || COALESCE(MAX("receivedAt")::text,'') FROM "WarehousePhysicalObservation") AS physical,
     (SELECT COUNT(*)::text || ':' || COALESCE(MAX("createdAt")::text,'') FROM "WarehouseObservationCorrection") AS corrections,
-    (SELECT COUNT(*)::text || ':' || COUNT("revokedAt")::text || ':' || COALESCE(MAX(GREATEST("createdAt",COALESCE("revokedAt","createdAt")))::text,'') FROM "WarehouseIdentifier") AS identifiers,
+    (SELECT COUNT(*)::text || ':' || COUNT("revokedAt")::text || ':' || COALESCE(MAX(GREATEST("createdAt",COALESCE("revokedAt","createdAt")))::text,'') FROM "WarehouseUnitAlias") AS identifiers,
     (SELECT COUNT(*)::text || ':' || COALESCE(MAX("executedAt")::text,'') FROM "OfficeDispositionExecution") AS executions,
     (SELECT COUNT(*)::text || ':' || COUNT("revokedAt")::text || ':' || COALESCE(MAX(GREATEST("createdAt",COALESCE("triggeredAt","createdAt"),COALESCE("revokedAt","createdAt")))::text,'') FROM "OfficeDisposition") AS disposition,
     (SELECT COUNT(*)::text || ':' || COALESCE(MAX("recordedAt")::text,'') FROM "OfficeExchangeAttempt") AS attempts,

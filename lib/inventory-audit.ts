@@ -2,12 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { InventoryAuditValidationError, normalizeLpn, prepareLpnReport, type LpnSourceRow } from "@/lib/lpn-report";
-import { retainCurrentSourceRevisions, retainImportedInventory } from "@/lib/warehouse/source-history";
+import { retainCurrentSourceRevisions, retainImportedInventory, WAREHOUSE_IDENTITY_IMPORT_LOCK } from "@/lib/warehouse/source-history";
 import type { Principal } from "@/lib/auth/principal";
 import { assertCurrentPrincipal } from "@/lib/auth/identity";
 
 export { InventoryAuditValidationError };
-const WRITE_LOCK = 8100801;
+const WRITE_LOCK = WAREHOUSE_IDENTITY_IMPORT_LOCK;
 const CHUNK_SIZE = 1000;
 export const AUDIT_PAGE_SIZE = 100;
 export type AuditFilters = { archive: "active" | "archived" | "all"; verification: "all" | "scanned" | "pending"; search: string; page: number; view: "inventory" | "unmatched" };
@@ -74,7 +74,7 @@ export async function importInventoryReport(options: { rows: LpnSourceRow[]; fil
         LEFT JOIN LATERAL (
           SELECT "scannedAt", "pickWaveName" FROM "InventoryAuditScan" WHERE lpn = r.lpn ORDER BY "scannedAt" DESC, id DESC LIMIT 1
         ) s ON true
-        ON CONFLICT (lpn) DO UPDATE SET
+        ON CONFLICT ("siteId",lpn) DO UPDATE SET
           status = EXCLUDED.status, "orderNumber" = EXCLUDED."orderNumber", vendor = EXCLUDED.vendor,
           "receivedDate" = EXCLUDED."receivedDate", description = EXCLUDED.description, "customerName" = EXCLUDED."customerName",
           "sourceData" = EXCLUDED."sourceData", "contentHash" = EXCLUDED."contentHash", "sourceChangedAt" = EXCLUDED."sourceChangedAt",
@@ -88,10 +88,13 @@ export async function importInventoryReport(options: { rows: LpnSourceRow[]; fil
       duplicateCount: parsed.duplicateCount, blankCount: parsed.blankCount,
       scope, coverage, sourceAsOf, uploadedByUserId: options.uploadedByUserId ?? null,
     } });
+    let identityUnresolvedCount = 0;
     for (let offset = 0; offset < records.length; offset += CHUNK_SIZE) {
-      await retainImportedInventory(tx, records.slice(offset, offset + CHUNK_SIZE).map((item) => item.lpn), batch.id, options.uploadedByUserId);
+      const lpns = records.slice(offset, offset + CHUNK_SIZE).map((item) => item.lpn);
+      await retainImportedInventory(tx, lpns, batch.id, options.uploadedByUserId);
+      identityUnresolvedCount += await tx.inventoryAuditItem.count({ where: { lpn: { in: lpns }, unitId: null } });
     }
-    return batch;
+    return { ...batch, identityUnresolvedCount };
   }, { timeout: 120_000, maxWait: 120_000 });
 }
 

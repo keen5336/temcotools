@@ -5,6 +5,8 @@ import { type Principal } from "@/lib/auth/principal";
 import { assertCurrentRtvAuthorization } from "@/lib/office/service";
 import { deriveCustody, type PhysicalFact } from "@/lib/office/domain";
 import { commandMars, marsEvidence, marsId, marsOperation, MarsWorkflowError, queryMars } from "./service";
+import { WAREHOUSE_IDENTITY_IMPORT_LOCK } from "@/lib/warehouse/source-history";
+import { assertUnitOperationalCustodyInTransaction } from "@/lib/warehouse/custody";
 
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 const actionInput = z.object({ operationId: marsOperation, intentId: marsId, expectedRevision: z.number().int().min(1), evidence: marsEvidence }).strict();
@@ -35,6 +37,7 @@ async function currentIntentAuthority(tx: Prisma.TransactionClient, intent: Mars
   return physicalAndHandling(tx, intent.unitId);
 }
 async function linkIdentity(tx: Prisma.TransactionClient, principal: Principal, input: { unitId: string; requestNumber: string; evidence: string; intent?: MarsSubmissionIntent; authorizationId?: string }) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WAREHOUSE_IDENTITY_IMPORT_LOCK})`;
   const value = input.requestNumber.trim().replace(/\s+/g, "").toUpperCase();
   if (!value || value.length > 200) throw new MarsWorkflowError("Use the actual submission number observed in the supported MARS workflow.");
   if (!principal.capabilities.includes("inventory.identify")) {
@@ -43,9 +46,9 @@ async function linkIdentity(tx: Prisma.TransactionClient, principal: Principal, 
     else throw new MarsWorkflowError("Identity-review permission or a current exact-unit office authorization is required to link a submission.", 403);
   } else await assertCurrentPrincipal(tx, principal, "inventory.identify");
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`mars-submission:${value}`},0))`;
-  const aliases = await tx.warehouseIdentifier.findMany({ where: { kind: "submission", namespace: "mars", value, revokedAt: null } });
+  const aliases = await tx.warehouseUnitAlias.findMany({ where: { kind: "submission", namespace: "mars", value, revokedAt: null } });
   if (aliases.some(alias => alias.unitId !== input.unitId)) throw new MarsWorkflowError("That submission is already linked to another physical unit. Resolve the identity conflict without merging original/replacement appliances.", 409);
-  const revoked = await tx.warehouseIdentifier.findFirst({ where: { unitId: input.unitId, kind: "submission", namespace: "mars", value, revokedAt: { not: null } } });
+  const revoked = await tx.warehouseUnitAlias.findFirst({ where: { unitId: input.unitId, kind: "submission", namespace: "mars", value, revokedAt: { not: null } } });
   if (revoked && !aliases.length) throw new MarsWorkflowError("This exact submission link was revoked. Use the explicit identity-review correction flow; a retry must not resurrect it.", 409);
   let submission = await tx.marsUnit.findFirst({ where: { requestNumber: { equals: value, mode: "insensitive" } } });
   // Imported serial text is reported context. Its namespace/cardinality is not
@@ -63,6 +66,7 @@ export async function listMarsSubmissionIntents(principal: Principal, raw: unkno
 export async function prepareMarsSubmissionIntent(principal: Principal, raw: unknown) {
   const input = marsSubmissionInputs.prepareMarsSubmissionIntent.parse(raw);
   return commandMars(principal, input.operationId, "intent.prepare", input, async tx => {
+    await assertUnitOperationalCustodyInTransaction(tx, principal, input.unitId);
     let authorizedByUserId: string, authorizationExpiresAt: Date;
     if (input.authorizationId) {
       const disposition = await assertCurrentRtvAuthorization(tx, input.unitId, input.authorizationId);
@@ -75,7 +79,7 @@ export async function prepareMarsSubmissionIntent(principal: Principal, raw: unk
     }
     const existing = await tx.marsSubmissionIntent.findFirst({ where: { unitId: input.unitId, state: { in: ["prepared","in_progress","unknown"] } } });
     if (existing) return { intent: existing, existing: true, next: "Review this existing intent. Unknown or in-progress work cannot be started again; reconcile its original outcome." };
-    if (await tx.warehouseIdentifier.findFirst({ where: { unitId: input.unitId, kind: "submission", revokedAt: null } })) throw new MarsWorkflowError("This unit already has a submission identity. Reconcile its existing submission/history before preparing another.", 409);
+    if (await tx.warehouseUnitAlias.findFirst({ where: { unitId: input.unitId, kind: "submission", revokedAt: null } })) throw new MarsWorkflowError("This unit already has a submission identity. Reconcile its existing submission/history before preparing another.", 409);
     const intent = await tx.marsSubmissionIntent.create({ data: { unitId: input.unitId, authorizationId: input.authorizationId, authorizedByUserId, authorizationExpiresAt, preparedByUserId: principal.userId, evidence: input.evidence } });
     await event(tx, intent, principal, "prepared", input.evidence, { authority: input.authorizationId ? "prior_exact_unit_office_disposition" : "current_office_authorization_capability", authorizationExpiresAt });
     return { intent, existing: false, upstreamSubmitted: false, next: "Review the exact unit and current instructions, then record a human workflow handoff. The app has not submitted anything to MARS." };
@@ -86,8 +90,9 @@ export async function startMarsSubmissionIntent(principal: Principal, raw: unkno
   return commandMars(principal, input.operationId, "intent.start", input, async tx => {
     const current = await lockIntent(tx, input.intentId, input.expectedRevision);
     if (current.state !== "prepared") throw new MarsWorkflowError("Only an unstarted prepared intent may be handed off. Reconcile in-progress or unknown results; do not replay them.", 409);
+    await assertUnitOperationalCustodyInTransaction(tx, principal, current.unitId);
     await currentIntentAuthority(tx, current);
-    if (await tx.warehouseIdentifier.findFirst({ where: { unitId: current.unitId, kind: "submission", revokedAt: null } })) throw new MarsWorkflowError("A submission was linked since preparation. Review it before creating another.", 409);
+    if (await tx.warehouseUnitAlias.findFirst({ where: { unitId: current.unitId, kind: "submission", revokedAt: null } })) throw new MarsWorkflowError("A submission was linked since preparation. Review it before creating another.", 409);
     const intent = await tx.marsSubmissionIntent.update({ where: { id: current.id }, data: { state: "in_progress", startedAt: new Date(), revision: { increment: 1 } } });
     await event(tx, intent, principal, "human_workflow_handoff_recorded", input.evidence);
     return { intent, upstreamSubmitted: false, automaticReplayAllowed: false, next: "Use the supported signed-in MARS workflow manually. Record its observed submission number here. If the result is uncertain, mark this existing intent unknown; do not create another.", creationAdapter: "unqualified_no_endpoint_configured" };
@@ -121,7 +126,7 @@ export async function linkMarsSubmission(principal: Principal, raw: unknown) {
 export async function getMarsLabelHandoff(principal: Principal, raw: unknown) {
   const input = marsSubmissionInputs.getMarsLabelHandoff.parse(raw);
   return queryMars(principal, async tx => {
-    const links = await tx.warehouseIdentifier.findMany({ where: { unitId: input.unitId, kind: "submission", revokedAt: null } });
+    const links = await tx.warehouseUnitAlias.findMany({ where: { unitId: input.unitId, kind: "submission", revokedAt: null } });
     if (links.length !== 1 || links[0].namespace !== "mars" || links[0].value !== input.requestNumber.trim().toUpperCase()) throw new MarsWorkflowError("The unit needs one current unambiguous submission link before label handoff. Review changed/historical submissions explicitly.", 409);
     const submission = await tx.marsUnit.findFirst({ where: { requestNumber: { equals: links[0].value, mode: "insensitive" } }, select: { requestNumber: true } });
     if (!submission) throw new MarsWorkflowError("The submission identity is not present in retained MARS records.", 409);

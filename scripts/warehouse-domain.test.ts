@@ -29,8 +29,8 @@ test("shared warehouse keeps source, identity and physical evidence separate in 
   try {
     await t.test("same-order appliances get different stable units; repeated WMS imports preserve legacy row state", async () => {
       await accept([row(a), row(b)], "2026-10-30T06:00:00Z");
-      const firstA = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: a.toUpperCase() } });
-      const firstB = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: b.toUpperCase() } });
+      const firstA = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: a.toUpperCase() } });
+      const firstB = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: b.toUpperCase() } });
       unitA = firstA.unitId!; unitB = firstB.unitId!; unitIds.add(unitA); unitIds.add(unitB);
       assert.notEqual(unitA, unitB);
       await prisma.inventoryAuditItem.update({ where: { id: firstA.id }, data: { archivedAt: now, verifiedAt: now } });
@@ -48,7 +48,7 @@ test("shared warehouse keeps source, identity and physical evidence separate in 
     await t.test("changed revisions retain full source rows; partial absence stays unknown and complete absence is report membership only", async () => {
       await accept([row(b, { Location: "CHANGED" })], "2026-10-30T06:10:00Z", "partial");
       assert.equal((await getWarehouseImportMembership(principal, { lpn: a, scope: prefix })).membership, "unknown");
-      const bRow = await prisma.inventoryAuditItem.findUniqueOrThrow({ where: { lpn: b.toUpperCase() } });
+      const bRow = await prisma.inventoryAuditItem.findFirstOrThrow({ where: { lpn: b.toUpperCase() } });
       assert.equal(bRow.revision, 2);
       const revisions = await prisma.inventorySourceRevision.findMany({ where: { inventoryItemId: bRow.id }, orderBy: { revision: "asc" } });
       assert.equal(revisions.length, 2);
@@ -56,7 +56,7 @@ test("shared warehouse keeps source, identity and physical evidence separate in 
       assert.equal((revisions[1].sourceData as Record<string, string>).location, "CHANGED");
       await accept([row(b, { Location: "CHANGED" })], "2026-10-30T06:15:00Z");
       assert.equal((await getWarehouseImportMembership(principal, { lpn: a, scope: prefix })).membership, "not_in_complete_report");
-      assert.ok(await prisma.inventoryAuditItem.findUnique({ where: { lpn: a.toUpperCase() } }));
+      assert.ok(await prisma.inventoryAuditItem.findFirst({ where: { lpn: a.toUpperCase() } }));
       const unit = await getWarehouseUnit(principal, { unitId: unitA });
       assert.equal(unit.physicalState.basis, "no_physical_observation");
       assert.equal(unit.physicalState.lastType, null);

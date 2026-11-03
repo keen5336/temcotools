@@ -29,6 +29,9 @@ test("integrated mobile warehouse context, platform-only scanner, local workers 
   await owner.workflowDefinitionRecord.create({ data: { id: definitionId, siteId: sites[0].id, name: definition.name, draft: definition, createdByUserId: users[0].id, updatedByUserId: users[0].id } });
   await owner.workflowDefinitionVersion.create({ data: { id: versionId, siteId: sites[0].id, definitionId, version: 1, definition, contentHash: createHash("sha256").update(stableWorkflowJson(definition)).digest("hex"), createdByUserId: users[0].id } });
   await owner.workflowDefinitionRecord.update({ where: { id: definitionId }, data: { publishedVersionId: versionId } });
+  const custodyUnitId = `synthetic-mobile-custody:${ns}`, custodyLpn = `SYNTHETIC-MOBILE-LPN-${ns}`.toUpperCase();
+  await owner.warehouseUnit.create({ data: { id: custodyUnitId, siteId: sites[0].id, creationEvidence: "SYNTHETIC-SOURCE-PRIVATE-ORIGIN" } });
+  await owner.warehouseIdentifier.create({ data: { siteId: sites[0].id, unitId: custodyUnitId, kind: "lpn", namespace: "wms", value: custodyLpn, rawValue: custodyLpn, evidence: "Synthetic source-private alias evidence" } });
   const reserve = createServer(); reserve.listen(0,"127.0.0.1"); await once(reserve,"listening"); const address = reserve.address(); assert.ok(address && typeof address !== "string"); const port = address.port; await new Promise<void>(r => reserve.close(() => r()));
   const origin = `http://127.0.0.1:${port}`, secret = randomBytes(32).toString("hex");
   const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", String(port)], { env: { ...process.env, DATABASE_URL: url!, NODE_ENV: "production", SESSION_SECRET: secret, TEMCO_PILOT_MODE: "read_only_dmp", TEMCO_SESSION_COOKIE_NAME: "temco_expanded_synthetic", NEXT_PUBLIC_APP_URL: origin, API_RELAY_INTERNAL_URL: "http://127.0.0.1:1" }, stdio: ["ignore","pipe","pipe"] });
@@ -77,6 +80,33 @@ test("integrated mobile warehouse context, platform-only scanner, local workers 
       await expect.poll(async () => owner.workflowRunRecord.count({ where: { createdByUserId: users[0].id, definitionVersionId: versionId, status: "completed", siteId: sites[0].id } })).toBe(1);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+1), false);
       assert.equal(await owner.integrationOperation.count({ where: { actorUserId: users[0].id } }), 0);
+    });
+    await t.test("mobile exact-unit handoff is accepted at its destination without claiming movement", async () => {
+      await signIn(0); await page.goto(`${origin}/tools/custody?unitId=${encodeURIComponent(custodyUnitId)}`);
+      await expect(page.getByRole("heading", { name: "Warehouse custody", exact: true })).toBeVisible();
+      await expect.poll(async () => page.locator("main").last().innerText()).toContain(custodyUnitId);
+      await page.getByLabel("Destination warehouse", { exact: true }).selectOption(sites[1].id);
+      await page.locator('main input[type="checkbox"]').check();
+      await page.getByLabel("Approved description", { exact: true }).fill("Synthetic approved appliance summary");
+      await page.getByLabel("Proposal audit note", { exact: true }).fill("Synthetic source approval");
+      await page.getByRole("button", { name: "Propose exact-unit transfer", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Transfer · proposed", exact: true })).toBeVisible();
+      await page.getByRole("combobox", { name: "Warehouse", exact: true }).selectOption(sites[1].id);
+      await expect(page).toHaveURL(origin+"/");
+      await expect(page.getByRole("complementary", { name: "Current warehouse" })).toContainText(sites[1].name);
+      await page.goto(`${origin}/tools/custody`);
+      await page.getByRole("button").filter({ hasText: `proposed · ${custodyUnitId}` }).click();
+      await page.getByLabel("Decision audit note", { exact: true }).fill("Synthetic receiving warehouse acceptance");
+      await page.getByRole("button", { name: "Accept at destination", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Transfer · accepted", exact: true })).toBeVisible();
+      const participation = await owner.warehouseUnitSite.findUniqueOrThrow({ where: { siteId_unitId: { siteId: sites[1].id, unitId: custodyUnitId } } });
+      assert.equal(participation.phase, "expected"); assert.equal(participation.holdsCustody, false);
+      assert.equal(await owner.warehousePhysicalObservation.count({ where: { unitId: custodyUnitId } }), 0);
+      assert.equal(await owner.marsSubmissionIntent.count({ where: { unitId: custodyUnitId } }), 0);
+      await page.goto(`${origin}/tools/custody?unitId=${encodeURIComponent(custodyUnitId)}`);
+      await expect(page.locator("main").last()).toContainText("Warehouse participation: expected");
+      await expect(page.locator("main").last()).not.toContainText("SYNTHETIC-SOURCE-PRIVATE-ORIGIN");
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+1), false);
     });
     await t.test("guarded full application serves local same-frame Tesseract and Paddle inference", async () => {
       await page.goto(`${origin}/tools/scan-lab`); await expect(page.getByRole("heading",{name:/TemcoScan/})).toBeVisible();
@@ -150,6 +180,8 @@ else{const users=await db.user.findMany({where:{username:{startsWith:prefix}},se
 async function verifyManagementUi(page: Page, origin: string) {
   await page.goto(origin+"/management/connections"); await expect(page.getByRole("heading",{name:"Approved provider activation and named operations",exact:true})).toBeVisible();
   await page.goto(origin+"/management/templates"); await expect(page.getByRole("heading",{name:"Platform defaults and warehouse overrides",exact:true})).toBeVisible();
+  await page.goto(origin+"/tools/custody"); await expect(page.getByRole("heading",{name:"Warehouse custody",exact:true})).toBeVisible();
+  await expect(page.getByText("No transfers involve this warehouse.",{exact:true})).toBeVisible(); await expect(page.getByText("No unlinked source rows in this warehouse.",{exact:true})).toBeVisible();
   await page.goto(origin+"/admin/payloads"); const load=page.getByRole("button",{name:"Load generic approved-provider executor",exact:true}); await expect(load).toBeEnabled(); await load.click();
   await expect(page.getByLabel("Payload source",{exact:true})).toHaveValue(/createBrowserProviderExecutor/); await expect(page.getByLabel("Payload source",{exact:true})).toHaveValue(/startGenericProvider/);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);

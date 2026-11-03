@@ -243,3 +243,5 @@ These are future cutover decisions; no tool is removed by this planning change.
 | Existing read-only MCP | Replace transport/auth boundary, reuse domain queries | Full UI/MCP parity with current permissions; retire direct database authority. |
 
 Implementation is complete only when the [finite acceptance scenarios](implementation-plan.md#acceptance-scenarios) demonstrate these connected workflows on the intended devices and the legacy transition has preserved evidence. Planning completion does not qualify live upstream mutations, printing hardware, deployment or human acceptance.
+
+Nov3 implementation continuation: [controlled warehouse custody](unit-custody.md) preserves one stable unit identity with site participation, explicitly approved aliases/handoff fields and private source-site histories. The shared UI/MCP lifecycle separates destination acceptance from independent departure/check-in evidence. Current40 migration/restore, native pin and meaningful limitations are tracked in [build status](build-status.md); physical pilot transitions/live operational effects remain restricted.
