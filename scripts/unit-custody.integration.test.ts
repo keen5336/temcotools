@@ -211,5 +211,25 @@ test("controlled custody preserves one identity, private histories and independe
     const ambiguousLabel = await as(b, () => prisma.$transaction(tx => deriveUnitLabelContext(tx, { unitId: recordA.unitId! })));
     assert.equal(ambiguousLabel.fields.lpn, undefined); assert.ok(ambiguousLabel.issues.some(issue => issue.code === "ambiguous_identifier_link"));
   });
+  await t.test("MARS identity writers wait for the import gate before locking a physical unit", async () => {
+    const item = await fixture("mars-gate-order"), submissions = await import("../lib/mars/submissions");
+    let linking!: Promise<Awaited<ReturnType<typeof submissions.linkMarsSubmission>>>;
+    await owner.$transaction(async tx => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(8100801)`;
+      linking = as(a, () => submissions.linkMarsSubmission(a, { operationId: op(), unitId: item.unit.id, requestNumber: `SYNTHETIC-MARS-${ns}`, evidence: "Synthetic human-observed identity only; no upstream call" }));
+      let waiting = false;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const [state] = await owner.$queryRaw<{ waiting: boolean }[]>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND wait_event='advisory' AND query LIKE '%pg_advisory_xact_lock%') AS waiting`;
+        if (state.waiting) { waiting = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.equal(waiting, true, "The native identity writer reached the held import gate");
+      await tx.$executeRawUnsafe("SET LOCAL lock_timeout='500ms'");
+      // The old row→gate order deadlocks a gate holder needing the native FK
+      // KEY SHARE lock; gate→row permits this real concurrent DB operation.
+      await tx.$queryRaw`SELECT id FROM "WarehouseUnit" WHERE id=${item.unit.id} FOR KEY SHARE`;
+    }, { timeout: 10_000 });
+    assert.equal((await linking).unitId, item.unit.id);
+  });
   await owner.$disconnect(); await prisma.$disconnect();
 });

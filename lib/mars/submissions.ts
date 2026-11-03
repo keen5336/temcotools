@@ -109,6 +109,7 @@ export async function cancelMarsSubmissionIntent(principal: Principal, raw: unkn
 export async function reconcileMarsSubmissionIntent(principal: Principal, raw: unknown) {
   const input = marsSubmissionInputs.reconcileMarsSubmissionIntent.parse(raw);
   return commandMars(principal, input.operationId, "intent.reconcile", input, async tx => {
+    if (input.outcome !== "verified_not_submitted") await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WAREHOUSE_IDENTITY_IMPORT_LOCK})`;
     const current = await lockIntent(tx, input.intentId, input.expectedRevision);
     if (!["in_progress","unknown","prepared"].includes(current.state)) throw new MarsWorkflowError("This intent is already resolved; retain its prior receipt.", 409);
     if (input.outcome === "verified_not_submitted") { await assertCurrentPrincipal(tx, principal, "office.authorize_rtv", true); await event(tx, current, principal, "verified_not_submitted", input.evidence); const intent = await tx.marsSubmissionIntent.update({ where: { id: current.id }, data: { state: "verified_not_submitted", revision: { increment: 1 } } }); return { intent, automaticReplayAllowed: false, next: "No retry was performed. A new explicitly authorized intent may be prepared only after this verified reconciliation." }; }
@@ -121,7 +122,7 @@ export async function reconcileMarsSubmissionIntent(principal: Principal, raw: u
 }
 export async function linkMarsSubmission(principal: Principal, raw: unknown) {
   const input = marsSubmissionInputs.linkMarsSubmission.parse(raw);
-  return commandMars(principal, input.operationId, "submission.link", input, async tx => { await tx.$queryRaw`SELECT id FROM "WarehouseUnit" WHERE id=${input.unitId} FOR UPDATE`; if (!await tx.warehouseUnit.findUnique({ where: { id: input.unitId }, select: { id: true } })) throw new MarsWorkflowError("Exact physical unit not found.", 404); return linkIdentity(tx, principal, input); });
+  return commandMars(principal, input.operationId, "submission.link", input, async tx => { await tx.$executeRaw`SELECT pg_advisory_xact_lock(${WAREHOUSE_IDENTITY_IMPORT_LOCK})`; await tx.$queryRaw`SELECT id FROM "WarehouseUnit" WHERE id=${input.unitId} FOR UPDATE`; if (!await tx.warehouseUnit.findUnique({ where: { id: input.unitId }, select: { id: true } })) throw new MarsWorkflowError("Exact physical unit not found.", 404); return linkIdentity(tx, principal, input); });
 }
 export async function getMarsLabelHandoff(principal: Principal, raw: unknown) {
   const input = marsSubmissionInputs.getMarsLabelHandoff.parse(raw);
