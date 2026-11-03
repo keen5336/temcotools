@@ -174,6 +174,15 @@ async function viewRun(tx: Prisma.TransactionClient, p: Principal, runId: string
   if (run.id !== record.id || run.siteId !== siteOf(p) || run.definitionVersionId !== record.definitionVersionId) throw new WorkflowError("The retained run identity/version is inconsistent.", "workflow_state_invalid", 409);
   const version = await tx.workflowDefinitionVersion.findFirst({ where: { id: record.definitionVersionId, siteId: siteOf(p) } });
   if (!version || hash(version.definition) !== version.contentHash || stableWorkflowJson(run.definition) !== stableWorkflowJson(version.definition)) throw new WorkflowError("The retained immutable workflow version changed.", "workflow_version_invalid", 409);
+  // A started READ can leave private output in later mappings, data, commands,
+  // events or old intent receipts. Deny the full view rather than redacting only
+  // its current output. Future/unstarted steps and write permissions do not
+  // become additional requirements for inspecting an independent saved run.
+  for (const item of run.definition.steps) {
+    if (item.kind === "action" && item.action.effect === "read" && run.steps[item.id]?.attempt > 0 && !(p.capabilities as readonly string[]).includes(item.action.capability)) {
+      throw new AuthorizationError(`Current ${item.action.capability} capability/client scope is required to read this run's retained READ data.`);
+    }
+  }
   await tx.$queryRaw`SELECT id FROM "WorkflowDefinitionRecord" WHERE id=${version.definitionId} AND "siteId"=${siteOf(p)} FOR SHARE`;
   const definition = await tx.workflowDefinitionRecord.findFirst({ where: { id: version.definitionId, siteId: siteOf(p) }, select: { enabled: true } });
   const receiving = record.receivingState as unknown as SyntheticReceivingState | null;

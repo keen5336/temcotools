@@ -47,6 +47,23 @@ test("application workflows reuse real scoped warehouse services without externa
       assert.equal(output.candidates[0].reportedRows.length, 1); assert.equal(await owner.warehousePhysicalObservation.count({ where: { siteId: sites[0].id } }), 0);
       await assert.rejects(as(other, () => service.getWorkflowRun(other, { runId: view.run.id })), /not found/);
     });
+    await t.test("retained native lookup requires current read permission without requiring a future write", async () => {
+      const view = await captured(msn);
+      await owner.warehouseRole.update({ where: { id: roles[0].id }, data: { capabilities: capabilities.filter(cap => cap !== "inventory.write") } });
+      try {
+        const readable = await as(p, () => service.getWorkflowRun(p, { runId: view.run.id }));
+        assert.equal(readable.run.currentStepId, "confirmPresence");
+        assert.equal((readable.run.steps.lookup.output as { unitId: string }).unitId, units[0].id);
+        await owner.warehouseRole.update({ where: { id: roles[0].id }, data: { capabilities: capabilities.filter(cap => cap !== "inventory.read") } });
+        // workflows.manage is still present. It is not authority for retained inventory data.
+        await assert.rejects(as(p, () => service.getWorkflowRun(p, { runId: view.run.id })), /inventory.read.*scope/);
+        const metadata = await as(p, () => service.listWorkflowRuns(p, {}));
+        assert.ok(metadata.runs.some(row => row.id === view.run.id));
+        assert.equal(JSON.stringify(metadata).includes(msn), false);
+      } finally { await owner.warehouseRole.update({ where: { id: roles[0].id }, data: { capabilities } }); }
+      const retained = await as(p, () => service.getWorkflowRun(p, { runId: view.run.id }));
+      assert.equal((retained.run.steps.lookup.output as { unitId: string }).unitId, units[0].id);
+    });
     await t.test("explicit confirmation commits one real native observation and retries keep its original receipt", async () => {
       const view = await captured(lpn), before = await owner.warehousePhysicalObservation.count({ where: { siteId: sites[0].id } }), input = commandInput(view, { kind: "confirm", accepted: true, note: "Synthetic physical observation confirmed", method: "human" });
       const done = await as(p, () => service.commandWorkflow(p, input)); assert.equal(done.run.status, "completed");

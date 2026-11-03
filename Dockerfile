@@ -29,6 +29,7 @@ WORKDIR /app
 COPY . .
 COPY --from=scan-assets /app/public/scan-lab/vendor ./public/scan-lab/vendor
 
+RUN chmod -R a+rX lib scripts prisma app components public prisma.config.ts tsconfig.json
 RUN npx prisma generate
 RUN npm run build
 
@@ -43,6 +44,7 @@ LABEL org.opencontainers.image.source="https://github.com/keen5336/temcotools" \
       com.temcotools.production-eligible="true"
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
+RUN chmod -R a+rX prisma prisma.config.ts
 USER node
 CMD ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
 
@@ -81,6 +83,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/node_modules/ws ./node_modules/ws
 
+RUN chmod -R a+rX scripts lib prisma prisma.config.ts
 USER nextjs:nodejs
 
 EXPOSE 3000

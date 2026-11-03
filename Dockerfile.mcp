@@ -13,6 +13,9 @@ COPY app/tools/rtv-label/marsLabelShared.ts ./app/tools/rtv-label/marsLabelShare
 COPY components/pick-waves/pickWaveLabel.ts ./components/pick-waves/pickWaveLabel.ts
 COPY prisma.config.ts tsconfig.json ./
 
+# A restrictive checkout umask must not make source unreadable by UID1001.
+# These are repository sources/configuration, never mounted private runtime data.
+RUN chmod -R a+rX lib scripts prisma app components prisma.config.ts tsconfig.json
 RUN npx prisma generate
 
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 --ingroup nodejs nextjs
