@@ -118,6 +118,12 @@ export async function recordWarehouseObservation(principal: Principal, input: Ob
   return prisma.$transaction((tx) => persistPhysicalObservation(tx, principal, input, "inventory.write"));
 }
 
+// Trusted workflow writers reuse the native observation validation and current
+// inventory authority inside the same transaction as the originating run step.
+export async function recordWarehouseObservationInTransaction(tx: Prisma.TransactionClient, principal: Principal, input: ObservationInput) {
+  return persistPhysicalObservation(tx, principal, input, "inventory.write");
+}
+
 // Trusted task commands can commit their own physical confirmation and task
 // result together. API/MCP callers cannot select an authorization capability.
 export async function recordWorkflowObservation(tx: Prisma.TransactionClient, principal: Principal, input: ObservationInput) {

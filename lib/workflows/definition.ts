@@ -104,14 +104,14 @@ const baseStep = { id: workflowKey, title: z.string().min(1).max(160), descripti
 export const workflowStep = z.discriminatedUnion("kind", [
   z.object({ ...baseStep, kind: z.literal("form"), fields: z.array(workflowField).min(1).max(32), saveAs: workflowKey }).strict(),
   z.object({ ...baseStep, kind: z.literal("scan"), expected: workflowValue, keyField: workflowKey, valueField: workflowKey, quantityField: workflowKey.default("quantity"), identityMode: z.enum(["unit", "quantity"]).default("unit"), maxCaptures: z.number().int().min(1).max(1000).default(500), bufferWhenProviderBlocked: z.boolean().default(false), discrepancyCapability: workflowId.default("workflows.manage") }).strict(),
-  z.object({ ...baseStep, kind: z.literal("confirm"), prompt: z.string().min(1).max(1000), saveAs: workflowKey, handoff: z.enum(["human", "camera", "device", "approval"]).default("human") }).strict(),
+  z.object({ ...baseStep, kind: z.literal("confirm"), prompt: z.string().min(1).max(1000), saveAs: workflowKey, handoff: z.enum(["human", "camera", "device", "approval"]).default("human"), manualFallback: z.boolean().optional() }).strict(),
   z.object({ ...baseStep, kind: z.literal("condition"), condition: workflowCondition, then: workflowKey, otherwise: workflowKey }).strict(),
   z.object({ ...baseStep, kind: z.literal("action"), action: z.object({ id: workflowId, versionId: workflowId, configurationVersion: workflowId, capability: workflowId, effect: z.enum(["read", "write", "print", "local"]), providerBinding: workflowKey.optional() }).strict(), parameters: z.record(workflowKey, workflowValue).default({}), retryKnownFailure: z.boolean().default(false) }).strict(),
 ]);
 export type WorkflowStep = z.infer<typeof workflowStep>;
 export const workflowDefinition = z.object({
   id: workflowId, versionId: workflowId, version: z.number().int().min(1).max(1_000_000), configurationVersion: workflowId,
-  name: z.string().min(1).max(160), description: z.string().max(3000).default(""), mode: z.enum(["synthetic", "live"]),
+  name: z.string().min(1).max(160), description: z.string().max(3000).default(""), mode: z.enum(["synthetic", "application", "live"]),
   startRequirements: z.array(workflowRequirement).max(16).default([]), steps: z.array(workflowStep).min(1).max(40), completion: workflowCondition.optional(),
 }).strict();
 export type WorkflowDefinition = z.infer<typeof workflowDefinition>;

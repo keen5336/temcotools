@@ -15,7 +15,7 @@ export type WorkflowProviderSnapshot = ProviderBinding & {
 };
 export type WorkflowActionSnapshot = {
   id: string; versionId: string; configurationVersion: string; siteId: string; effect: EffectKind;
-  enabled: boolean; permitted: boolean; ready: boolean; qualification: "synthetic" | "qualified" | "unqualified"; reason?: string; fix?: string;
+  enabled: boolean; permitted: boolean; ready: boolean; qualification: "synthetic" | "application" | "qualified" | "unqualified"; reason?: string; fix?: string;
 };
 export type WorkflowRuntime = {
   siteId: string; actorUserId: string; capabilities: readonly string[]; runPermitted: boolean; configurationVersion: string; now: string;
@@ -32,7 +32,7 @@ export type WorkflowCapture = {
 export type WorkflowActionResult = { outcome: "succeeded" | "failed" | "unknown" | "handoff"; output?: JsonValue; receiptId: string; noEffectConfirmed?: boolean; reason?: string };
 export type WorkflowEffectIntent = {
   id: string; runId: string; siteId: string; stepId: string; attempt: number; definitionVersionId: string; configurationVersion: string;
-  actionId: string; actionVersionId: string; actionConfigurationVersion: string; effect: EffectKind; mode: "synthetic" | "live";
+  actionId: string; actionVersionId: string; actionConfigurationVersion: string; effect: EffectKind; mode: "synthetic" | "application" | "live";
   actorUserId: string; provider?: ProviderBinding; parameters: Record<string, JsonValue>; createdAt: string;
 };
 export type WorkflowStepState = { status: WorkflowStepStatus; attempt: number; output?: JsonValue; captures?: WorkflowCapture[]; intent?: WorkflowEffectIntent; result?: WorkflowActionResult; completedAt?: string };
@@ -48,7 +48,7 @@ export type WorkflowCommand =
   | { kind: "scan"; eventId: string; rawValue: string; quantity?: number; selectedKey?: string; source?: WorkflowCapture["source"]; capturedAt?: string }
   | { kind: "resolve_capture"; eventId: string; reason: string }
   | { kind: "finish_scan" }
-  | { kind: "confirm"; accepted: boolean; note?: string }
+  | { kind: "confirm"; accepted: boolean; note?: string; method?: "human" | "manual" }
   | { kind: "refresh" } | { kind: "pause"; reason: string } | { kind: "resume" }
   | { kind: "action_result"; intentId: string; result: WorkflowActionResult }
   | { kind: "reconcile"; intentId: string; result: WorkflowActionResult; reason: string }
@@ -84,8 +84,9 @@ function providerReadiness(run: WorkflowRun, runtime: WorkflowRuntime, bindingKe
 function actionReadiness(run: WorkflowRun, runtime: WorkflowRuntime, actionId: string, versionId: string, configurationVersion: string) {
   const action = runtime.actions.find(value => value.id === actionId && value.versionId === versionId && value.configurationVersion === configurationVersion && value.siteId === run.siteId);
   if (!action) return { ready: false, reason: "The pinned action/configuration version is unavailable.", fix: "Resolve the retained published version; do not substitute a newer action." };
-  if (!action.enabled || !action.permitted) return { ready: false, reason: "The action is disabled or current authority does not allow it.", fix: "Restore permitted site-scoped access or pause this run." };
-  if ((run.definition.mode === "synthetic" && action.qualification !== "synthetic") || (run.definition.mode === "live" && action.qualification !== "qualified")) return { ready: false, reason: run.definition.mode === "synthetic" ? "A synthetic run cannot dispatch a live action." : "The live upstream contract is unqualified.", fix: run.definition.mode === "synthetic" ? "Use the synthetic action adapter only." : "Qualify the exact identity/action/site contract and obtain live-trial authority." };
+  if (!action.enabled || !action.permitted) return { ready: false, reason: action.reason || "The action is disabled or current authority does not allow it.", fix: action.fix || "Restore permitted site-scoped access or pause this run." };
+  const expectedQualification = run.definition.mode === "synthetic" ? "synthetic" : run.definition.mode === "application" ? "application" : "qualified";
+  if (action.qualification !== expectedQualification) return { ready: false, reason: run.definition.mode === "synthetic" ? "A synthetic run cannot dispatch a live action." : run.definition.mode === "application" ? "This is not a registered internal application action for this run mode." : "The live upstream contract is unqualified.", fix: run.definition.mode === "synthetic" ? "Use the synthetic action adapter only." : run.definition.mode === "application" ? "Select an exact supported internal action version; external effects remain unavailable." : "Qualify the exact identity/action/site contract and obtain live-trial authority." };
   return { ready: action.ready, reason: action.ready ? "Pinned action is ready." : action.reason || "Action prerequisites are not ready.", fix: action.ready ? "" : action.fix || "Resolve the action's readiness issue." };
 }
 function requirementItem(run: WorkflowRun, runtime: WorkflowRuntime, requirement: WorkflowRequirement, phase: "start" | "step"): WorkflowReadinessItem {
@@ -105,6 +106,7 @@ export function workflowReadiness(run: WorkflowRun, runtime: WorkflowRuntime): W
   const step = run.currentStepId ? run.definition.steps.find(value => value.id === run.currentStepId) : undefined;
   const items = step?.requirements.map(req => requirementItem(run, runtime, req, "step")) ?? [];
   if (!runtime.runPermitted) items.unshift({ id: "run-authority", phase: "step", kind: "run", status: "red", label: "Current warehouse/run authority", reason: "The current actor cannot execute this run.", fix: "Restore current membership, scope and run authority; a saved role is insufficient." });
+  if (step?.kind === "confirm" && ["camera", "device"].includes(step.handoff)) items.push({ id: "device-handoff", phase: "step", kind: "provider", status: step.manualFallback ? "yellow" : "red", label: "Actual device handoff", reason: "This workflow has no qualified camera/device capture adapter. No device result has been fabricated.", fix: step.manualFallback ? "Use the explicitly permitted manual fallback and record its actual method." : "A qualified device adapter is required, or publish a new definition permitting a manual fallback. Active definitions remain pinned." });
   if (step?.kind === "action") {
     const ready = actionReadiness(run, runtime, step.action.id, step.action.versionId, step.action.configurationVersion);
     const action = runtime.actions.find(value => value.id === step.action.id && value.versionId === step.action.versionId && value.configurationVersion === step.action.configurationVersion && value.siteId === run.siteId);
@@ -301,7 +303,9 @@ export function advanceWorkflowRun(previous: WorkflowRun, input: WorkflowCommand
       } else if (command.kind === "confirm" && step.kind === "confirm") {
         if (command.note && command.note.length > 1000) throw new WorkflowError("Confirmation note is too long.");
         if (typeof command.accepted !== "boolean") throw new WorkflowError("Explicit confirmation is required.");
-        if (command.accepted) { run.data[step.saveAs] = true; complete(run, step, runtime, { confirmed: true, actorUserId: runtime.actorUserId, at: runtime.now, note: command.note ?? "", handoff: step.handoff }); }
+        const deviceHandoff = ["camera", "device"].includes(step.handoff);
+        if (deviceHandoff && (!step.manualFallback || command.method !== "manual")) throw new WorkflowError("Complete an actual authorized device handoff or explicitly use this definition's manual fallback; a boolean is not device evidence.", "workflow_device_handoff", 409);
+        if (command.accepted) { run.data[step.saveAs] = true; complete(run, step, runtime, { confirmed: true, actorUserId: runtime.actorUserId, at: runtime.now, note: command.note ?? "", handoff: step.handoff, method: command.method ?? "human", deviceVerified: false }); }
         else addEvent(run, runtime, "confirmation_declined", command.note);
       } else throw new WorkflowError("This command does not apply to the active step.", "workflow_command_wrong_step", 409);
     }
