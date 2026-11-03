@@ -1,5 +1,7 @@
 # TemcoScan Lab implementation handoff — November 3, 2026
 
+Coordinator status: the historical specialist integration hooks below are completed on `v2`: real platform guard/route/nav/shared MCP handoff, full-app/deployed both-engine checks and same-origin assets. Current native pin and physical-device limits are in [build status](build-status.md). Do not recreate a stub guard or restart the delivered scanner assignment.
+
 The bounded package is a functional client-only scanning experiment. It makes no WMS/API writes, imports no application actions/auth/Prisma modules, and requires no new server endpoint. The immutable [owner handoff](temcoscan-owner-handoff.md) is preserved separately.
 
 ## Coordinator integration
