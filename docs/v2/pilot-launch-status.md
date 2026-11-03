@@ -1,6 +1,6 @@
 # Parallel pilot launch and first-account handoff
 
-**Live isolated pilot:** https://temco-v2.chronchive.com/ · **MCP:** https://temco-v2.chronchive.com/mcp. Current application/image source is `d2614520cb1f72e0515ce2b05a018dab5ac3921e`; later documentation commits do not change that runtime. Native expanded release, public scoped SDK and actual public both-engine scanner inference passed; earlier48c release records below are historical. Adam completed password activation; his client consent and privileged MFA remain human steps; full v2/upstream/device acceptance is not complete.
+**Live isolated pilot:** https://temco-v2.chronchive.com/ · **MCP:** https://temco-v2.chronchive.com/mcp. Current application/image source is `8e845dc063563f504e0759b9aee1315acab26e7f`; later documentation commits do not change that runtime. Native expanded release, public scoped SDK and actual public both-engine scanner inference passed; earlier48c release records below are historical. Adam completed password activation; his client consent and privileged MFA remain human steps; full v2/upstream/device acceptance is not complete.
 
 ## Authority and actual routing
 
@@ -12,9 +12,28 @@ The exact new Caddy vhost now routes UI/human consent to loopback43100, MCP/OAut
 
 Root-private proxy/TLS backup: `/root/temcotools-v2-pilot-backup-20261101/caddy-before.tar`, with original configuration, maintenance fragment and validation/reload logs. Parent Caddyfile SHA256 remains `0f15706104853b5cc0f4707c7d3b694f25605ee930a471238760d5e930a154f4`: original bytes plus only the new explicit import. The initial Nov1 admitted fragment SHA256 was `5d82512a4a074c1fe4ce04770b6beedd775113d87e40a91009b9d00893cad8a1`. The Nov3 exact second browser-relay path changes only this pilot fragment to `585fde6508e66eaa75db7e7a98534635304806f5821d2db9f0b6f412f4544b9d`; parent/production configuration is unchanged. The prior fragment is private at `artifacts/d261452/proxy-before.caddy`. Full configuration validation and graceful reload passed; no established production3002/3003 upstream streams were present immediately before it.
 
-## Nov3 provider/template release — current native runtime
+## Current workflow-provider READ release —8e
 
-**Live image/source `d2614520cb1f72e0515ce2b05a018dab5ac3921e`**, deployed November3 at21:49–21:50 UTC. This includes native printer queues, real internal workflow actions, the durable generic provider lifecycle and platform/site templates. Earlier2ae/7d releases remain distinct history;7d fixed timezone hydration and first passed actual public both-engine inference.
+**Native source `8e845dc063563f504e0759b9aee1315acab26e7f`**, deployed Nov3 at22:32UTC. Workflow intents now execute approved provider READs with committed original run/step/provider/grant/version pins. Full retained run reads require the current capabilities of attempted READ actions, including data copied into later steps. No upstream mutation/printing is enabled.
+
+| Service | Container prefix | Native amd64 image ID |
+| --- | --- | --- |
+| App | `dd4950bf5301` | `sha256:11c9d315383e54855e6ac163e12ff0189a66a24cf32638b5f9a9289f531cca21` |
+| DMP/generic relay | `1ae136767db2` | `sha256:15ee254eec2b8c03b1522432e408799d36cf2d84cee89e0b3b1702b698b6ba0c` |
+| MCP HTTP | `b7fb96a56bbd` | Same full MCP image above |
+| Migrator candidate, schema unchanged | Not invoked | `sha256:a86ced3c092df686ef674b0e51f6c83e775851cce83f1f4f0f8ef61a860b7f83` |
+
+Original pilot DB `b872082621ef`, all38 migrations, dedicated files/keys/cookie/audiences/ports, both proxy files and production source/containers are preserved. Preflight confirms75 forced operational tables and no blockers. Owner identity/factors/recovery/sessions/grants private fingerprint still matches. No owner factor, enrollment or live operation was exercised.
+
+Native build `20261103-163109-build-9205`, exact clean source/image/resource guard+rollout `163220-build-9595`; broker health200/MCP unauthenticated401 and all three running services passed. The first295 candidate's restrictive checkout umask yielded unreadable0600 source in the MCP image; admission failed before public synthetic setup and d261 was restored. Repository-only image permissions now normalize read access for UID1001. This is not a runtime-files/secrets permission widening. Failed diagnostics remain private; no schema/proxy rollback was necessary.
+
+Actual public Chrome390px/Auckland **5/5 PASS** `163506-build-10155`: temporary synthetic platform admin, anonymous/site-admin Lab denial, current warehouse/RSC pinning and both real OCR workers on the same synthetic frame. External OCR0, errors0, overflow0, synthetic people/sessions/sites0 after cleanup; raw misreads preserved. Native/public scoped SDK **PASS** `163545-build-10560`: actual password/TOTP/PKCE and two-read consent before MFA, scope/current-session revocation/effect denial, normal public native headers/default TLS and revoked-bearer401. Synthetic actor/client removed; others preserved. This is not Adam's MCP attachment or handheld acceptance.
+
+Private logs/images/preservation/preflight: `/srv/temcotools-v2-pilot/artifacts/8e845dc/`; exact guard `/srv/temcotools-v2-pilot/receipts/render-8e845dc/`; scoped SDK summary MacDev `Qualification/temcotools-v2-workflow-reads-8e845dc-20261103/native/native-internal-summary.json`. Source custody changes are a later working package, not part of8e.
+
+## Earlier Nov3 provider/template release — d261 runtime history
+
+**Historical image/source `d2614520cb1f72e0515ce2b05a018dab5ac3921e`**, deployed November3 at21:49–21:50 UTC. This includes native printer queues, real internal workflow actions, the durable generic provider lifecycle and platform/site templates. Earlier2ae/7d releases remain distinct history;7d fixed timezone hydration and first passed actual public both-engine inference.
 
 | Service | Container prefix | Native amd64 image ID |
 | --- | --- | --- |
@@ -37,7 +56,7 @@ Current qualification:
 - All26 native model/runtime hashes pass,117,792,876 bytes, pinned Paddle0.4.2/ORT1.24.3/Tesseract7.0.0. Models/workers stay lazy on the pilot origin; actual public inference ran. Physical Zebra/Android/iPhone/camera benchmarking remains pending.
 - Owner MFA remains unconfigured. Migrate preflight has no blockers and warns privileged MFA/recovery custody is pending. Existing password login/read-only MCP consent remain usable; protected publication/sharing requires Adam’s own current password/authenticator ceremony at `/account/security`. No agent configures that factor.
 
-Usable paths: [TemcoScan Lab](https://temco-v2.chronchive.com/tools/scan-lab), [Workflows and Receiving practice](https://temco-v2.chronchive.com/tools/workflows), [Warehouse settings](https://temco-v2.chronchive.com/management/warehouse), [Connections/actions](https://temco-v2.chronchive.com/management/connections), [Templates/defaults](https://temco-v2.chronchive.com/management/templates), [Payloads](https://temco-v2.chronchive.com/admin/payloads), [MCP setup](https://temco-v2.chronchive.com/account/access). [Provider guide](provider-connection-guide.md) explains actual activation vs configuration. No approved upstream mapping/provider is silently seeded; Route Planner/WMS/MARS qualification, official finals and device acceptance remain pending. Workflow-to-provider outbox execution and controlled unit custody remain source-independent implementation packages, not owner-evidence gates.
+Usable paths: [TemcoScan Lab](https://temco-v2.chronchive.com/tools/scan-lab), [Workflows and Receiving practice](https://temco-v2.chronchive.com/tools/workflows), [Warehouse settings](https://temco-v2.chronchive.com/management/warehouse), [Connections/actions](https://temco-v2.chronchive.com/management/connections), [Templates/defaults](https://temco-v2.chronchive.com/management/templates), [Payloads](https://temco-v2.chronchive.com/admin/payloads), [MCP setup](https://temco-v2.chronchive.com/account/access). [Provider guide](provider-connection-guide.md) explains actual activation vs configuration. No approved upstream mapping/provider is silently seeded; Route Planner/WMS/MARS qualification, official finals and device acceptance remain pending. Workflow-to-provider READ outbox execution is deployed in8e; controlled unit custody remains an independent implementation package, not owner-evidence gates.
 
 ## Previous48c native target and isolation
 
@@ -99,4 +118,4 @@ The explicit operational-target flag admits only the exact named pilot database;
 
 New pilot environment/keys, database/files and audit/unknown-effect ledgers stay private and retained. To suspend admission, validate and restore **only** the new hostname's saved maintenance fragment, then gracefully reload after checking relevant streams; production routes remain unchanged. Stop only the explicit pilot Compose project if needed. Never use `down -v`, prune, replace production resources or run an old image against a forward-migrated database. The [pilot runbook](pilot-runbook.md) and [cutover package](cutover-runbook.md) retain the concrete recovery boundaries; production cutover is not authorized.
 
-Existing Work recovery/review supervision is active, without guaranteed instant/continuous execution. The T3 queue was read back empty at this checkpoint; no new coordinator, supervisor or idle continuation was created. The Nov3 expanded build remains active: generic provider activation/durable dispatch, supported workflow building blocks, platform/site defaults and controlled custody are independent implementation packages. Missing upstream identity/receipt/close evidence and physical-device acceptance gate only their dependent live behavior. Do not manufacture mappings or stop the independent program awaiting owner MCP consent.
+Existing Work recovery/review supervision is active, without guaranteed instant/continuous execution. Exactly one adaptive ordinal12 continuation is queued; no second coordinator/supervisor/continuation was created. The Nov3 expanded build remains active: provider activation/durable READ dispatch, domain workflow actions and platform/site defaults are delivered; controlled custody/consumer qualification is active. Missing upstream identity/receipt/close evidence and physical-device acceptance gate only their dependent live behavior. Do not manufacture mappings or stop the independent program awaiting owner MCP consent.
