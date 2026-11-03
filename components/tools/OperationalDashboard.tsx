@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import LocalTime from "@/components/LocalTime";
 import OfficeRefreshClient from "@/components/office/OfficeRefreshClient";
 import { useRef, useState } from "react";
 import type { OperationalDashboard as DashboardData, WidgetId } from "@/lib/dashboard";
@@ -28,6 +29,6 @@ export default function OperationalDashboard({ initial }: { initial: DashboardDa
     {editing && data && <div className="rounded-xl border bg-base-100 p-4 space-y-3"><h2 className="font-semibold">Your authorized widgets</h2>{data.availableWidgets.map(widget => <label key={widget.id} className="flex items-center gap-3 min-h-11"><input type="checkbox" className="checkbox" checked={selection.includes(widget.id)} onChange={event => setSelection(previous => event.target.checked ? [...previous, widget.id] : previous.filter(id => id !== widget.id))} />{widget.name}</label>)}<ol className="space-y-2">{selection.map((id, index) => <li key={id} className="flex items-center justify-between gap-2"><span>{data.availableWidgets.find(widget => widget.id === id)?.name}</span><span className="flex gap-1"><button className="btn btn-sm min-h-11" aria-label={`Move ${id} earlier`} disabled={index === 0 || busy} onClick={() => move(index, -1)}>↑</button><button className="btn btn-sm min-h-11" aria-label={`Move ${id} later`} disabled={index === selection.length - 1 || busy} onClick={() => move(index, 1)}>↓</button></span></li>)}</ol><div className="flex flex-wrap gap-2"><button className="btn btn-primary" disabled={busy} onClick={() => void save()}>Save home</button><button className="btn btn-outline" disabled={busy} onClick={() => void save(true)}>Restore useful defaults</button></div></div>}
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{data?.widgets.map(widget => <article key={widget.id} className="rounded-xl bg-base-100 border border-base-300 p-4 min-w-0"><h2 className="font-semibold text-lg">{widget.title}</h2><p className="text-xl font-bold mt-2 break-words">{widget.summary}</p><ul className="space-y-2 mt-3">{widget.items?.map(item => <li key={item.id}><Link className="link inline-block py-2 break-words" href={item.href}>{item.text}</Link></li>)}</ul>{widget.lines.map((line, index) => <p key={index} className="text-sm opacity-75 mt-2 break-words">{line}</p>)}<Link className="btn btn-outline btn-sm min-h-11 mt-4" href={widget.href}>Open {widget.title.toLowerCase()}</Link></article>)}</div>
     {data && data.widgets.length === 0 && <p className="rounded-xl bg-base-100 p-4">No widgets selected. Customize home or use your tools below.</p>}
-    {data && <p className="text-xs opacity-60">Snapshot: {new Date(data.asOf).toLocaleString()}. Refresh after imports or operational changes.</p>}
+    {data && <p className="text-xs opacity-60">Snapshot: <LocalTime value={data.asOf} timeZone={data.timeZone} />. Refresh after imports or operational changes.</p>}
   </section>;
 }
