@@ -12,7 +12,34 @@ The exact new Caddy vhost now routes UI/human consent to loopback43100, MCP/OAut
 
 Root-private proxy/TLS backup: `/root/temcotools-v2-pilot-backup-20261101/caddy-before.tar`, with original configuration, maintenance fragment and validation/reload logs. Parent Caddyfile SHA256 remains `0f15706104853b5cc0f4707c7d3b694f25605ee930a471238760d5e930a154f4`: original bytes plus only the new explicit import. Admitted `/etc/caddy/sites/temco-v2.caddy` SHA256 is `5d82512a4a074c1fe4ce04770b6beedd775113d87e40a91009b9d00893cad8a1`, matching the staged reviewed fragment. Full configuration validation and graceful reload passed; no established production3002/3003 upstream streams were present immediately before it.
 
-## Native target and isolation
+## Nov3 expanded release — current native runtime
+
+**Live runtime source `2ae6cb2d39d7d685035c469f2383ef56a67df0d2`**, deployed November3 at20:25 UTC on the same isolated host/project. Documentation/tests may advance beyond this pin. Source `48c` below is the previous release, retained as history, not the current runtime.
+
+| Service | Current container prefix | Native amd64 image ID |
+| --- | --- | --- |
+| App | `7b006d77e9aa` | `sha256:c0c386486aa766142c65d42728d98a9a1bc825ffd19ae3d6982228f356055c67` |
+| Existing DMP API relay | `79a941d3d64d` | Same pinned app image |
+| MCP HTTP | `be3d8544ce6d` | `sha256:db009517e1fcf21d4776a0f6d21dce078a4e9d9cd19a176cf8e49337bd1cc8fa` |
+| Migrator, completed | One-off | `sha256:7788ac93a6fe1c942bac7b50c9bd7aaefa83065bef1dedc023e63dabbc49ff1a` |
+
+The original DB container `b872082621ef` remains at its November1 start. All34 migrations applied successfully with no pending/failed/checksum/unknown entries. Source/image/clean-v2/resource/port guard render+verify passed. Private receipts/logs: `/srv/temcotools-v2-pilot/artifacts/2ae6cb2/` and `/srv/temcotools-v2-pilot/receipts/render-2ae6cb2/`. The compose migrator consumed remaining stdin in the first launcher, leaving the pilot stopped after a successful migration; actual DB state34/0 was verified, then only the three intended pilot services were started. No schema replay or production restart occurred.
+
+Private before/after fingerprints matched Adam's identity, password/PIN envelope, MFA/factors/recovery, retained session/grant state and all pilot keys/database/origin. No new enrollment/reset/login impersonation was performed. Production container IDs/images/start times/mounts/ports and clean main `fea1f22` matched before/after; production sign-in200. Main/v1 published refs remain `fea1f22`.
+
+Current qualification:
+
+- Full local optimized2ae app and actual390px Chrome integration passed: platform-only Lab denial, cross-tab/RSC warehouse pinning, Receiving run persistence, real same-frame Tesseract+Paddle workers, no external recognition request/overflow. Receipt `20261103-141433-build-82293`.
+- Native Linux/x64/UID1001 password/TOTP/PKCE/scoped SDK, read-only consent before MFA, scope denial, current session revocation and pilot-effect denial passed; the reused fixture was adapted to explicit platform/site authority and a privileged **synthetic-only fixture client** for honest before/after counts. Actual public HTTPS SDK passed with normal native headers/default TLS verification; revoked bearer401. Temporary synthetic person/client removed and effect rows0. Receipt `20261103-142708-build-84433`; private summary `Qualification/temcotools-v2-expanded-2ae6cb2-20261103/native/native-internal-summary.json`. This is not Adam's MCP attachment.
+- Actual incognito public browser sign-in/discovery200; anonymous Lab redirects to sign-in; public control/internal callbacks404 and label socket403. Worker JS/manifest200 with JavaScript/JSON types; Paddle/Tesseract workers200 and ORT binary200/application-wasm. Inert static assets remain public; the Lab page is platform guarded. Direct private app callback correctly requires authorization401, distinct from the public404 proxy block.
+- Native app verifies all26 runtime/model asset hashes,117,792,876 bytes, pinned Paddle0.4.2/ORT1.24.3/Tesseract7.0.0. These assets are lazy on the pilot origin. Real handheld/camera/hardware benchmarks remain pending.
+- Owner MFA is still unconfigured: preflight migrate phase has no blockers but warns privileged MFA/recovery custody is pending. Password enrollment, existing owner access and read-only MCP are usable; sensitive publication/authorization asks for current password+MFA. No owner factor was configured by an agent.
+
+Usable test paths: [TemcoScan Lab](https://temco-v2.chronchive.com/tools/scan-lab), [Workflows/Receiving practice](https://temco-v2.chronchive.com/tools/workflows), [Warehouse settings](https://temco-v2.chronchive.com/management/warehouse), [Connections/actions](https://temco-v2.chronchive.com/management/connections), [MCP setup](https://temco-v2.chronchive.com/account/access). The generic provider registry is still configuration/preview only; upcoming transport glue is not part of2ae. Live WMS/MARS/printing remain disabled/uninvoked, and source mappings/official finals/device acceptance remain separate.
+
+## Previous48c native target and isolation
+
+
 
 Host is Linux/x86_64, Docker29.1.3, Compose2.29.2, Caddy2.11.2. Separate clean deployment source `/srv/temcotools-v2-pilot/source` is pinned to48c. Project `temcotools-v2-pilot-parallel` owns only database `temcotools_v2_pilot_parallel`, volumes `temcotools-v2-pilot-parallel-db` / `temcotools-v2-pilot-parallel-admin-files` and bridge `temcotools-v2-pilot-parallel-private`. Private root 0700/env 0600 contain newly generated DB/session/MFA keys; no production environment is selected. An off-host private copy of these new pilot keys is retained under the MacDev launch artifact directory.
 
