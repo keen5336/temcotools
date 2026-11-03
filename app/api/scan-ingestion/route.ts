@@ -11,6 +11,7 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 8192) return NextResponse.json({ error: "Scan event too large." }, { status: 413 });
     const input = JSON.parse(raw);
+    if ((input.siteId ?? "warehouse-initial") !== principal.siteId) return NextResponse.json({ error: "This observation belongs to another warehouse. Open its originating warehouse to save it." }, { status: 409 });
     let result;
     if (input.finalsSessionId) {
       const finals = await recordFinalsScan(principal, { sessionId: input.finalsSessionId, eventId: input.eventId, lane: input.lane, rawIdentifier: input.rawIdentifier, confirmPlacement: input.confirmPlacement ?? false, capturedAt: input.capturedAt, capturedByUserId: input.capturedByUserId, captureMethod: input.captureMethod, deviceId: input.deviceId });

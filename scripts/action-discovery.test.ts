@@ -139,7 +139,7 @@ test("SDK-discovered inputs execute the native draft and scan-list commands with
     assert.equal((await execute("scan-lists.create", { ...scanInput, name: "Conflicting retry" })).isError, true);
   } finally {
     await connection?.close();
-    if (workflowCreated) { await prisma.labelWorkflowAudit.deleteMany({ where: { purpose } }); await prisma.labelWorkflow.delete({ where: { purpose } }); }
+    if (workflowCreated) { await prisma.labelWorkflowAudit.deleteMany({ where: { purpose } }); await prisma.labelWorkflow.deleteMany({ where: { purpose } }); }
     if (payloadCreated) { await prisma.payloadAudit.deleteMany({ where: { payloadId } }); await prisma.payload.delete({ where: { id: payloadId } }); }
     if (targetId) await prisma.user.delete({ where: { id: targetId } });
     if (editedBundleId) await prisma.roleBundle.delete({ where: { id: editedBundleId } });

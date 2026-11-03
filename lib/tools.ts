@@ -5,6 +5,10 @@ export type Tool = { id: string; name: string; href: string; description: string
 // One catalog keeps the dashboard and navigation in sync. Visibility here is
 // presentation only; each tool still enforces its own server authorization.
 export const TOOLS: readonly Tool[] = [
+  { id: "workflows", capability: "workflow.read", name: "Workflows", href: "/tools/workflows", description: "Run local Receiving practice and manage versioned declarative workflows." },
+  { id: "connections", capability: "account.self", name: "Connections & Actions", href: "/management/connections", description: "Inspect entitled providers, device links, explicit grants and approved action versions." },
+  { id: "scan-lab", capability: "platform.manage", adminOnly: true, name: "TemcoScan Lab", href: "/tools/scan-lab", description: "Experimental local camera, barcode and WASM OCR comparison. No warehouse writes.", roles: ["admin"] },
+  { id: "warehouse-settings", capability: "sites.configure", name: "Warehouse Settings", href: "/management/warehouse", description: "Manage this warehouse's configuration, memberships and capability bundles." },
   { id: "security", name: "Account Security", href: "/account/security", description: "Manage strong sign-in, individual sessions, shared-device lock and recovery." },
   { id: "payloads", capability: "payloads.manage", adminOnly: true, name: "Bookmarklet Payloads", href: "/admin/payloads", description: "Admin source drafts, publication, immutable versions and stable mobile loaders.", roles: ["admin"] },
   { id: "relay-sites", capability: "payloads.manage", adminOnly: true, name: "Connect Site Mappings", href: "/admin/relay-sites", description: "Approved payloads for exact sites/paths with one Connect TemcoTools bookmark.", roles: ["admin"] },

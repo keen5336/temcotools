@@ -47,7 +47,7 @@ export async function createDispatchSnapshot(principal: Principal, raw: unknown)
   const slots = expandDispatchLines(input.lines);
   return dispatchCommand(principal, input.operationId, "create_snapshot", input, "office.decide", async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dispatch-board:${input.day}:${input.scope}`},0))`;
-    const board = await tx.dispatchBoard.upsert({ where: { day_scope: { day: input.day, scope: input.scope } }, create: { day: input.day, scope: input.scope }, update: {} });
+    const board = await tx.dispatchBoard.findFirst({ where: { day: input.day, scope: input.scope } }) ?? await tx.dispatchBoard.create({ data: { day: input.day, scope: input.scope } });
     await tx.$executeRaw`SELECT id FROM "DispatchBoard" WHERE id=${board.id} FOR UPDATE`;
     const current = await tx.dispatchBoard.findUniqueOrThrow({ where: { id: board.id } });
     const snapshot = await tx.dispatchSnapshot.create({ data: { boardId: board.id, version: current.nextVersion, baseHeadId: current.headSnapshotId, sourceKind: input.sourceKind, sourceAsOf: new Date(input.sourceAsOf), sourceRef: input.sourceRef, coverage: input.coverage, note: input.note, slots: asJson(slots), status: input.coverage === "complete" ? "draft" : "incomplete", createdByUserId: principal.userId } });

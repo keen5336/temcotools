@@ -1,5 +1,5 @@
 import { getIronSession } from "iron-session";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { sessionOptions, type SessionData } from "@/lib/session";
 import { prisma } from "@/lib/db";
@@ -8,11 +8,12 @@ import { CURRENT_USER_SELECT, isLivePersistentSession, resolvePrincipal, type Pr
 export async function getSession() {
   const cookieStore = await cookies();
   const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
+  const persisted = session.sessionId ? await prisma.userSession.findUnique({ where: { id: session.sessionId } }) : null;
+  const siteId = (await headers()).get("X-Temco-Site") || persisted?.activeSiteId || "warehouse-initial";
   const principal = await resolvePrincipal(session, (id) => prisma.user.findUnique({
     where: { id },
     select: CURRENT_USER_SELECT,
-  }));
-  const persisted = principal && session.sessionId ? await prisma.userSession.findUnique({ where: { id: session.sessionId } }) : null;
+  }), Date.now(), siteId);
   if (principal && persisted && isLivePersistentSession(persisted, session)) {
     // These values are always refreshed from the authoritative user, not saved
     // cookie snapshots. No cookie write is required in a Server Component.
@@ -21,6 +22,9 @@ export async function getSession() {
     session.role = principal.role;
     session.isActive = true;
     session.capabilities = principal.capabilities;
+    session.siteId = principal.siteId;
+    session.siteName = principal.siteName;
+    session.isPlatformAdmin = principal.isPlatformAdmin;
     session.strongAuthenticatedAt = persisted.lastStrongAuthenticatedAt.getTime();
     session.mfaVerifiedAt = persisted.mfaVerifiedAt?.getTime();
   } else {
@@ -32,6 +36,7 @@ export async function getSession() {
     session.role = "user";
     session.isActive = false;
     session.capabilities = [];
+    delete session.siteId; delete session.siteName; delete session.isPlatformAdmin;
     delete session.apiRelaySessionId;
     delete session.strongAuthenticatedAt;
     delete session.mfaVerifiedAt;
@@ -47,6 +52,7 @@ export async function getCurrentPrincipal(): Promise<Principal | null> {
     role: session.role, authVersion: session.authVersion, capabilities: session.capabilities ?? [],
     sessionId: session.sessionId, strongAuthenticatedAt: session.strongAuthenticatedAt,
     mfaVerifiedAt: session.mfaVerifiedAt,
+    siteId: session.siteId, siteName: session.siteName, isPlatformAdmin: session.isPlatformAdmin,
   };
 }
 

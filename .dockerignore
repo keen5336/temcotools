@@ -11,3 +11,6 @@ coverage
 reference
 README.md
 runtime
+
+# Always generate pinned OCR/runtime assets in the build stage.
+public/scan-lab/vendor

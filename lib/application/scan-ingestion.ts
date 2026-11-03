@@ -6,6 +6,7 @@ import { reviewOfficeObservation } from "@/lib/office/service";
 import { reviewDispatchObservation } from "@/lib/dispatch/service";
 
 export const scanIngestionSchema = z.object({
+  siteId: z.string().max(200).optional(),
   eventId: z.string().min(1).max(150), capturedByUserId: z.string().min(1).max(200),
   rawIdentifier: z.string().trim().min(1).max(500), identifierType: z.enum(["auto", "lpn", "msn", "serial", "submission"]).default("auto"),
   namespace: z.string().trim().max(100).optional(), type: z.enum(["presence", "check_in", "placement", "departure"]),
@@ -16,6 +17,7 @@ export const scanIngestionSchema = z.object({
 export async function ingestWarehouseScan(principal: Principal, raw: unknown) {
   assertCapability(principal, "inventory.write");
   const input = scanIngestionSchema.parse(raw);
+  if (input.siteId && input.siteId !== principal.siteId) throw new AuthorizationError("Observation warehouse does not match this connection.");
   const receipt = await recordWarehouseObservation(principal, input);
   // Rule evaluation only creates/returns durable local instructions. It never
   // sends a print or a MARS submission, including on same-event replay.

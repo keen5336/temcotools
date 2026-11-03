@@ -16,15 +16,17 @@ export function requiresUiContext(method: string, pathname: string): boolean {
   return true;
 }
 
-export function boundApiHref(href: string, context: string | null) {
+export function boundApiHref(href: string, context: string | null, siteId = typeof window === "undefined" ? null : window.__temcoUiContextV1?.siteId ?? null) {
   if (!href.startsWith("/api/")) return href;
   const url = new URL(href, "http://temco.invalid");
   url.searchParams.set(UI_CONTEXT_QUERY, context ?? "anonymous");
+  if (siteId) url.searchParams.set("__temco_site", siteId);
   return url.pathname + url.search + url.hash;
 }
 
 export interface BrowserUiContext {
   readonly context: string | null;
+  readonly siteId?: string | null;
   readonly blocked: boolean;
   readonly message: string;
   block: (message?: string) => void;

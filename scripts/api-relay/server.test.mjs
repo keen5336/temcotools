@@ -237,7 +237,7 @@ test("audience-bound control keys preserve the unset legacy key and isolate pilo
 
 test("same-user connections remain private to their exact creating session and grant", async t => {
   const f = await fixture(t), c = await f.paired();
-  for (const requester of [{ ...alice, sessionId: "different-browser" }, { ...alice, grantId: "oauth:own-same-session" }]) {
+  for (const requester of [{ ...alice, siteId: "other-warehouse" }, { ...alice, sessionId: "different-browser" }, { ...alice, grantId: "oauth:own-same-session" }]) {
     assert.deepEqual((await f.control("connections", requester)).connections, []);
     assert.equal((await f.request(c, "/private", requester)).status, 404);
     assert.equal((await f.control("disconnect", requester, { connectionId: c.id })).status, 404);

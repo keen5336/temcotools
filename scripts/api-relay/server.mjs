@@ -21,7 +21,7 @@ export function createApiRelayServer({ secret, audience = process.env.API_RELAY_
   const leases = new Map();
   // JSON can encode one text byte as six bytes (\u0000, for example).
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RESPONSE_BYTES * 6 + 65536, perMessageDeflate: false });
-  const leaseKey = ({ userId, sessionId }) => JSON.stringify([userId, sessionId]);
+  const leaseKey = ({ userId, sessionId, siteId }) => JSON.stringify([userId, sessionId, siteId || "warehouse-initial"]);
   const live = (owner) => (leases.get(leaseKey(owner)) || 0) > Date.now();
   const json = (res, status, body) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(body)); };
   const renew = (owner) => {
@@ -135,7 +135,7 @@ export function createApiRelayServer({ secret, audience = process.env.API_RELAY_
       if (action === "share") {
         if (owner.grantId || !c.ready) throw fault("Approve sharing from the original signed-in browser after pairing.", 403);
         const { requester, operations, expiresAt, operationConfigHash } = data;
-        if (!requester || requester.userId !== owner.userId || typeof requester.grantId !== "string" || !/^oauth:.{1,200}$/.test(requester.grantId) || !requester.authSessionId || !requester.sessionId || !Number.isSafeInteger(requester.authVersion) || !Array.isArray(operations) || !operations.length || operations.length > 32 || new Set(operations).size !== operations.length || operations.some(op => typeof op !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(op)) || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + 60 * 60_000 || !/^[a-f0-9]{64}$/.test(operationConfigHash || "")) throw fault("Invalid bounded OAuth read sharing approval.");
+        if (!requester || (requester.siteId || "warehouse-initial") !== (owner.siteId || "warehouse-initial") || requester.userId !== owner.userId || typeof requester.grantId !== "string" || !/^oauth:.{1,200}$/.test(requester.grantId) || !requester.authSessionId || !requester.sessionId || !Number.isSafeInteger(requester.authVersion) || !Array.isArray(operations) || !operations.length || operations.length > 32 || new Set(operations).size !== operations.length || operations.some(op => typeof op !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(op)) || !Number.isSafeInteger(expiresAt) || expiresAt <= Date.now() || expiresAt > Date.now() + 60 * 60_000 || !/^[a-f0-9]{64}$/.test(operationConfigHash || "")) throw fault("Invalid bounded OAuth read sharing approval.");
         const share = { id: randomUUID(), requester, operations, operationConfigHash, expiresAt: Math.min(expiresAt, c.expires) };
         for (const operation of operations) if (!(await authorize(requester, { connectionOwner: c.owner, origin: c.origin, payloadGrant: c.payloadGrant, operation, requestMethod: "GET", share }))) throw fault("The current connection, named read operation or OAuth grant cannot be shared.", 403);
         if (!connections.has(c.id) || !live(c.owner)) throw fault("Original connection ended before approval.", 409);

@@ -1,3 +1,4 @@
+import { warehouseFilesRoot } from "@/lib/sites/files";
 import { promises as fs, constants } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -23,7 +24,7 @@ export const adminFileDeleteInput = z.object({ operationId, path: requiredRelati
 const MIME_TYPES: Record<string, string> = { ".csv": "text/csv", ".json": "application/json", ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".txt": "text/plain; charset=utf-8", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xls": "application/vnd.ms-excel", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".zip": "application/zip" };
 type Metadata = Record<string, unknown>;
 type FileOperationReceipt = { ok: boolean; operationId: string; status: "completed" | "unknown" | "not_applied"; result?: Metadata; error?: string };
-async function audit(tx: Prisma.TransactionClient, principal: Principal, action: string, reason: Metadata, sourceHash?: string) { await tx.identityAudit.create({ data: { action: `files.${action}`, actorUserId: principal.userId, sessionId: principal.sessionId, sourceHash, reason: JSON.stringify({ ...reason, grantId: principal.grantId ?? null }) } }); }
+async function audit(tx: Prisma.TransactionClient, principal: Principal, action: string, reason: Metadata, sourceHash?: string) { await tx.identityAudit.create({ data: { action: `files.${action}`, siteId: principal.siteId, actorUserId: principal.userId, sessionId: principal.sessionId, sourceHash, reason: JSON.stringify({ ...reason, grantId: principal.grantId ?? null }) } }); }
 function parseMetadata(value: string | null): Metadata { try { return JSON.parse(value ?? "{}"); } catch { throw new AdminFileError("The original operation receipt is unavailable. Inspect the folder before a new operation.", 409, "unknown_effect"); } }
 async function checkFingerprint(filename: string, expectedValue?: string) {
   const stats = await fs.lstat(filename);
@@ -46,12 +47,12 @@ function decodeUpload(contentBase64: string) {
 // The root is application configuration, never an action argument. A factory
 // gives integration tests an isolated synthetic root without touching user files.
 export function createAdminFileCommands(configuredRoot = ADMIN_FILES_ROOT) {
-  const root = path.resolve(/* turbopackIgnore: true */ configuredRoot);
+  const rootFor = (principal: Principal) => warehouseFilesRoot(configuredRoot, principal);
   async function read<T>(principal: Principal, action: string, input: Metadata, run: () => Promise<T>) {
-    return prisma.$transaction(async tx => { const current = await assertCurrentPrincipal(tx, principal, "files.manage"); await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`admin-files-root:${root}`}, 813))`; const result = await run(); await audit(tx, current, action, input); return result; }, { timeout: 30_000 });
+    return prisma.$transaction(async tx => { const current = await assertCurrentPrincipal(tx, principal, "files.manage"); await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`admin-files-root:${rootFor(principal)}`}, 813))`; const result = await run(); await audit(tx, current, action, input); return result; }, { timeout: 30_000 });
   }
   async function mutate(principal: Principal, action: string, id: string, input: Metadata, run: (dispatch: () => void) => Promise<Metadata>): Promise<FileOperationReceipt> {
-    const inputFingerprint = fingerprint({ action, input }), sourceHash = createHash("sha256").update(`files:${principal.userId}:${id}`).digest("hex");
+    const inputFingerprint = fingerprint({ action, input }), sourceHash = createHash("sha256").update(principal.siteId === "warehouse-initial" ? `files:${principal.userId}:${id}` : `files:${principal.siteId}:${principal.userId}:${id}`).digest("hex");
     const prior = await prisma.$transaction(async tx => {
       const current = await assertCurrentPrincipal(tx, principal, "files.manage");
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`admin-files-operation:${sourceHash}`}, 813))`;
@@ -69,7 +70,7 @@ export function createAdminFileCommands(configuredRoot = ADMIN_FILES_ROOT) {
     try {
       return await prisma.$transaction(async tx => {
         const current = await assertCurrentPrincipal(tx, principal, "files.manage");
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`admin-files-root:${root}`}, 813))`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`admin-files-root:${rootFor(principal)}`}, 813))`;
         const result = await run(() => { effectStarted = true; });
         const receipt: FileOperationReceipt = { ok: true, operationId: id, status: "completed", result };
         await audit(tx, current, "operation_completed", { operationId: id, action, receipt }, sourceHash);
@@ -85,11 +86,11 @@ export function createAdminFileCommands(configuredRoot = ADMIN_FILES_ROOT) {
   }
   async function listAdminFiles(principal: Principal, input: unknown = {}) {
     const data = adminFilesListInput.parse(input);
-    return read(principal, "listed", { path: data.path }, async () => ({ currentPath: data.path, parentPath: data.path.split("/").slice(0, -1).join("/"), entries: await listAdminDirectory(data.path, root) }));
+    return read(principal, "listed", { path: data.path }, async () => ({ currentPath: data.path, parentPath: data.path.split("/").slice(0, -1).join("/"), entries: await listAdminDirectory(data.path, rootFor(principal)) }));
   }
   async function downloadAdminFile(principal: Principal, input: unknown) {
     const data = adminFileDownloadInput.parse(input);
-    return read(principal, "downloaded", { path: data.path }, async () => { const file = await readAdminFileBytes(data.path, root); return { filename: file.filename, contentType: MIME_TYPES[path.extname(file.filename).toLowerCase()] ?? "application/octet-stream", size: file.bytes.length, fingerprint: file.fingerprint, contentBase64: file.bytes.toString("base64") }; });
+    return read(principal, "downloaded", { path: data.path }, async () => { const file = await readAdminFileBytes(data.path, rootFor(principal)); return { filename: file.filename, contentType: MIME_TYPES[path.extname(file.filename).toLowerCase()] ?? "application/octet-stream", size: file.bytes.length, fingerprint: file.fingerprint, contentBase64: file.bytes.toString("base64") }; });
   }
   async function uploadAdminFiles(principal: Principal, input: unknown) {
     const data = adminFilesUploadInput.parse(input);
@@ -98,10 +99,10 @@ export function createAdminFileCommands(configuredRoot = ADMIN_FILES_ROOT) {
     if (files.reduce((sum, file) => sum + file.bytes.length, 0) > MAX_ADMIN_UPLOAD_BYTES) throw new AdminFileError("The upload batch exceeds 128 MiB.", 413);
     const metadata = { path: data.path, files: files.map(file => ({ name: file.name, size: file.bytes.length, hash: createHash("sha256").update(file.bytes).digest("hex"), replace: file.replace, expectedFingerprint: file.expectedFingerprint ?? null })) };
     return mutate(principal, "upload", data.operationId, metadata, async dispatch => {
-      const directory = await secureAdminPath(data.path, root); if (!(await fs.lstat(directory.resolved)).isDirectory()) throw new AdminFileError("Choose an existing destination folder.");
+      const directory = await secureAdminPath(data.path, rootFor(principal)); if (!(await fs.lstat(directory.resolved)).isDirectory()) throw new AdminFileError("Choose an existing destination folder.");
       const targets = [];
       for (const file of files) {
-        const target = await secureAdminPath(data.path ? `${data.path}/${file.name}` : file.name, root, true);
+        const target = await secureAdminPath(data.path ? `${data.path}/${file.name}` : file.name, rootFor(principal), true);
         if (target.exists) { if (!file.replace || !file.expectedFingerprint) throw new AdminFileError("A filename already exists. Explicitly authorize replacement of its current version.", 409, "file_exists"); const stats = await checkFingerprint(target.resolved, file.expectedFingerprint); if (!stats.isFile()) throw new AdminFileError("An upload cannot replace a folder.", 409); }
         else if (file.replace || file.expectedFingerprint) throw new AdminFileError("The replacement target changed. Reload the folder.", 409, "stale_file");
         targets.push({ ...target, file });
@@ -119,17 +120,17 @@ export function createAdminFileCommands(configuredRoot = ADMIN_FILES_ROOT) {
   }
   async function createAdminDirectory(principal: Principal, input: unknown) {
     const data = adminDirectoryCreateInput.parse(input);
-    return mutate(principal, "mkdir", data.operationId, data, async dispatch => { const target = await secureAdminPath(data.path ? `${data.path}/${data.folderName}` : data.folderName, root, true); if (target.exists) throw new AdminFileError("That file or folder already exists.", 409); dispatch(); await fs.mkdir(target.resolved, { mode: 0o700 }); return { path: target.clean }; });
+    return mutate(principal, "mkdir", data.operationId, data, async dispatch => { const target = await secureAdminPath(data.path ? `${data.path}/${data.folderName}` : data.folderName, rootFor(principal), true); if (target.exists) throw new AdminFileError("That file or folder already exists.", 409); dispatch(); await fs.mkdir(target.resolved, { mode: 0o700 }); return { path: target.clean }; });
   }
   async function moveAdminFile(principal: Principal, input: unknown) {
     const data = adminFileMoveInput.parse(input);
     if (!data.path || !data.destinationPath || data.path === data.destinationPath || data.destinationPath.startsWith(`${data.path}/`)) throw new AdminFileError("Choose distinct managed source and destination paths outside the source folder.");
-    return mutate(principal, "move", data.operationId, data, async dispatch => { const source = await secureAdminPath(data.path, root), target = await secureAdminPath(data.destinationPath, root, true); await checkFingerprint(source.resolved, data.expectedFingerprint); await checkTree(source.resolved); if (target.exists) throw new AdminFileError("Destination already exists. Choose another name or remove it explicitly.", 409, "file_exists"); dispatch(); await fs.rename(source.resolved, target.resolved); return { path: target.clean, previousPath: source.clean }; });
+    return mutate(principal, "move", data.operationId, data, async dispatch => { const source = await secureAdminPath(data.path, rootFor(principal)), target = await secureAdminPath(data.destinationPath, rootFor(principal), true); await checkFingerprint(source.resolved, data.expectedFingerprint); await checkTree(source.resolved); if (target.exists) throw new AdminFileError("Destination already exists. Choose another name or remove it explicitly.", 409, "file_exists"); dispatch(); await fs.rename(source.resolved, target.resolved); return { path: target.clean, previousPath: source.clean }; });
   }
   async function deleteAdminFile(principal: Principal, input: unknown) {
     const data = adminFileDeleteInput.parse(input);
     if (!data.path) throw new AdminFileError("The managed root cannot be deleted.");
-    return mutate(principal, "delete", data.operationId, data, async dispatch => { const source = await secureAdminPath(data.path, root); await checkFingerprint(source.resolved, data.expectedFingerprint); await checkTree(source.resolved); dispatch(); await fs.rm(source.resolved, { recursive: true, force: false }); return { path: source.clean }; });
+    return mutate(principal, "delete", data.operationId, data, async dispatch => { const source = await secureAdminPath(data.path, rootFor(principal)); await checkFingerprint(source.resolved, data.expectedFingerprint); await checkTree(source.resolved); dispatch(); await fs.rm(source.resolved, { recursive: true, force: false }); return { path: source.clean }; });
   }
   return { listAdminFiles, downloadAdminFile, uploadAdminFiles, createAdminDirectory, moveAdminFile, deleteAdminFile };
 }

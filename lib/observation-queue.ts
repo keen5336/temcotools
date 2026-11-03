@@ -2,6 +2,7 @@
 // printing, MARS submissions or other external mutations in this queue.
 export interface QueuedObservation {
   eventId: string;
+  siteId?: string;
   capturedByUserId: string;
   rawIdentifier: string;
   capturedAt: string;
@@ -39,9 +40,9 @@ async function transact<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore
     tx.onerror = tx.onabort = () => { db.close(); reject(new Error("Device storage could not save the scan. Check pending work before scanning again.")); };
   });
 }
-export async function queuedObservations(userId: string): Promise<QueuedObservation[]> {
+export async function queuedObservations(userId: string, siteId?: string): Promise<QueuedObservation[]> {
   const rows = await transact("readonly", store => store.index("capturedByUserId").getAll(userId));
-  return (rows as QueuedObservation[]).sort((a, b) => a.capturedAt.localeCompare(b.capturedAt) || a.eventId.localeCompare(b.eventId));
+  return (rows as QueuedObservation[]).filter(row => !siteId || (row.siteId ?? "warehouse-initial") === siteId).sort((a, b) => a.capturedAt.localeCompare(b.capturedAt) || a.eventId.localeCompare(b.eventId));
 }
 export async function queueObservation(input: Omit<QueuedObservation, "state">) {
   const rows = await queuedObservations(input.capturedByUserId);

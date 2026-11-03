@@ -13,14 +13,14 @@ import { assertOAuthGrant } from "@/lib/oauth/grants";
 export { IdentityError } from "./passwords";
 const publicUser = {
   id: true, authVersion: true, username: true, displayName: true, role: true, isActive: true,
-  lastLoginAt: true, createdAt: true, passwordChangedAt: true,
+  lastLoginAt: true, createdAt: true, passwordChangedAt: true, isPlatformAdmin: true,
   roleBundles: { select: { bundle: { select: { id: true, name: true, capabilities: true } } } },
 } as const;
 const idSchema = z.string().min(1).max(200);
 const usernameSchema = z.string().trim().min(1).max(80);
 export const identitySessionRevokeInput = z.object({ sessionId: idSchema });
 export const identityCreateUserInput = z.object({ username: usernameSchema, displayName: z.string().trim().min(1).max(100), role: z.enum(["admin", "manager", "user"]).default("user") }).strict();
-export const identityUpdateUserInput = z.object({ id: idSchema, expectedAuthVersion: z.number().int().positive(), username: usernameSchema.optional(), displayName: z.string().trim().min(1).max(100).optional(), role: z.enum(["admin", "manager", "user"]).optional(), isActive: z.boolean().optional(), revokeSessions: z.boolean().optional(), bundleIds: z.array(idSchema).max(20).optional() }).strict();
+export const identityUpdateUserInput = z.object({ id: idSchema, expectedAuthVersion: z.number().int().positive(), username: usernameSchema.optional(), displayName: z.string().trim().min(1).max(100).optional(), role: z.enum(["admin", "manager", "user"]).optional(), isActive: z.boolean().optional(), revokeSessions: z.boolean().optional(), isPlatformAdmin: z.boolean().optional(), bundleIds: z.array(idSchema).max(20).optional() }).strict();
 const identityBundleValues = z.object({ name: z.string().trim().min(1).max(80), description: z.string().trim().max(300).default(""), capabilities: z.array(z.enum(CAPABILITIES)).max(CAPABILITIES.length) });
 export const identitySaveBundleInput = z.union([
   identityBundleValues.strict().describe("Create a new custom bundle without an ID."),
@@ -39,15 +39,15 @@ function sourceHash(value: string) {
 async function audit(tx: Prisma.TransactionClient, action: string, data: {
   actorUserId?: string; targetUserId?: string; sessionId?: string; sourceHash?: string; reason?: string;
 } = {}) {
-  await tx.identityAudit.create({ data: { action, ...data } });
+  await tx.identityAudit.create({ data: { action, ...data, siteId: null } });
 }
 
 async function ensureRecoveryAdministrator(tx: Prisma.TransactionClient) {
   const administrators = await tx.user.findMany({
-    where: { role: "admin", isActive: true, passwordHash: { not: null } },
+    where: { isPlatformAdmin: true, isActive: true, passwordHash: { not: null } },
     select: { roleBundles: { select: { bundle: { select: { capabilities: true } } } } },
   });
-  if (!administrators.some((user) => user.roleBundles.some(({ bundle }) => bundle.capabilities.includes("users.manage")))) {
+  if (!administrators.length) {
     throw new IdentityError("Keep an enrolled active system administrator with user-management access for recovery.");
   }
 }
@@ -91,6 +91,14 @@ export async function assertCurrentPrincipal(
     SELECT id FROM "UserSession" WHERE id = ${principal.sessionId} AND "userId" = ${principal.userId} FOR SHARE
   `;
   if (!sessionRows.length) throw new AuthorizationError("Your session ended. Sign in again.");
+  if (principal.siteId) {
+    const site = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "WarehouseSite" WHERE id=${principal.siteId} AND "isActive"=true FOR SHARE`;
+    if (!site.length) throw new AuthorizationError("This warehouse is unavailable.");
+    // Keep permissions stable until the command commits. Membership/role writers
+    // lock these same rows before changing assignments or delegation.
+    await tx.$queryRaw`SELECT id FROM "WarehouseMembership" WHERE "userId"=${principal.userId} AND "siteId"=${principal.siteId} FOR SHARE`;
+    await tx.$queryRaw`SELECT r.id FROM "WarehouseRole" r JOIN "WarehouseMembershipRole" mr ON mr."roleId"=r.id JOIN "WarehouseMembership" m ON m.id=mr."membershipId" WHERE m."userId"=${principal.userId} AND m."siteId"=${principal.siteId} ORDER BY r.id FOR SHARE OF r`;
+  }
   const user = await tx.user.findUnique({ where: { id: principal.userId }, select: CURRENT_USER_SELECT });
   const session = await tx.userSession.findUnique({ where: { id: principal.sessionId } });
   const claim = session && {
@@ -98,8 +106,8 @@ export async function assertCurrentPrincipal(
     issuedAt: session.createdAt.getTime(), expiresAt: session.expiresAt.getTime(),
   };
   if (!session || !claim || !isLivePersistentSession(session, claim)) throw new AuthorizationError("Your session ended or is locked. Sign in again.");
-  const current = await resolvePrincipal(claim, async () => user);
-  if (!current) throw new AuthorizationError("Your access changed. Sign in again.");
+  const current = await resolvePrincipal(claim, async () => user, Date.now(), principal.siteId ?? session.activeSiteId);
+  if (!current || (principal.siteId && current.siteId !== principal.siteId)) throw new AuthorizationError("Your warehouse access changed. Select an authorized warehouse again.");
   let result: Principal = {
     ...current, sessionId: session.id, strongAuthenticatedAt: session.lastStrongAuthenticatedAt.getTime(),
     mfaVerifiedAt: session.mfaVerifiedAt?.getTime(),
@@ -111,7 +119,7 @@ export async function assertCurrentPrincipal(
   } else if (principal.grantId) {
     await tx.$queryRaw`SELECT id FROM "AppAccessGrant" WHERE id = ${principal.grantId} FOR SHARE`;
     const grant = await tx.appAccessGrant.findUnique({ where: { id: principal.grantId } });
-    if (!grant || grant.revokedAt || grant.expiresAt.getTime() <= Date.now() || grant.userId !== result.userId || grant.sessionId !== result.sessionId || grant.authVersion !== result.authVersion || grant.audience !== "temcotools-mcp") throw new AuthorizationError("Your client grant expired or was revoked.");
+    if (!grant || grant.revokedAt || grant.expiresAt.getTime() <= Date.now() || grant.userId !== result.userId || grant.sessionId !== result.sessionId || grant.authVersion !== result.authVersion || grant.audience !== "temcotools-mcp" || grant.siteId !== (result.siteId ?? session.activeSiteId)) throw new AuthorizationError("Your client grant expired or was revoked.");
     result = { ...result, capabilities: result.capabilities.filter((cap) => grant.scopes.includes(cap)) };
   }
   if (capability) assertCapability(result, capability);
@@ -132,8 +140,9 @@ export async function signInWithPassword(input: unknown, context: IdentityContex
   return prisma.$transaction(async (tx) => {
     const accepted = await tx.user.updateMany({ where: { id: user.id, isActive: true, authVersion: user.authVersion, passwordHash: user.passwordHash }, data: { lastLoginAt: at } });
     if (!accepted.count) throw new IdentityError("Sign-in state changed. Try again.", 401);
+    const firstMembership = await tx.warehouseMembership.findFirst({ where: { userId: user.id, isActive: true, site: { isActive: true } }, orderBy: { createdAt: "asc" }, select: { siteId: true } });
     const session = await tx.userSession.create({ data: {
-      id: randomUUID(), userId: user.id, authVersion: user.authVersion, createdAt: at,
+      activeSiteId: firstMembership?.siteId ?? "warehouse-initial", id: randomUUID(), userId: user.id, authVersion: user.authVersion, createdAt: at,
       lastActivityAt: at, lastStrongAuthenticatedAt: at, expiresAt: new Date(at.getTime() + SESSION_MAX_AGE_MS), deviceLabel: data.deviceLabel,
     } });
     await audit(tx, "sign_in", { actorUserId: user.id, targetUserId: user.id, sessionId: session.id, sourceHash: sourceHash(context.source) });
@@ -294,7 +303,7 @@ export async function listIdentityUsers(principal: Principal, search = "") {
 }
 
 export async function assertManageableAccess(tx: Prisma.TransactionClient, actor: Principal, input: { targetUserId?: string; role?: string; bundleIds?: string[]; capabilities?: readonly string[] }) {
-  const permitted = new Set(actor.capabilities);
+  const permitted = new Set(actor.isPlatformAdmin && !actor.grantId ? CAPABILITIES : actor.capabilities);
   const check = (capabilities: readonly string[]) => {
     if (capabilities.some(capability => capability !== "account.self" && !permitted.has(capability as Capability))) {
       throw new AuthorizationError("This account/client grant cannot assign or recover access beyond its own scope. Use an explicitly broader authorized grant.");
@@ -302,8 +311,9 @@ export async function assertManageableAccess(tx: Prisma.TransactionClient, actor
   };
   if (input.role === "admin" && actor.role !== "admin") throw new AuthorizationError("Only a system administrator can assign system-administrator identity.");
   if (input.targetUserId) {
-    const target = await tx.user.findUnique({ where:{id:input.targetUserId},select:{role:true,roleBundles:{select:{bundle:{select:{capabilities:true}}}}} });
+    const target = await tx.user.findUnique({ where:{id:input.targetUserId},select:{role:true,isPlatformAdmin:true,roleBundles:{select:{bundle:{select:{capabilities:true}}}}} });
     if (target) {
+      if (target.isPlatformAdmin && !actor.capabilities.includes("platform.manage")) throw new AuthorizationError("Managing a platform administrator requires explicit platform scope.");
       if (target.role === "admin" && actor.role !== "admin") throw new AuthorizationError("System-administrator identity requires system-administrator authority.");
       check(target.roleBundles.flatMap(link => link.bundle.capabilities));
     }
@@ -326,6 +336,7 @@ export async function createIdentityUser(principal: Principal, input: unknown) {
     const duplicate = await tx.user.findFirst({ where: { username: { equals: data.username, mode: "insensitive" } }, select: { id: true } });
     if (duplicate) throw new IdentityError("Username already exists.", 409);
     const user = await tx.user.create({ data: { ...data, pinHash: "disabled:v2", roleBundles: { create: { bundleId: `legacy-${data.role}` } } }, select: publicUser });
+    await tx.warehouseMembership.create({ data: { siteId: current.siteId ?? "warehouse-initial", userId: user.id, roles: { create: { roleId: data.role === "user" ? "warehouse-operator" : "warehouse-manager" } } } });
     await audit(tx, "user_created", { actorUserId: principal.userId, targetUserId: user.id, sessionId: principal.sessionId });
     return user;
   });
@@ -340,6 +351,7 @@ export async function updateIdentityUser(principal: Principal, input: unknown) {
     await tx.$queryRaw`SELECT id FROM "User" WHERE id=${data.id} FOR UPDATE`;
     const target = await tx.user.findUnique({ where: { id: data.id } });
     if (!target) throw new IdentityError("User not found.", 404);
+    if (data.isPlatformAdmin !== undefined && (!current.isPlatformAdmin || !current.capabilities.includes("platform.manage"))) throw new AuthorizationError("Current platform administration authority is required to change platform access.");
     if (target.authVersion !== data.expectedAuthVersion) throw new IdentityError("This account changed after you opened it. Reload its current access before saving another change.", 409);
     await assertManageableAccess(tx, current, {targetUserId:data.id,role:data.role,bundleIds:data.bundleIds??(data.role?[`legacy-${data.role}`]:undefined)});
     if (data.username) {
@@ -358,7 +370,7 @@ export async function updateIdentityUser(principal: Principal, input: unknown) {
     // cannot silently overwrite a later account edit or restore revoked access.
     const user = await tx.user.update({ where: { id: data.id }, data: {
       ...(data.username === undefined ? {} : { username: data.username }), ...(data.displayName === undefined ? {} : { displayName: data.displayName }),
-      ...(data.role === undefined ? {} : { role: data.role }), ...(data.isActive === undefined ? {} : { isActive: data.isActive }),
+      ...(data.isPlatformAdmin === undefined ? {} : { isPlatformAdmin: data.isPlatformAdmin }), ...(data.role === undefined ? {} : { role: data.role }), ...(data.isActive === undefined ? {} : { isActive: data.isActive }),
       authVersion: { increment: 1 },
     }, select: publicUser });
     await tx.userSession.updateMany({ where: { userId: data.id, revokedAt: null }, data: { revokedAt: new Date() } });

@@ -30,20 +30,20 @@ export async function bootstrapV2Administrator(prisma: PrismaClient, options: { 
     return await prisma.$transaction(async (tx) => {
       if (!options.apply) await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
       else await tx.$executeRaw`SELECT pg_advisory_xact_lock(8110102)`;
-      const existing = await tx.user.findUnique({ where: { username }, select: { id: true, role: true, isActive: true, passwordHash: true, authVersion: true, roleBundles: { select: { bundle: { select: { capabilities: true } } } } } });
+      const existing = await tx.user.findUnique({ where: { username }, select: { id: true, role: true, isPlatformAdmin: true, isActive: true, passwordHash: true, authVersion: true, roleBundles: { select: { bundle: { select: { capabilities: true } } } } } });
       if (existing && options.create) throw new MaintenanceError("That account already exists. No account or credential was replaced.");
       if (!existing && !options.create) throw new MaintenanceError("The exact administrator was not found. No account was created.");
-      if (existing && (existing.role !== "admin" || !existing.isActive)) throw new MaintenanceError("Offline enrollment/recovery permits only an existing active administrator; it does not promote or reactivate accounts.");
+      if (existing && (!existing.isPlatformAdmin || !existing.isActive)) throw new MaintenanceError("Offline enrollment/recovery permits only an existing active administrator; it does not promote or reactivate accounts.");
       if (options.recoverEnrolledAdmin) {
         const interruptedRecovery = existing && !existing.passwordHash && await tx.identityAudit.count({ where: { targetUserId: existing.id, action: "offline_administrator_recovery_issued" } }) > 0;
-        if ((!existing?.passwordHash && !interruptedRecovery) || !existing?.roleBundles.some(({ bundle }) => bundle.capabilities.includes("users.manage"))) throw new MaintenanceError("Emergency recovery requires an enrolled active administrator already assigned users.manage, or its recorded interrupted offline recovery. Existing access is not broadened.");
+        if ((!existing?.passwordHash && !interruptedRecovery) || !existing?.isPlatformAdmin) throw new MaintenanceError("Emergency recovery requires an enrolled active administrator already assigned users.manage, or its recorded interrupted offline recovery. Existing access is not broadened.");
       } else {
         if (existing?.passwordHash) throw new MaintenanceError("This administrator is enrolled. Use authenticated recovery, or the separate explicit emergency recovery mode.");
-        if (await tx.user.count({ where: { isActive: true, role: "admin", passwordHash: { not: null } } })) throw new MaintenanceError("An enrolled active administrator already exists. Use its authenticated user-management/recovery flow; initial bootstrap does not bypass it.");
+        if (await tx.user.count({ where: { isActive: true, isPlatformAdmin: true, passwordHash: { not: null } } })) throw new MaintenanceError("An enrolled active administrator already exists. Use its authenticated user-management/recovery flow; initial bootstrap does not bypass it.");
       }
       if (!await tx.roleBundle.findUnique({ where: { id: "legacy-admin" }, select: { id: true } })) throw new MaintenanceError("Apply the strong identity migration and system administrator bundle first.");
       if (!options.apply) return { mode: "dry-run", action: options.recoverEnrolledAdmin ? "recover-enrolled-administrator-and-reset-factors" : existing ? "enroll-existing-administrator" : "create-initial-administrator", writes: 0, deliveryRequired: true };
-      const user = existing ?? await tx.user.create({ data: { username, displayName: displayName!, pinHash: "disabled:v2", role: "admin", roleBundles: { create: { bundleId: "legacy-admin" } } } });
+      const user = existing ?? await tx.user.create({ data: { username, displayName: displayName!, pinHash: "disabled:v2", role: "admin", isPlatformAdmin: true, siteMemberships: { create: { siteId: "warehouse-initial", roles: { create: { roleId: "warehouse-manager" } } } }, roleBundles: { create: { bundleId: "legacy-admin" } } } });
       const at = new Date(), expiresAt = new Date(at.getTime() + 30 * 60_000);
       if (existing) {
         await tx.user.update({ where: { id: user.id }, data: { authVersion: { increment: 1 }, ...(options.recoverEnrolledAdmin ? { passwordHash: null, passwordChangedAt: null } : {}) } });

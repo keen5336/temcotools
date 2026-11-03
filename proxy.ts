@@ -31,11 +31,13 @@ export async function proxy(request: NextRequest) {
     });
   }
   let response: NextResponse;
-  if (query !== null) {
+  if (query !== null || (read && request.nextUrl.searchParams.has("__temco_site"))) {
     // The reserved GET transport field is not domain input (some query schemas
     // are strict). Preserve its verified value as a request header on rewrite.
     const clean = request.nextUrl.clone(); clean.searchParams.delete(UI_CONTEXT_QUERY);
     const headers = new Headers(request.headers); headers.set(UI_CONTEXT_HEADER, supplied!);
+    const site = clean.searchParams.get("__temco_site"); clean.searchParams.delete("__temco_site");
+    if (site) { if (site.length > 200) return NextResponse.json({ error: "Invalid warehouse context." }, { status: 400 }); headers.set("X-Temco-Site", site); }
     response = NextResponse.rewrite(clean, { request: { headers } });
   } else response = NextResponse.next();
   response.headers.set("Cache-Control", "no-store"); response.headers.set("Referrer-Policy", "no-referrer");

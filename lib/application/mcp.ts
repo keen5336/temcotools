@@ -1,3 +1,4 @@
+import { withPrincipalSite } from "@/lib/sites/context";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { AuthorizationError, type Principal } from "@/lib/auth/principal";
@@ -11,7 +12,8 @@ export function createApplicationMcpServer(authenticate: () => Promise<Principal
   const server = new McpServer({ name: "temcotools", version: "2.0.0-development" });
   async function execute(action: (principal: Principal) => unknown | Promise<unknown>) {
     try {
-      const value = await action(await authenticate());
+      const principal = await authenticate();
+      const value = await withPrincipalSite(principal, () => action(principal));
       return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
     } catch (error) {
       const known = error instanceof AuthorizationError || error instanceof GrantError || (error instanceof Error && "status" in error && typeof error.status === "number" && error.status >= 400 && error.status < 500);

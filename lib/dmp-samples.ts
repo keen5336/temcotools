@@ -1,3 +1,4 @@
+import { warehouseFilesRoot } from "@/lib/sites/files";
 import { constants, promises as fs } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -48,23 +49,23 @@ const parse = (value: string | null): Metadata => { try { return JSON.parse(valu
 // Reuse the managed private root/path guards and file-command custody pattern.
 // workflow.read never accepts a general path or another user's storage scope.
 export function createDmpSampleCommands(configuredRoot = ADMIN_FILES_ROOT) {
-  const root = path.resolve(/* turbopackIgnore: true */ configuredRoot);
+  const rootFor = (principal: Principal) => warehouseFilesRoot(configuredRoot, principal);
   const userDirectory = (principal: Principal) => `dmp-samples/${sha(principal.userId)}`;
   const filePath = (principal: Principal, id: string) => `${userDirectory(principal)}/${id}.json`;
   async function audit(tx: Prisma.TransactionClient, principal: Principal, action: string, metadata: Metadata, sourceHash?: string) {
-    await tx.identityAudit.create({ data: { actorUserId: principal.userId, sessionId: principal.sessionId, action: `dmp_sample.${action}`, sourceHash, reason: JSON.stringify({ ...metadata, grantId: principal.grantId ?? null }) } });
+    await tx.identityAudit.create({ data: { actorUserId: principal.userId, sessionId: principal.sessionId, action: `dmp_sample.${action}`, siteId: principal.siteId, sourceHash, reason: JSON.stringify({ ...metadata, grantId: principal.grantId ?? null }) } });
   }
-  async function lock(tx: Prisma.TransactionClient, principal: Principal) { await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dmp-samples:${root}:${principal.userId}`}, 813))`; }
+  async function lock(tx: Prisma.TransactionClient, principal: Principal) { await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`dmp-samples:${rootFor(principal)}:${principal.userId}`}, 813))`; }
   async function directory(principal: Principal, dispatch: () => void) {
-    await secureAdminPath("", root);
+    await secureAdminPath("", rootFor(principal));
     for (const relative of ["dmp-samples", userDirectory(principal)]) {
-      const target = await secureAdminPath(relative, root, true);
+      const target = await secureAdminPath(relative, rootFor(principal), true);
       if (!target.exists) { dispatch(); await fs.mkdir(target.resolved, { mode: 0o700 }); }
       else if (!(await fs.lstat(target.resolved)).isDirectory()) throw new DmpSampleError("Private sample storage is unavailable.", 409);
     }
   }
   async function load(principal: Principal, id: string): Promise<Envelope> {
-    const file = await readAdminFileBytes(filePath(principal, id), root);
+    const file = await readAdminFileBytes(filePath(principal, id), rootFor(principal));
     if (file.bytes.length > MAX_SAMPLE_BYTES * 7) throw new DmpSampleError("Stored sample exceeds its envelope limit.", 413);
     let stored: Envelope;
     try { stored = JSON.parse(file.bytes.toString("utf8")); } catch { throw new DmpSampleError("This private sample is unreadable.", 409); }
@@ -74,7 +75,7 @@ export function createDmpSampleCommands(configuredRoot = ADMIN_FILES_ROOT) {
   }
   async function checkManaged(tx: Prisma.TransactionClient, principal: Principal, reference: NonNullable<Envelope["managedFile"]>) {
     await assertCurrentPrincipal(tx, principal, "files.manage");
-    const file = await readAdminFileBytes(reference.path, root);
+    const file = await readAdminFileBytes(reference.path, rootFor(principal));
     if (file.fingerprint !== reference.expectedFingerprint) throw new DmpSampleError("The managed file changed. Reload its current fingerprint before intake or inspection.", 409, "stale_file");
     if (file.bytes.length > MAX_SAMPLE_BYTES) throw new DmpSampleError("Pilot sample files are limited to 2 MiB. Existing larger exports remain available in managed files.", 413);
     return file;
@@ -88,7 +89,7 @@ export function createDmpSampleCommands(configuredRoot = ADMIN_FILES_ROOT) {
     return stored;
   }
   async function mutate(principal: Principal, action: "save" | "remove", id: string, inputFingerprint: string, run: (tx: Prisma.TransactionClient, actor: Principal, dispatch: () => void) => Promise<Omit<Receipt, "ok" | "operationId" | "status">>, receiptOnly = false): Promise<Receipt> {
-    const sourceHash = sha(`dmp-sample:${root}:${principal.userId}:${id}`);
+    const sourceHash = sha(`dmp-sample:${rootFor(principal)}:${principal.userId}:${id}`);
     const previous = await prisma.$transaction(async tx => {
       const actor = await assertCurrentPrincipal(tx, principal, "workflow.read"); await lock(tx, actor);
       const started = await tx.identityAudit.findFirst({ where: { actorUserId: actor.userId, sourceHash, action: "dmp_sample.operation_started" } });
@@ -129,9 +130,9 @@ export function createDmpSampleCommands(configuredRoot = ADMIN_FILES_ROOT) {
       const id = sha(`sample:${actor.userId}:${data.operationId}`), capturedAt = new Date().toISOString();
       const summary: Summary = { sampleId: id, format: data.format, contentHash: sha(body ?? bytes!), bytes: body === undefined ? bytes!.length : Buffer.byteLength(body), sourceKind: data.sourceKind, sourceMethod: data.sourceMethod, sourceDay: data.sourceDay ?? null, sourceAsOf: data.sourceAsOf ?? null, exportedAt: data.exportedAt ?? null, capturedAt, provenance: data.originalDmpOperationId ? "verified_original_read_body" : data.managedFile ? "managed_file" : "manual_body", originalDmpOperationId: data.originalDmpOperationId ?? null, qualification: "manual_sample_only" };
       await directory(actor, dispatch);
-      const entries = await fs.readdir((await secureAdminPath(userDirectory(actor), root)).resolved);
+      const entries = await fs.readdir((await secureAdminPath(userDirectory(actor), rootFor(principal))).resolved);
       if (entries.length >= 100) throw new DmpSampleError("Pilot retention is limited to 100 private samples per person. Remove an unneeded sample first.", 413);
-      const target = await secureAdminPath(filePath(actor, id), root, true);
+      const target = await secureAdminPath(filePath(actor, id), rootFor(principal), true);
       if (target.exists) throw new DmpSampleError("This sample already exists. Inspect it; do not replay an uncertain save.", 409);
       const temporary = path.join(path.dirname(target.resolved), `.temco-upload-${randomUUID()}`);
       const envelope: Envelope = { version: 1, actorUserId: actor.userId, summary, ...(data.managedFile ? { managedFile: data.managedFile } : {}), ...(body === undefined ? {} : { body }) };
@@ -150,7 +151,7 @@ export function createDmpSampleCommands(configuredRoot = ADMIN_FILES_ROOT) {
       const rows = await tx.identityAudit.findMany({ where: { actorUserId: actor.userId, action: "dmp_sample.saved" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], ...(data.beforeId ? { cursor: { id: data.beforeId }, skip: 1 } : {}), take: data.limit + 1 });
       const samples = await Promise.all(rows.slice(0, data.limit).map(async row => {
         const summary = parse(row.reason).sample as Summary;
-        let retained = false; try { const target = await secureAdminPath(filePath(actor, sampleId.parse(summary.sampleId)), root); retained = (await fs.lstat(target.resolved)).isFile(); } catch { /* Removed or unavailable; metadata is retained, never a body substitute. */ }
+        let retained = false; try { const target = await secureAdminPath(filePath(actor, sampleId.parse(summary.sampleId)), rootFor(principal)); retained = (await fs.lstat(target.resolved)).isFile(); } catch { /* Removed or unavailable; metadata is retained, never a body substitute. */ }
         return { ...summary, retained };
       }));
       const starts = await tx.identityAudit.findMany({ where: { actorUserId: actor.userId, action: "dmp_sample.operation_started" }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 20 });
@@ -189,7 +190,7 @@ export function createDmpSampleCommands(configuredRoot = ADMIN_FILES_ROOT) {
     return mutate(principal, "remove", data.operationId, sha(JSON.stringify(data)), async (tx, actor, dispatch) => {
       const stored = await load(actor, data.sampleId);
       if (stored.summary.contentHash !== data.expectedContentHash) throw new DmpSampleError("The sample changed. Inspect its current version before removal.", 409);
-      const target = await secureAdminPath(filePath(actor, data.sampleId), root);
+      const target = await secureAdminPath(filePath(actor, data.sampleId), rootFor(principal));
       dispatch(); await fs.unlink(target.resolved);
       await audit(tx, actor, "removed", { sampleId: data.sampleId, contentHash: data.expectedContentHash }); return { removedSampleId: data.sampleId };
     });

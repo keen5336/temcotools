@@ -161,7 +161,7 @@ test("database label versions and device-bound receipts preserve unknown-no-repl
     await prisma.printingDevice.deleteMany({ where: { userId: { in: userIds } } });
     await prisma.warehouseObservationCorrection.deleteMany({ where: { observationId: { in: observationIds } } });
     await prisma.warehousePhysicalObservation.deleteMany({ where: { id: { in: observationIds } } });
-    if (workflowCreated) { await prisma.labelWorkflow.update({ where: { purpose: draft.purpose }, data: { publishedVersionId: null } }); await prisma.labelWorkflowAudit.deleteMany({ where: { purpose: draft.purpose } }); await prisma.labelWorkflowVersion.deleteMany({ where: { purpose: draft.purpose } }); await prisma.labelWorkflow.delete({ where: { purpose: draft.purpose } }); }
+    if (workflowCreated) { await prisma.labelWorkflow.updateMany({ where: { purpose: draft.purpose }, data: { publishedVersionId: null } }); await prisma.labelWorkflowAudit.deleteMany({ where: { purpose: draft.purpose } }); await prisma.labelWorkflowVersion.deleteMany({ where: { purpose: draft.purpose } }); await prisma.labelWorkflow.deleteMany({ where: { purpose: draft.purpose } }); }
     await prisma.officeScheduleFact.deleteMany({ where: { unitId: { in: unitIds } } });
     await prisma.warehouseIdentifier.deleteMany({ where: { unitId: { in: unitIds } } });
     await prisma.warehouseUnit.deleteMany({ where: { id: { in: unitIds } } });

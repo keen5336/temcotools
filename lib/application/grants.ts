@@ -26,7 +26,7 @@ export async function createAccessGrant(principal: Principal, input: unknown) {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`client-grants:${principal.userId}`}, 0))`;
     const activeCount = await tx.appAccessGrant.count({where:{userId:principal.userId,revokedAt:null,expiresAt:{gt:new Date()}}});
     if (activeCount >= 10) throw new GrantError("Revoke an existing client grant first.");
-    const grant = await tx.appAccessGrant.create({data:{userId:principal.userId,sessionId:principal.sessionId,authVersion:principal.authVersion,tokenHash:hashGrantToken(token),clientName:data.clientName,scopes:[...new Set(data.scopes)],expiresAt:new Date(Date.now()+data.lifetimeMinutes*60_000)},select:publicFields});
+    const grant = await tx.appAccessGrant.create({data:{userId:principal.userId,sessionId:principal.sessionId,authVersion:principal.authVersion,siteId:current.siteId ?? "warehouse-initial",tokenHash:hashGrantToken(token),clientName:data.clientName,scopes:[...new Set(data.scopes)],expiresAt:new Date(Date.now()+data.lifetimeMinutes*60_000)},select:publicFields});
     await tx.identityAudit.create({data:{action:"client_grant_created",actorUserId:principal.userId,sessionId:principal.sessionId,reason:data.clientName}});
     return {grant,token};
   });
@@ -54,7 +54,7 @@ export async function authenticateAccessGrant(token: string): Promise<Principal>
   const session = await prisma.userSession.findUnique({where:{id:grant.sessionId}});
   const claim = session && {userId:session.userId,authVersion:session.authVersion,issuedAt:session.createdAt.getTime(),expiresAt:session.expiresAt.getTime(),sessionId:session.id};
   if (!session || !claim || session.userId !== grant.userId || session.authVersion !== grant.authVersion || !isLivePersistentSession(session,claim)) throw new GrantError("The issuing session ended or was locked.");
-  const principal = await resolvePrincipal(claim, id => prisma.user.findUnique({where:{id},select:CURRENT_USER_SELECT}));
+  const principal = await resolvePrincipal(claim, id => prisma.user.findUnique({where:{id},select:CURRENT_USER_SELECT}), Date.now(), grant.siteId);
   if (!principal) throw new GrantError("The user session was revoked. Sign in again.");
   return {...principal,sessionId:session.id,grantId:grant.id,mfaVerifiedAt:session.mfaVerifiedAt?.getTime(),strongAuthenticatedAt:session.lastStrongAuthenticatedAt.getTime(),capabilities:principal.capabilities.filter(scope=>grant.scopes.includes(scope))};
 }

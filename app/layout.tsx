@@ -1,3 +1,5 @@
+import ConnectionStatus from "@/components/ConnectionStatus";
+import WarehouseSelector from "@/components/WarehouseSelector";
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -35,11 +37,11 @@ export default async function RootLayout({
     <html lang="en" data-theme="light" data-temco-pilot={policy.isolated ? policy.mode : undefined} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        <script id="temco-ui-context-bootstrap" dangerouslySetInnerHTML={{ __html: uiContextBootstrap(uiContext) }} />
+        <script id="temco-ui-context-bootstrap" dangerouslySetInnerHTML={{ __html: uiContextBootstrap(uiContext, session.siteId ?? null) }} />
       </head>
       <body className="antialiased">
         {policy.isolated && <aside role="status" className="bg-warning text-warning-content p-3 text-center text-sm">Isolated v2 pilot — named DMP reads and private exports. Live MARS actions and printing are disabled. Official finals remain unqualified.</aside>}
-        <ThemeProvider><UiContextBoundary context={uiContext}><FavoritesProvider key={uiContext || "anonymous"} userId={userId} role={userId ? session.role : "user"} capabilities={session.capabilities ?? []}><SessionActivity userId={userId} /><ApiRelayLease userId={userId} /><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></FavoritesProvider></UiContextBoundary></ThemeProvider>
+        <ThemeProvider>{userId && <WarehouseSelector siteId={session.siteId ?? null} siteName={session.siteName ?? null} />}<UiContextBoundary context={uiContext}><FavoritesProvider key={uiContext || "anonymous"} userId={userId} role={userId ? session.role : "user"} capabilities={session.capabilities ?? []}><ConnectionStatus userId={userId} /><SessionActivity userId={userId} /><ApiRelayLease userId={userId} /><LabelRelayProvider userId={userId}>{children}</LabelRelayProvider></FavoritesProvider></UiContextBoundary></ThemeProvider>
       </body>
     </html>
   );

@@ -15,7 +15,7 @@ export async function ensureBuiltInLabelTemplates(client?: Prisma.TransactionCli
     for (const item of [{ kind: "mars_return" as const, name: DEFAULT_TEMPLATE_NAME, zpl: DEFAULT_TEMPLATE_ZPL }, { kind: "pick_wave" as const, name: "Default Pick Wave 4x3", zpl: DEFAULT_PICK_WAVE_TEMPLATE }]) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`legacy-template:${item.kind}`}, 812))`;
       const currentDefault = await tx.labelTemplate.findFirst({ where: { kind: item.kind, isActive: true, isDefault: true }, select: { id: true } });
-      await tx.labelTemplate.upsert({ where: { kind_name: { kind: item.kind, name: item.name } }, create: { ...item, isDefault: !currentDefault }, update: {} });
+      if (!await tx.labelTemplate.findFirst({ where: { kind: item.kind, name: item.name } })) await tx.labelTemplate.create({ data: { ...item, isDefault: !currentDefault } });
     }
   };
   if (client) await ensure(client); else await prisma.$transaction(ensure);

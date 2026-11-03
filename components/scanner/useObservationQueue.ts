@@ -4,15 +4,16 @@ import { acknowledgeQueuedObservation, queuedObservations, queueObservation, rej
 
 export interface ObservationReceipt { observation?: unknown; resolution?: string; unitId?: string | null; replayed?: boolean; task?: unknown; office?: unknown; finals?: unknown }
 export function useObservationQueue(userId: string, onReceipt?: (receipt: ObservationReceipt, event: QueuedObservation) => void) {
+  const siteId = typeof window === "undefined" ? null : window.__temcoUiContextV1?.siteId ?? null;
   const [pending, setPending] = useState<QueuedObservation[]>([]), [error, setError] = useState("");
   const draining = useRef(false), owner = useRef(userId), callback = useRef(onReceipt);
   useEffect(() => { callback.current = onReceipt; });
   useEffect(() => { owner.current = userId; }, [userId]);
   const refresh = useCallback(async () => {
-    const current = await queuedObservations(userId);
+    const current = await queuedObservations(userId, siteId ?? undefined);
     if (owner.current === userId) setPending(current);
     return current;
-  }, [userId]);
+  }, [userId, siteId]);
   const drain = useCallback(async () => {
     if (draining.current) return;
     draining.current = true;
@@ -44,10 +45,11 @@ export function useObservationQueue(userId: string, onReceipt?: (receipt: Observ
     return () => { window.clearTimeout(initial); window.removeEventListener("online", online); window.clearInterval(interval); };
   }, [drain]);
   const capture = useCallback(async (input: { rawIdentifier: string; type?: QueuedObservation["type"]; location?: string; captureMethod?: QueuedObservation["captureMethod"]; pickWaveId?: string; finalsSessionId?: string; lane?: string; confirmPlacement?: boolean }) => {
+    if (!siteId) throw new Error("Select a warehouse before capturing observations.");
     if (owner.current !== userId) throw new Error("Operator changed. Reopen the scan workspace.");
-    const event = await queueObservation({ ...input, eventId: crypto.randomUUID(), capturedByUserId: userId, capturedAt: new Date().toISOString(), identifierType: "auto", type: input.type ?? "presence", captureMethod: input.captureMethod ?? "scanner" });
+    const event = await queueObservation({ ...input, eventId: crypto.randomUUID(), siteId, capturedByUserId: userId, capturedAt: new Date().toISOString(), identifierType: "auto", type: input.type ?? "presence", captureMethod: input.captureMethod ?? "scanner" });
     await refresh(); void drain();
     return event;
-  }, [drain, refresh, userId]);
+  }, [drain, refresh, userId, siteId]);
   return { capture, retry: drain, pending, error, queuedCount: pending.filter(item => item.state === "pending").length, rejectedCount: pending.filter(item => item.state === "rejected").length };
 }

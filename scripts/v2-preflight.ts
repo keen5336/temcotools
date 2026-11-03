@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { parseArgs } from "node:util";
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { decryptMfaSecret } from "../lib/auth/mfa-crypto";
 import { hasColumn, inventoryRepairCounts, maintenanceClient, maintenanceFailure, maintenanceTarget, migrationState, printMaintenance, tableExists, MaintenanceError } from "./v2-preflight-support";
 
@@ -15,13 +15,15 @@ export async function inspectV2Readiness(prisma: PrismaClient, phase: "migrate" 
     if (migrations.pending.length && phase === "launch") blockers.push("Apply the reviewed pending migrations before launch.");
     let identity = null;
     if (await hasColumn(tx, "User", "passwordHash") && await tableExists(tx, "UserMfa") && await tableExists(tx, "RoleBundle")) {
+      const warehouseRoles = await tableExists(tx, "WarehouseMembership");
+      const capExpression = warehouseRoles ? Prisma.sql`coalesce((SELECT array_agg(DISTINCT cap) FROM "WarehouseMembership" wm JOIN "WarehouseSite" ws ON ws.id=wm."siteId" JOIN "WarehouseMembershipRole" mr ON mr."membershipId"=wm.id JOIN "WarehouseRole" r ON r.id=mr."roleId" CROSS JOIN unnest(r.capabilities) cap WHERE wm."userId"=u.id AND wm."isActive" AND ws."isActive" AND r."isActive" AND (r."siteId" IS NULL OR r."siteId"=wm."siteId")),ARRAY[]::text[])` : Prisma.sql`coalesce((SELECT array_agg(DISTINCT cap) FROM "UserRoleBundle" a JOIN "RoleBundle" b ON b.id=a."bundleId" CROSS JOIN unnest(b.capabilities) cap WHERE a."userId"=u.id),ARRAY[]::text[])`;
       const [counts] = await tx.$queryRaw<Record<string, bigint>[]>`
-        WITH accounts AS (SELECT u.*,m."enabledAt" AS "mfaEnabledAt",coalesce((SELECT array_agg(DISTINCT cap) FROM "UserRoleBundle" a JOIN "RoleBundle" b ON b.id=a."bundleId" CROSS JOIN unnest(b.capabilities) cap WHERE a."userId"=u.id),ARRAY[]::text[]) AS caps FROM "User" u LEFT JOIN "UserMfa" m ON m."userId"=u.id)
+        WITH accounts AS (SELECT u.*,m."enabledAt" AS "mfaEnabledAt",${capExpression} AS caps,coalesce((to_jsonb(u)->>'isPlatformAdmin')::boolean,u.role='admin') AS platform FROM "User" u LEFT JOIN "UserMfa" m ON m."userId"=u.id)
         SELECT count(*) FILTER(WHERE "isActive") AS "activeUsers",
           count(*) FILTER(WHERE "isActive" AND "passwordHash" IS NULL) AS "activeUsersNeedingEnrollment",
           count(*) FILTER(WHERE "isActive" AND "passwordHash" IS NOT NULL AND "passwordHash" !~ ${strongHashPattern}) AS "unsupportedCredentials",
-          count(*) FILTER(WHERE "isActive" AND (role='admin' OR caps && ARRAY['users.manage','payloads.manage','labels.manage','office.decide','office.authorize_rtv','dispatch.allocate','dispatch.signoff','inventory.identify']) AND "mfaEnabledAt" IS NULL) AS "privilegedUsersNeedingMfa",
-          count(*) FILTER(WHERE "isActive" AND role='admin' AND "passwordHash" IS NOT NULL AND 'users.manage'=ANY(caps) AND "mfaEnabledAt" IS NOT NULL) AS "readyRecoveryAdministrators",
+          count(*) FILTER(WHERE "isActive" AND (platform OR caps && ARRAY['users.manage','payloads.manage','labels.manage','office.decide','office.authorize_rtv','dispatch.allocate','dispatch.signoff','inventory.identify']) AND "mfaEnabledAt" IS NULL) AS "privilegedUsersNeedingMfa",
+          count(*) FILTER(WHERE "isActive" AND platform AND "passwordHash" IS NOT NULL AND "mfaEnabledAt" IS NOT NULL) AS "readyRecoveryAdministrators",
           count(*) FILTER(WHERE "isActive" AND cardinality(caps)=0) AS "activeUsersWithoutWarehouseBundles"
         FROM accounts`;
       identity = Object.fromEntries(Object.entries(counts).map(([key, value]) => [key, Number(value)]));
@@ -30,10 +32,7 @@ export async function inspectV2Readiness(prisma: PrismaClient, phase: "migrate" 
       // account, ciphertext, secret or live authenticator code.
       const factors = await tx.$queryRaw<{ userId: string; encryptedSecret: string; recoveryAdministrator: boolean }[]>`
         SELECT m."userId",m."encryptedSecret",
-          (u.role='admin' AND u."passwordHash" IS NOT NULL AND EXISTS (
-            SELECT 1 FROM "UserRoleBundle" a JOIN "RoleBundle" b ON b.id=a."bundleId"
-            WHERE a."userId"=u.id AND 'users.manage'=ANY(b.capabilities)
-          )) AS "recoveryAdministrator"
+          (coalesce((to_jsonb(u)->>'isPlatformAdmin')::boolean,u.role='admin') AND u."passwordHash" IS NOT NULL) AS "recoveryAdministrator"
         FROM "UserMfa" m JOIN "User" u ON u.id=m."userId"
         WHERE u."isActive" AND m."enabledAt" IS NOT NULL`;
       identity.unreadableEnabledMfaFactors = 0;

@@ -16,6 +16,9 @@ export interface SessionData {
   mfaVerifiedAt?: number;
   capabilities?: readonly Capability[];
   apiRelaySessionId?: string;
+  siteId?: string;
+  siteName?: string;
+  isPlatformAdmin?: boolean;
 }
 
 const cookieName = process.env.TEMCO_SESSION_COOKIE_NAME || "temco_session";

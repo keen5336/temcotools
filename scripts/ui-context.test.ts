@@ -62,3 +62,12 @@ test("early bootstrap preserves native Request/FormData/abort and cannot rebind 
   const count = captured.length, denied = await window.fetch("https://synthetic.temco.invalid/api/account/security", { method: "POST" }); assert.equal(denied.status, 409); assert.equal(captured.length, count, "A blocked document neither dispatches nor retries queued API work.");
   await window.fetch("https://synthetic.temco.invalid/api/auth/login", { method: "POST" }); assert.equal(captured.length, count + 1, "An explicit login ceremony remains available; success must open a fresh document.");
 });
+
+test("warehouse pin covers RSC navigation and downloads without exporting context to other origins", async () => {
+  const seen: Request[] = [];
+  const window = { location: { href: "https://synthetic.temco.invalid/tools/warehouse", origin: "https://synthetic.temco.invalid" }, fetch: async (input: RequestInfo | URL, init?: RequestInit) => { const r = new Request(input, init); seen.push(r); return new Response("{}"); }, dispatchEvent: () => true };
+  runInNewContext(uiContextBootstrap("uc1_" + "A".repeat(43), "site-a"), { window, Request, Headers, Response, URL, CustomEvent });
+  await window.fetch("https://synthetic.temco.invalid/tools/pick-waves?_rsc=synthetic", { headers: { RSC: "1", "X-Temco-Site": "site-b" } });
+  assert.equal(seen[0].headers.get("X-Temco-Site"), "site-a");
+  assert.match(boundApiHref("/api/warehouse/export", "uc1_" + "A".repeat(43), "site-a"), /__temco_site=site-a/);
+});

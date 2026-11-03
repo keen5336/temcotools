@@ -22,14 +22,14 @@ export const dmpReceiptInput = z.object({ operationId: z.string().min(16).max(10
 export const dmpReconcileInput = dmpReceiptInput.extend({ outcome: z.enum(["verified_applied", "verified_not_applied"]), evidence: z.string().trim().min(10).max(2000) }).strict();
 export const dmpRequestInput = dmpReceiptInput.extend({ connectionId: z.string().min(1).max(100), operation: z.string().min(1).max(64), input: z.unknown().default({}).describe("Scalar parameters for the configured named operation; no arbitrary endpoint or method.") }).strict();
 export const relaySessionId = (sessionId: string) => `v2:${hash(sessionId)}`;
-function owner(principal: Principal) { return { userId: principal.userId, sessionId: relaySessionId(principal.sessionId!), authSessionId: principal.sessionId, authVersion: principal.authVersion, grantId: principal.grantId }; }
+function owner(principal: Principal) { return { siteId: principal.siteId ?? "warehouse-initial", userId: principal.userId, sessionId: relaySessionId(principal.sessionId!), authSessionId: principal.sessionId, authVersion: principal.authVersion, grantId: principal.grantId }; }
 async function current(principal: Principal, capability: "workflow.read" | "workflow.execute" = "workflow.read") { return prisma.$transaction(tx => assertCurrentPrincipal(tx, principal, capability)); }
 export async function getDmpStatus(principal: Principal) {
   const actor = await current(principal), config = dmpConfig();
   const data = await apiRelayControl("connections", owner(actor));
   const shareCandidates = actor.grantId ? [] : await prisma.$transaction(async tx => {
     await assertCurrentPrincipal(tx, actor, "workflow.read");
-    const grants = await tx.oAuthGrant.findMany({ where: { userId: actor.userId, revokedAt: null, expiresAt: { gt: new Date() }, scopes: { has: "workflow.read" } }, include: { client: { select: { name: true } }, session: { select: { deviceLabel: true } } }, orderBy: { createdAt: "desc" }, take: 100 });
+    const grants = await tx.oAuthGrant.findMany({ where: { siteId: actor.siteId, userId: actor.userId, revokedAt: null, expiresAt: { gt: new Date() }, scopes: { has: "workflow.read" } }, include: { client: { select: { name: true } }, session: { select: { deviceLabel: true } } }, orderBy: { createdAt: "desc" }, take: 100 });
     const eligible = [];
     for (const grant of grants) {
       try {
@@ -64,7 +64,7 @@ export async function approveDmpShare(principal: Principal, raw: unknown) {
     const target = await tx.oAuthGrant.findUnique({ where: { id: data.oauthGrantId } });
     if (!target || target.userId !== actor.userId) throw new AuthorizationError("Choose a current OAuth grant belonging to your own account.");
     const requester = await principalForOAuthGrant(tx, target.id);
-    if (!requester.capabilities.includes("workflow.read")) throw new AuthorizationError("The remote client's current grant requires workflow.read.");
+    if (requester.siteId !== actor.siteId || !requester.capabilities.includes("workflow.read")) throw new AuthorizationError("The remote client's current grant requires workflow.read.");
     const expiresAt = Math.min(Date.now() + data.expiresInMinutes * 60_000, target.expiresAt.getTime());
     await tx.identityAudit.create({ data: { action: "dmp_read_share_authorization_recorded", actorUserId: actor.userId, sessionId: actor.sessionId, reason: JSON.stringify({ connectionId: data.connectionId, requesterGrantId: requester.grantId, requesterSessionId: requester.sessionId, operations: data.operations, expiresAt, phase: "authorization_recorded" }) } });
     return { actor, requester, expiresAt };

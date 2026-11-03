@@ -14,6 +14,7 @@ const claim: SessionClaim = {
 const current: CurrentUser = {
   id: "operator-a", username: "operator-a", displayName: "Operator A",
   role: "admin", isActive: true, authVersion: 3,
+  siteMemberships: [{ siteId: "warehouse-initial", isActive: true, site: { isActive: true, name: "Synthetic warehouse" }, roles: [{ role: { siteId: null, isActive: true, capabilities: ["inventory.read", "labels.manage"] } }] }],
 };
 
 test("principal uses the current user and role, ignoring cookie display/role snapshots", async () => {
@@ -53,7 +54,7 @@ test("database errors fail closed rather than using cookie authority", async () 
   await assert.rejects(resolvePrincipal(claim, async () => { throw new Error("unavailable"); }, now), /unavailable/);
 });
 
-test("initial manager bundle retains label management without user/payload/file administration", async () => {
+test("warehouse membership supplies capabilities independently of the legacy role label", async () => {
   const principal = await resolvePrincipal(claim, async () => ({ ...current, role: "manager" }), now);
   assert.ok(principal);
   assertCapability(principal, "labels.manage");
@@ -82,4 +83,19 @@ test("dedicated MCP lives outside app API Origin guard; ordinary API paths have 
   assert.equal(requiresSameOrigin("POST", "/api/mcp/other"), true);
   assert.equal(requiresSameOrigin("POST", "/api/mcp-lookalike"), true);
   for (const method of ["GET", "HEAD", "OPTIONS"]) assert.equal(requiresSameOrigin(method, "/api/admin/users"), false);
+});
+
+test("legacy admin alone cannot become a platform admin; warehouse bundles cannot grant platform powers", async () => {
+  const p = await resolvePrincipal(claim, async () => ({ ...current, siteMemberships: [{ ...current.siteMemberships![0], roles: [{ role: { siteId: null, isActive: true, capabilities: ["users.manage", "payloads.manage", "platform.manage", "sites.members.manage"] } }] }] }), now);
+  assert.equal(p?.role, "manager"); assert.equal(p?.isPlatformAdmin, false);
+  assert.deepEqual([...(p?.capabilities ?? [])].sort(), ["account.self", "sites.members.manage"].sort());
+  const platform = await resolvePrincipal(claim, async () => ({ ...current, isPlatformAdmin: true }), now);
+  assert.equal(platform?.role, "admin"); assert.ok(platform?.capabilities.includes("platform.manage"));
+});
+
+test("one person has different active bundles in different warehouses; inactive membership supplies none", async () => {
+  const person = { ...current, siteMemberships: [...current.siteMemberships!, { siteId: "site-b", isActive: true, site: { isActive: true, name: "Warehouse B" }, roles: [{ role: { siteId: "site-b", isActive: true, capabilities: ["workflow.read"] } }] }] };
+  const b = await resolvePrincipal(claim, async () => person, now, "site-b"); assert.equal(b?.siteId, "site-b"); assert.equal(b?.capabilities.includes("inventory.read"), false);
+  person.siteMemberships[1].isActive = false;
+  const gone = await resolvePrincipal(claim, async () => person, now, "site-b"); assert.equal(gone?.siteId, undefined); assert.deepEqual(gone?.capabilities, ["account.self"]);
 });

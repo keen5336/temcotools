@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { controlKey } from "../../scripts/api-relay/control-key.mjs";
 
-export type RelayOwner = { userId: string; sessionId: string; authSessionId?: string; authVersion?: number; grantId?: string };
+export type RelayOwner = { siteId?: string; userId: string; sessionId: string; authSessionId?: string; authVersion?: number; grantId?: string };
 export async function apiRelayControl(action: string, owner: RelayOwner, data: Record<string, unknown> = {}) {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) throw new Error("API relay requires a configured session secret.");

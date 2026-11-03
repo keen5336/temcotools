@@ -22,13 +22,13 @@ export type AdminFileEntry = {
 export function normalizeRelativePath(input?: string | null) {
   if (input != null && typeof input !== "string") throw new AdminFileError("A relative path is required.");
   const raw = (input ?? "").replace(/\\/g, "/").trim();
-  if (raw.length > 2048 || /[\x00-\x1f\x7f]/.test(raw) || raw.startsWith("/") || /^[a-z]:/i.test(raw) || raw.split("/").some(segment => segment === ".." || segment.length > 240 || segment.startsWith(".temco-upload-"))) throw new AdminFileError("Use a path within the managed file root without parent traversal or reserved upload names.");
+  if (raw.length > 2048 || /[\x00-\x1f\x7f]/.test(raw) || raw.startsWith("/") || /^[a-z]:/i.test(raw) || raw.split("/").some(segment => segment === ".." || segment.length > 240 || (segment.startsWith(".temco-upload-") || segment === ".temco-sites"))) throw new AdminFileError("Use a path within the managed file root without parent traversal or reserved upload names.");
   const clean = path.posix.normalize(raw);
   return clean === "." ? "" : clean.replace(/\/$/, "");
 }
 
 export function validateAdminFileName(input: string) {
-  if (typeof input !== "string" || !input || input.length > 240 || input !== input.trim() || input === "." || input === ".." || /[/\\\x00-\x1f\x7f]/.test(input) || input.startsWith(".temco-upload-")) throw new AdminFileError("Use a single file or folder name without path separators.");
+  if (typeof input !== "string" || !input || input.length > 240 || input !== input.trim() || input === "." || input === ".." || /[/\\\x00-\x1f\x7f]/.test(input) || (input.startsWith(".temco-upload-") || input === ".temco-sites")) throw new AdminFileError("Use a single file or folder name without path separators.");
   return input;
 }
 
@@ -93,7 +93,7 @@ export async function listAdminDirectory(relativePath = "", configuredRoot = ADM
 
   if (entries.length > MAX_ADMIN_ENTRIES) throw new AdminFileError("This folder exceeds 5,000 entries. Organize it into smaller folders.", 413);
   const items = await Promise.all(
-    entries.filter(entry => !entry.name.startsWith(".temco-upload-")).map(async (entry): Promise<AdminFileEntry> => {
+    entries.filter(entry => !entry.name.startsWith(".temco-upload-") && entry.name !== ".temco-sites").map(async (entry): Promise<AdminFileEntry> => {
       const childPath = clean ? `${clean}/${entry.name}` : entry.name;
       const stats = await fs.lstat(path.join(resolved, entry.name));
       const blocked = stats.isSymbolicLink() || (!stats.isFile() && !stats.isDirectory()) || (stats.isFile() && stats.nlink !== 1);

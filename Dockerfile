@@ -10,10 +10,24 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 
+# Scanner assets are pinned/lazy browser runtimes, prepared independently from
+# the application dependency graph. No recognition service or global headers.
+FROM base AS scan-assets
+WORKDIR /app
+COPY scripts/scan-lab/runtime-package.json /opt/temcoscan/package.json
+COPY scripts/scan-lab/runtime-package-lock.json /opt/temcoscan/package-lock.json
+RUN npm ci --prefix /opt/temcoscan --no-audit --no-fund
+COPY scripts/scan-lab-prepare.mjs ./scripts/scan-lab-prepare.mjs
+COPY scripts/scan-lab ./scripts/scan-lab
+COPY lib/scan-lab/runtime ./lib/scan-lab/runtime
+COPY public/scan-lab/licenses ./public/scan-lab/licenses
+RUN SCAN_LAB_SANDBOX=/opt/temcoscan node scripts/scan-lab-prepare.mjs
+
 # Rebuild the source code only when needed
 FROM deps AS builder
 WORKDIR /app
 COPY . .
+COPY --from=scan-assets /app/public/scan-lab/vendor ./public/scan-lab/vendor
 
 RUN npx prisma generate
 RUN npm run build

@@ -8,7 +8,7 @@ export async function lockCurrentAdmin(tx: Prisma.TransactionClient, userId: str
   const current = await tx.$queryRaw<{ id: string }[]>`
     SELECT id FROM "User"
     WHERE id = ${userId} AND "authVersion" = ${authVersion}
-      AND "isActive" = true AND role = 'admin'
+      AND "isActive" = true AND "isPlatformAdmin" = true
     FOR SHARE
   `;
   if (!current.length) throw new AuthorizationError("Your access changed. Sign in again before continuing.");

@@ -1,18 +1,25 @@
 import { parseArgs } from "node:util";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { retainCurrentSourceRevisions } from "../lib/warehouse/source-history";
-import { inventoryRepairCounts, maintenanceClient, maintenanceFailure, maintenanceReason, maintenanceTarget, printMaintenance, MaintenanceError } from "./v2-preflight-support";
+import { inventoryRepairCounts, hasColumn, maintenanceClient, maintenanceFailure, maintenanceReason, maintenanceTarget, printMaintenance, MaintenanceError } from "./v2-preflight-support";
 
-export async function backfillV2Inventory(prisma: PrismaClient, options: { apply: boolean; reason?: string; limit?: number; after?: string }) {
+export async function backfillV2Inventory(prisma: PrismaClient, options: { apply: boolean; reason?: string; limit?: number; after?: string; siteId?: string }) {
   const limit = options.limit ?? 500;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5000) throw new MaintenanceError("--limit must be 1 to 5000 rows.");
   if (options.apply) maintenanceReason(options.reason);
   return prisma.$transaction(async (tx) => {
     if (!options.apply) await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
     else await tx.$executeRaw`SELECT pg_advisory_xact_lock(8100801)`;
+    const scoped = await hasColumn(tx, "InventoryAuditItem", "siteId");
+    const siteId = options.siteId ?? "warehouse-initial";
+    if (scoped) {
+      if (!options.siteId && await tx.warehouseSite.count({ where: { isActive: true } }) > 1) throw new MaintenanceError("Choose --site explicitly for a multi-warehouse backfill.");
+      if (!await tx.warehouseSite.findUnique({ where: { id: siteId } })) throw new MaintenanceError("The exact warehouse does not exist.");
+      await tx.$queryRaw`SELECT set_config('temco.site_id',${siteId},true)`;
+    } else if (options.siteId) throw new MaintenanceError("Apply warehouse scope migration before a site-specific backfill.");
     const before = await inventoryRepairCounts(tx);
     if (before.conflictingCurrentRevisions) throw new MaintenanceError("Current source history conflicts with retained immutable revisions. No repair was attempted; investigate without replacing history.");
-    const rows = await tx.inventoryAuditItem.findMany({ where: options.after ? { id: { gt: options.after } } : undefined, select: { id: true, lpn: true }, orderBy: { id: "asc" }, take: limit + 1 });
+    const rows = await tx.inventoryAuditItem.findMany({ where: { ...(scoped ? { siteId } : {}), ...(options.after ? { id: { gt: options.after } } : {}) }, select: { id: true, lpn: true }, orderBy: { id: "asc" }, take: limit + 1 });
     const batch = rows.slice(0, limit), lpns = batch.map((row) => row.lpn);
     if (options.apply && lpns.length) {
       const collisions = await tx.$queryRaw<{ count: bigint }[]>`
@@ -35,7 +42,7 @@ export async function backfillV2Inventory(prisma: PrismaClient, options: { apply
         ON CONFLICT DO NOTHING`;
       await tx.identityAudit.create({ data: { action: "v2_inventory_baseline_repaired", reason: `Offline maintenance: ${options.reason}; examined ${batch.length} rows. Existing links, revoked aliases and evidence preserved.` } });
     }
-    return { mode: options.apply ? "applied" : "dry-run", examinedRows: batch.length, hasMore: rows.length > limit, nextCursor: rows.length > limit ? batch.at(-1)!.id : null, before, after: options.apply ? await inventoryRepairCounts(tx) : before, limits: ["Only missing WMS unit baselines, current-row snapshots and safe LPN aliases are repaired.", "Revoked/conflicting aliases, existing unit links, overwritten source history, historical import membership and physical observations are never reconstructed.", "Re-running a completed page is safe; nextCursor is an internal source-row ID, not an LPN."] };
+    return { siteId: scoped ? siteId : null, mode: options.apply ? "applied" : "dry-run", examinedRows: batch.length, hasMore: rows.length > limit, nextCursor: rows.length > limit ? batch.at(-1)!.id : null, before, after: options.apply ? await inventoryRepairCounts(tx) : before, limits: ["Only missing WMS unit baselines, current-row snapshots and safe LPN aliases are repaired.", "Revoked/conflicting aliases, existing unit links, overwritten source history, historical import membership and physical observations are never reconstructed.", "Re-running a completed page is safe; nextCursor is an internal source-row ID, not an LPN."] };
   }, { isolationLevel: "Serializable", timeout: 60_000 });
 }
 
@@ -66,11 +73,11 @@ export async function invalidateRestoredAccess(prisma: PrismaClient, options: { 
 }
 
 export async function runBackfillCli() {
-  const { values } = parseArgs({ options: { "expect-database": { type: "string" }, "allow-operational-target": { type: "boolean", default: false }, apply: { type: "boolean", default: false }, reason: { type: "string" }, limit: { type: "string", default: "500" }, after: { type: "string" }, "invalidate-restored-access": { type: "boolean", default: false } }, strict: true });
+  const { values } = parseArgs({ options: { "expect-database": { type: "string" }, "allow-operational-target": { type: "boolean", default: false }, apply: { type: "boolean", default: false }, reason: { type: "string" }, limit: { type: "string", default: "500" }, after: { type: "string" }, site: { type: "string" }, "invalidate-restored-access": { type: "boolean", default: false } }, strict: true });
   const target = maintenanceTarget(values["expect-database"], values["allow-operational-target"]);
   const prisma = maintenanceClient(target);
   try {
-    const report = values["invalidate-restored-access"] ? await invalidateRestoredAccess(prisma, { apply: values.apply, reason: values.reason }) : await backfillV2Inventory(prisma, { apply: values.apply, reason: values.reason, limit: Number(values.limit), after: values.after });
+    const report = values["invalidate-restored-access"] ? await invalidateRestoredAccess(prisma, { apply: values.apply, reason: values.reason }) : await backfillV2Inventory(prisma, { apply: values.apply, reason: values.reason, limit: Number(values.limit), after: values.after, siteId: values.site });
     printMaintenance({ database: target.database, operationalTarget: target.operational, ...report });
   } finally { await prisma.$disconnect(); }
 }

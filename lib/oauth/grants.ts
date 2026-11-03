@@ -25,7 +25,7 @@ export async function principalForOAuthGrant(tx: Prisma.TransactionClient, id: s
     || grant.clientId !== client.id || grant.userId !== user.id || grant.sessionId !== session.id || session.userId !== user.id || grant.authVersion !== user.authVersion) throw new AuthorizationError("OAuth grant expired or was revoked.");
   const claim = { userId: session.userId, sessionId: session.id, authVersion: session.authVersion, issuedAt: session.createdAt.getTime(), expiresAt: session.expiresAt.getTime() };
   if (!isLivePersistentSession(session, claim)) throw new AuthorizationError("The consenting user session ended or was locked.");
-  const current = await resolvePrincipal(claim, async () => user);
+  const current = await resolvePrincipal(claim, async () => user, Date.now(), grant.siteId);
   if (!current) throw new AuthorizationError("The consenting user's current access changed.");
   return { ...current, sessionId: session.id, grantId: `oauth:${grant.id}`, strongAuthenticatedAt: session.lastStrongAuthenticatedAt.getTime(), mfaVerifiedAt: session.mfaVerifiedAt?.getTime(), capabilities: current.capabilities.filter((cap) => grant.scopes.includes(cap)) };
 }
@@ -33,7 +33,7 @@ export async function principalForOAuthGrant(tx: Prisma.TransactionClient, id: s
 export async function assertOAuthGrant(tx: Prisma.TransactionClient, principal: Principal, capability?: Capability): Promise<Principal> {
   if (!principal.grantId?.startsWith("oauth:")) throw new AuthorizationError("An OAuth grant is required.");
   const current = await principalForOAuthGrant(tx, principal.grantId.slice(6));
-  if (current.userId !== principal.userId || current.sessionId !== principal.sessionId || current.authVersion !== principal.authVersion) throw new AuthorizationError("OAuth grant owner changed.");
+  if (current.userId !== principal.userId || current.sessionId !== principal.sessionId || current.authVersion !== principal.authVersion || current.siteId !== principal.siteId) throw new AuthorizationError("OAuth grant owner changed.");
   const result = { ...current, capabilities: current.capabilities.filter((cap) => principal.capabilities.includes(cap)) };
   if (capability) assertCapability(result, capability);
   return result;

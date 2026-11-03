@@ -73,7 +73,7 @@ export async function prepareLabelIssuanceInTransaction(tx: Prisma.TransactionCl
       zpl = data.legacyZpl; contentFingerprint = fingerprint({ purpose: data.purpose, zpl });
     } else {
       if (!data.unitId) throw new LabelError("A shared physical-unit ID is required for this label workflow.");
-      const workflow = await tx.labelWorkflow.findUnique({ where: { purpose: data.purpose }, include: { publishedVersion: true } });
+      const workflow = await tx.labelWorkflow.findFirst({ where: { purpose: data.purpose }, include: { publishedVersion: true } });
       if (!workflow?.enabled || !workflow.publishedVersion || (data.versionId && data.versionId !== workflow.publishedVersion.id)) throw new LabelError("Use the current enabled published label version.", 409);
       const selectedDay = await unitLabelDispatchDay(tx, { unitId: data.unitId, dispatchDay: data.dispatchDay, pickWaveItemId: data.pickWaveItemId });
       const context = await deriveUnitLabelContext(tx, { unitId: data.unitId, dispatchDay: selectedDay, wmsScope: data.wmsScope });
@@ -133,7 +133,7 @@ export async function claimLabelDispatch(principal: Principal, input: unknown): 
     }
     if (row.workflowVersionId) {
       await tx.$queryRaw`SELECT purpose FROM "LabelWorkflow" WHERE purpose=${row.purpose} FOR SHARE`;
-      const workflow = await tx.labelWorkflow.findUnique({ where: { purpose: row.purpose }, select: { enabled: true, publishedVersionId: true } });
+      const workflow = await tx.labelWorkflow.findFirst({ where: { purpose: row.purpose }, select: { enabled: true, publishedVersionId: true } });
       if (!workflow?.enabled || (workflow.publishedVersionId !== row.workflowVersionId && !row.reprintOf)) {
         const cancelled = await tx.labelIssuance.update({ where: { id: row.id }, data: { state: "not_sent", reportedAt: new Date() } });
         await event(tx, cancelled, principal.userId, "publication_changed_before_dispatch", "Publication changed or was disabled; no device print claim was issued.", device.id);

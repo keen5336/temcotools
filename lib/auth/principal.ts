@@ -10,6 +10,7 @@ export const CAPABILITIES = [
   "office.decide", "office.authorize_rtv",
   "account.self",
   "dispatch.allocate", "dispatch.signoff",
+  "platform.manage", "sites.members.manage", "sites.configure", "integrations.manage", "providers.manage", "workflows.manage",
 ] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
@@ -24,6 +25,9 @@ export interface Principal {
   strongAuthenticatedAt?: number;
   mfaVerifiedAt?: number;
   grantId?: string;
+  siteId?: string;
+  siteName?: string;
+  isPlatformAdmin?: boolean;
 }
 
 export interface CurrentUser {
@@ -34,6 +38,8 @@ export interface CurrentUser {
   isActive: boolean;
   authVersion: number;
   roleBundles?: Array<{ bundle: { capabilities: string[] } }>;
+  isPlatformAdmin?: boolean;
+  siteMemberships?: Array<{ siteId: string; isActive: boolean; site: { isActive: boolean; name: string }; roles: Array<{ role: { siteId: string | null; isActive: boolean; capabilities: string[] } }> }>;
 }
 
 export interface SessionClaim {
@@ -50,6 +56,8 @@ export const RECENT_AUTH_MS = 10 * 60 * 1000;
 export const CURRENT_USER_SELECT = {
   id: true, username: true, displayName: true, role: true, isActive: true, authVersion: true,
   roleBundles: { select: { bundle: { select: { capabilities: true } } } },
+  isPlatformAdmin: true,
+  siteMemberships: { select: { siteId: true, isActive: true, site: { select: { isActive: true, name: true } }, roles: { select: { role: { select: { siteId: true, isActive: true, capabilities: true } } } } } },
 } as const;
 const COMMON_CAPABILITIES: readonly Capability[] = [
   "account.self",
@@ -81,17 +89,20 @@ export async function resolvePrincipal(
   claim: SessionClaim,
   lookup: (userId: string) => Promise<CurrentUser | null>,
   now = Date.now(),
+  siteId: string = "warehouse-initial",
 ): Promise<Principal | null> {
   if (!isLiveSessionClaim(claim, now)) return null;
   const user = await lookup(claim.userId!);
   if (!user || user.id !== claim.userId || !user.isActive || user.authVersion !== claim.authVersion) return null;
   if (user.role !== "admin" && user.role !== "manager" && user.role !== "user") return null;
-  const assigned = user.roleBundles
-    ? [...new Set(user.roleBundles.flatMap(({ bundle }) => bundle.capabilities))].filter((cap): cap is Capability => CAPABILITIES.includes(cap as Capability))
-    : [...capabilitiesForRole(user.role)];
+  const membership = user.siteMemberships?.find(m => m.siteId === siteId && m.isActive && m.site.isActive);
+  const platform = user.isPlatformAdmin === true;
+  const forbiddenLocal = new Set(["platform.manage", "users.manage", "payloads.manage"]);
+  const assigned = platform ? [...CAPABILITIES] : [...new Set(membership?.roles.filter(({ role }) => role.isActive && (role.siteId === null || role.siteId === siteId)).flatMap(({ role }) => role.capabilities) ?? [])].filter((cap): cap is Capability => CAPABILITIES.includes(cap as Capability) && !forbiddenLocal.has(cap));
   return {
     userId: user.id, username: user.username, displayName: user.displayName,
-    role: user.role, authVersion: user.authVersion,
+    role: platform ? "admin" : assigned.includes("sites.members.manage") ? "manager" : "user", authVersion: user.authVersion,
+    isPlatformAdmin: platform, siteId: platform || membership ? siteId : undefined, siteName: membership?.site.name,
     // An active person can always secure their own account, even if all
     // warehouse bundles are removed. Delegated grants still intersect scopes
     // and receive this capability only when it was explicitly granted.

@@ -1,3 +1,7 @@
+import * as workflows from "@/lib/workflows/service";
+import * as integrations from "@/lib/integrations/service";
+import * as warehouses from "@/lib/sites/service";
+import { withPrincipalSite } from "@/lib/sites/context";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { assertCapability, type Capability, type Principal } from "@/lib/auth/principal";
@@ -46,6 +50,45 @@ const userCeremony = (principal: Principal, action: () => unknown | Promise<unkn
 // One explicit application action list. UI APIs and MCP call these same domain
 // services; no arbitrary URL, JS execution, user impersonation or DB tunnel.
 export const applicationActions = {
+  "workflows.list": { capability: "workflow.read", description: "listWorkflows: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowListInput, run: workflows.listWorkflows },
+  "workflows.get": { capability: "workflow.read", description: "getWorkflow: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowGetInput, run: workflows.getWorkflow },
+  "workflows.create": { capability: "workflows.manage", description: "createWorkflowDraft: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowCreateInput, run: workflows.createWorkflowDraft },
+  "workflows.save": { capability: "workflows.manage", description: "saveWorkflowDraft: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowSaveInput, run: workflows.saveWorkflowDraft },
+  "workflows.validate": { capability: "workflows.manage", description: "validateWorkflowDraft: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowValidateInput, run: workflows.validateWorkflowDraft },
+  "workflows.test": { capability: "workflows.manage", description: "testWorkflowDraft: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowTestInput, run: workflows.testWorkflowDraft },
+  "workflows.publish": { capability: "workflows.manage", description: "publishWorkflow: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowPublishInput, run: workflows.publishWorkflow },
+  "workflows.rollback": { capability: "workflows.manage", description: "rollbackWorkflow: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowRollbackInput, run: workflows.rollbackWorkflow },
+  "workflows.enabled": { capability: "workflows.manage", description: "setWorkflowEnabled: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowEnabledInput, run: workflows.setWorkflowEnabled },
+  "workflows.start": { capability: "workflow.read", description: "startWorkflow: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowStartInput, run: workflows.startWorkflow },
+  "workflows.command": { capability: "workflow.read", description: "commandWorkflow: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowCommandServiceInput, run: workflows.commandWorkflow },
+  "workflows.run": { capability: "workflow.read", description: "getWorkflowRun: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowRunGetInput, run: workflows.getWorkflowRun },
+  "workflows.runs": { capability: "workflow.read", description: "listWorkflowRuns: versioned site-scoped workflow; local practice only until an adapter is qualified", inputSchema: workflows.workflowRunListInput, run: workflows.listWorkflowRuns },
+  "integrations.list": { capability: "integrations.manage", description: "listIntegrationActions: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationListInput, run: integrations.listIntegrationActions },
+  "integrations.draft.save": { capability: "integrations.manage", description: "saveIntegrationActionDraft: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationDraftInput, run: integrations.saveIntegrationActionDraft },
+  "integrations.validate": { capability: "integrations.manage", description: "validateIntegrationActionDraft: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationValidateInput, run: integrations.validateIntegrationActionDraft },
+  "integrations.preview": { capability: "integrations.manage", description: "previewIntegrationAction: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationPreviewInput, run: integrations.previewIntegrationAction },
+  "integrations.publish": { capability: "integrations.manage", description: "publishIntegrationAction: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationPublishInput, run: integrations.publishIntegrationAction },
+  "integrations.qualify": { capability: "platform.manage", adminOnly: true, description: "qualifyIntegrationAction: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationQualifyInput, run: integrations.qualifyIntegrationAction },
+  "integrations.rollback": { capability: "integrations.manage", description: "rollbackIntegrationAction: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationRollbackInput, run: integrations.rollbackIntegrationAction },
+  "integrations.enabled": { capability: "integrations.manage", description: "setIntegrationActionEnabled: current site/provider authority; no arbitrary network execution", inputSchema: integrations.integrationEnabledInput, run: integrations.setIntegrationActionEnabled },
+  "connections.register": { capability: "providers.manage", description: "registerProviderPlaceholder: current site/provider authority; no arbitrary network execution", inputSchema: integrations.connectionRegisterInput, run: integrations.registerProviderPlaceholder },
+  "connections.grant": { capability: "account.self", humanInteraction: true, description: "grantProviderAccess: current site/provider authority; no arbitrary network execution", inputSchema: integrations.connectionGrantInput, run: integrations.grantProviderAccess },
+  "connections.grant.revoke": { capability: "account.self", humanInteraction: true, description: "revokeProviderAccess: current site/provider authority; no arbitrary network execution", inputSchema: integrations.connectionRevokeInput, run: integrations.revokeProviderAccess },
+  "connections.device.link": { capability: "account.self", humanInteraction: true, description: "linkConnectedDevices: current site/provider authority; no arbitrary network execution", inputSchema: integrations.connectionLinkInput, run: integrations.linkConnectedDevices },
+  "connections.device.unlink": { capability: "account.self", humanInteraction: true, description: "unlinkConnectedDevices: current site/provider authority; no arbitrary network execution", inputSchema: integrations.connectionUnlinkInput, run: integrations.unlinkConnectedDevices },
+  "connections.device.default": { capability: "account.self", humanInteraction: true, description: "saveDeviceProviderDefault: current site/provider authority; no arbitrary network execution", inputSchema: integrations.connectionRouteInput, run: integrations.saveDeviceProviderDefault },
+  "connections.simulate": { capability: "workflow.read", description: "simulateConfiguredAction: current site/provider authority; no arbitrary network execution", inputSchema: integrations.connectionSimulateInput, run: integrations.simulateConfiguredAction },
+  "connections.actions": { capabilitiesAny: ["providers.manage", "integrations.manage"], description: "Read available published action versions for provider registration without draft administration", inputSchema: z.object({}), run: integrations.listProviderActions },
+  "connections.status": { capability: "account.self", description: "Read only entitled connections, explicit shares, leases and actual readiness in the current warehouse", inputSchema: z.object({}), run: integrations.getConnectionStatus },
+  "scan-lab.open": { capability: "platform.manage", adminOnly: true, humanInteraction: true, description: "Open the experimental local camera/OCR lab on an authorized human device; no server camera or operational writes", run: () => ({ status: "requires_user_interaction", actionUrl: `${new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").origin}/tools/scan-lab`, instruction: "Open on your own camera-capable device as platform administrator. Recognition and experiment exports remain local; MCP cannot activate a camera or turn an OCR result into warehouse evidence." }) },
+  "sites.mine": { capability: "account.self", description: "List your currently authorized warehouses and current site", inputSchema: z.object({}), run: warehouses.listMySites },
+  "sites.switch": { capability: "account.self", description: "Select a warehouse for new UI pages; grants and active runs remain pinned", inputSchema: warehouses.switchSiteInput, run: warehouses.switchSite },
+  "sites.create": { capability: "platform.manage", adminOnly: true, description: "Create a warehouse without changing existing data or identities", inputSchema: warehouses.createSiteInput, run: warehouses.createSite },
+  "sites.administration": { capability: "sites.configure", description: "Read configuration and membership only for your current warehouse", inputSchema: z.object({}), run: warehouses.getSiteAdministration },
+  "sites.configuration.save": { capability: "sites.configure", description: "Save current warehouse configuration with revision checking", inputSchema: warehouses.siteConfigurationInput, run: warehouses.saveSiteConfiguration },
+  "sites.person.find": { capability: "sites.members.manage", description: "Find an existing active person by exact username for warehouse membership", inputSchema: warehouses.findSitePersonInput, run: warehouses.findSitePerson },
+  "sites.membership.save": { capability: "sites.members.manage", description: "Manage local membership within current delegation without changing global identity", inputSchema: warehouses.saveMembershipInput, run: warehouses.saveMembership },
+  "sites.role.save": { capability: "sites.members.manage", description: "Create or update a delegated local role; platform templates stay protected", inputSchema: warehouses.saveSiteRoleInput, run: warehouses.saveSiteRole },
   ...labelActions,
   ...adminActions,
   ...pickActions,
@@ -175,6 +218,7 @@ export function listApplicationActions(principal: Principal, options: { prefix?:
   });
 }
 export async function executeApplicationAction(principal: Principal, name: string, input: unknown) {
+  return withPrincipalSite(principal, async () => {
   if (!Object.hasOwn(applicationActions, name)) throw new identity.IdentityError("Unknown application action.", 404);
   const action: Action = applicationActions[name as ApplicationAction];
   if (action.capability) assertCapability(principal, action.capability);
@@ -185,5 +229,9 @@ export async function executeApplicationAction(principal: Principal, name: strin
   for (const cap of action.capabilitiesAll ?? []) assertCapability(current, cap);
   if (action.capabilitiesAny && !action.capabilitiesAny.some(cap => current.capabilities.includes(cap))) throw new identity.IdentityError("Your current client scope no longer allows this action.", 403);
   if (action.adminOnly && current.role !== "admin") throw new identity.IdentityError("System administrator access required.", 403);
+  // Human-bound MCP actions advertise only {}. Their service returns a
+  // handoff before any mutation schema is parsed or authority is granted.
+  if (action.humanInteraction && current.grantId) return action.run(current, humanHandoffInput.parse(input));
   return action.run(current, action.inputSchema ? action.inputSchema.parse(input) : input);
+  });
 }

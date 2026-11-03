@@ -7,6 +7,8 @@ datasource db {
 }
 
 model User {
+  isPlatformAdmin Boolean @default(false)
+  siteMemberships WarehouseMembership[]
   id                    String             @id @default(cuid())
   username              String             @unique
   displayName           String
@@ -52,6 +54,7 @@ model DashboardPreference {
 }
 
 model DmpOperation {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String   @id @default(cuid())
   actorUserId    String
   actorSessionId String
@@ -73,6 +76,7 @@ model DmpOperation {
 }
 
 model UserSession {
+  activeSiteId String @default("warehouse-initial")
   id                      String    @id
   userId                  String
   authVersion             Int
@@ -124,6 +128,7 @@ model OAuthClient {
 }
 
 model OAuthAuthorizationRequest {
+  siteId String?
   id                String      @id
   clientId          String
   redirectUri       String
@@ -143,6 +148,7 @@ model OAuthAuthorizationRequest {
 }
 
 model OAuthGrant {
+  siteId String @default("warehouse-initial")
   id                String                   @id @default(cuid())
   requestId         String                   @unique
   clientId          String
@@ -211,6 +217,7 @@ model IdentityRecoveryToken {
 }
 
 model IdentityAudit {
+  siteId String?
   id           String   @id @default(cuid())
   action       String
   actorUserId  String?
@@ -250,6 +257,7 @@ model UserRoleBundle {
 }
 
 model AppAccessGrant {
+  siteId String @default("warehouse-initial")
   id          String   @id @default(cuid())
   tokenHash   String   @unique
   userId      String
@@ -267,8 +275,9 @@ model AppAccessGrant {
 }
 
 model LabelPrinter {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String   @id @default(cuid())
-  name            String   @unique
+  name            String
   endpoint        String
   contentType     String   @default("text/plain")
   isActive        Boolean  @default(true)
@@ -279,10 +288,12 @@ model LabelPrinter {
   createdByUser   User?    @relation("LabelPrinterCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUser   User?    @relation("LabelPrinterUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
+  @@unique([siteId, name])
   @@index([isActive, name])
 }
 
 model LabelTemplate {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String            @id @default(cuid())
   name            String
   kind            LabelTemplateKind
@@ -296,11 +307,12 @@ model LabelTemplate {
   createdByUser   User?             @relation("LabelTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUser   User?             @relation("LabelTemplateUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
 
-  @@unique([kind, name])
+  @@unique([siteId, kind, name])
   @@index([kind, isActive, name])
 }
 
 model Pipeline {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id        String   @id @default(cuid())
   name      String
   steps     Json     @default("[]")
@@ -311,6 +323,7 @@ model Pipeline {
 // Local custody for a human-assisted external MARS submission. No upstream
 // creation endpoint or physical completion is implied by an intent state.
 model MarsSubmissionIntent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                     String @id @default(cuid())
   unitId                 String
   unit                   WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
@@ -333,6 +346,7 @@ model MarsSubmissionIntent {
 }
 
 model MarsSubmissionIntentEvent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   intentId    String
   intent      MarsSubmissionIntent @relation(fields: [intentId], references: [id], onDelete: Restrict)
@@ -346,6 +360,7 @@ model MarsSubmissionIntentEvent {
 }
 
 model MarsCommandReceipt {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   userId      String
   operationId String
@@ -358,6 +373,7 @@ model MarsCommandReceipt {
 }
 
 model MarsImportBatch {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id               String            @id @default(cuid())
   filename         String
   uploadedByUserId String?
@@ -378,6 +394,7 @@ model MarsImportBatch {
 }
 
 model MarsImportRow {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id            String @id @default(cuid())
   batchId       String
   batch         MarsImportBatch @relation(fields: [batchId], references: [id], onDelete: Restrict)
@@ -393,6 +410,7 @@ model MarsImportRow {
 }
 
 model MarsUnit {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                        String           @id @default(cuid())
   requestNumber             String           @unique
   orderNumber               String?
@@ -422,6 +440,7 @@ model MarsUnit {
 }
 
 model MarsEvent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id         String   @id @default(cuid())
   marsUnitId String
   type       String
@@ -433,6 +452,7 @@ model MarsEvent {
 }
 
 model MarsAuditSession {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id               String            @id @default(cuid())
   startedByUserId  String?
   startedAt        DateTime          @default(now())
@@ -449,6 +469,7 @@ model MarsAuditSession {
 }
 
 model MarsAuditScan {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                 String           @id @default(cuid())
   auditSessionId     String
   scannedValue       String
@@ -474,6 +495,7 @@ model MarsAuditScan {
 }
 
 model MarsAuditReport {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                String           @id @default(cuid())
   auditSessionId    String
   importBatchId     String?
@@ -488,6 +510,7 @@ model MarsAuditReport {
 }
 
 model ScanListSession {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String         @id @default(cuid())
   localDraftId    String?        @unique
   name            String
@@ -503,6 +526,7 @@ model ScanListSession {
 }
 
 model ScanListItem {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String          @id @default(cuid())
   sessionId       String
   scannedValue    String
@@ -515,6 +539,7 @@ model ScanListItem {
 }
 
 model PickWave {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String                 @id @default(cuid())
   name            String
   sourceFilename  String
@@ -532,6 +557,7 @@ model PickWave {
 }
 
 model PickWaveItem {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String         @id @default(cuid())
   pickWaveId     String
   rowNumber      Int
@@ -558,6 +584,7 @@ model PickWaveItem {
 }
 
 model PickWaveRouteMapping {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String   @id @default(cuid())
   pickWaveId      String
   routeNumber     String
@@ -571,6 +598,7 @@ model PickWaveRouteMapping {
 }
 
 model PickWaveScan {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String        @id @default(cuid())
   pickWaveId      String
   itemId          String?
@@ -590,6 +618,7 @@ model PickWaveScan {
 }
 
 model RouteRecon {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String           @id @default(cuid())
   name            String
   sourceFilename  String
@@ -605,6 +634,7 @@ model RouteRecon {
 }
 
 model RouteReconItem {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String     @id @default(cuid())
   routeReconId   String
   rowNumber      Int
@@ -637,6 +667,7 @@ enum LabelTemplateKind {
 
 // LPN source records and scan evidence are retained independently of pick-wave deletion.
 model InventoryAuditItem {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id               String   @id @default(cuid())
   lpn              String   @unique
   status           String
@@ -663,6 +694,7 @@ model InventoryAuditItem {
 }
 
 model InventoryAuditImport {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String   @id @default(cuid())
   filename       String
   uploadedByName String
@@ -683,6 +715,7 @@ model InventoryAuditImport {
 }
 
 model InventoryAuditScan {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String   @id @default(cuid())
   sourceScanId    String   @unique
   pickWaveId      String
@@ -778,7 +811,8 @@ model PayloadAudit {
 }
 
 model LabelWorkflow {
-  purpose            String @id
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  purpose            String
   name               String
   draftZpl           String
   requiredFields     String[]
@@ -795,9 +829,11 @@ model LabelWorkflow {
   versions           LabelWorkflowVersion[] @relation("LabelWorkflowVersions")
   publishedVersion   LabelWorkflowVersion? @relation("LabelWorkflowPublished", fields: [publishedVersionId], references: [id], onDelete: Restrict)
   audits             LabelWorkflowAudit[]
+  @@id([siteId, purpose])
 }
 
 model LabelWorkflowVersion {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                 String @id @default(cuid())
   purpose            String
   version            Int
@@ -812,13 +848,14 @@ model LabelWorkflowVersion {
   publishedByUserId  String
   note               String
   publishedAt        DateTime @default(now())
-  workflow           LabelWorkflow @relation("LabelWorkflowVersions", fields: [purpose], references: [purpose], onDelete: Restrict)
+  workflow           LabelWorkflow @relation("LabelWorkflowVersions", fields: [siteId, purpose], references: [siteId, purpose], onDelete: Restrict)
   currentFor         LabelWorkflow? @relation("LabelWorkflowPublished")
 
-  @@unique([purpose, version])
+  @@unique([siteId, purpose, version])
 }
 
 model LabelWorkflowAudit {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   purpose     String
   actorUserId String
@@ -827,12 +864,13 @@ model LabelWorkflowAudit {
   versionId   String?
   note        String
   createdAt   DateTime @default(now())
-  workflow    LabelWorkflow @relation(fields: [purpose], references: [purpose], onDelete: Restrict)
+  workflow    LabelWorkflow @relation(fields: [siteId, purpose], references: [siteId, purpose], onDelete: Restrict)
 
   @@index([purpose, createdAt])
 }
 
 model PrintingDevice {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id            String @id
   userId        String
   sessionId     String
@@ -851,6 +889,7 @@ model PrintingDevice {
 }
 
 model LabelIssuance {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                   String @id @default(cuid())
   operationId          String
   actorUserId          String
@@ -891,6 +930,7 @@ model LabelIssuance {
 }
 
 model LabelIssuanceEvent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   issuanceId  String
   actorUserId String
@@ -906,6 +946,7 @@ model LabelIssuanceEvent {
 
 // Physical identity is independent of order context, source rows and submissions.
 model WarehouseUnit {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String   @id @default(cuid())
   createdAt       DateTime @default(now())
   createdByUserId  String?
@@ -927,6 +968,7 @@ model WarehouseUnit {
 }
 
 model WarehouseUnitNote {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String @id @default(cuid())
   unitId          String
   unit            WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
@@ -943,6 +985,7 @@ model WarehouseUnitNote {
 }
 
 model WarehouseUnitNoteRevision {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   noteId         String
   note           WarehouseUnitNote @relation(fields: [noteId], references: [id], onDelete: Restrict)
@@ -960,6 +1003,7 @@ model WarehouseUnitNoteRevision {
 }
 
 model WarehouseIdentifier {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                  String   @id @default(cuid())
   unitId              String
   unit                WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
@@ -979,6 +1023,7 @@ model WarehouseIdentifier {
 }
 
 model InventorySourceRevision {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                String   @id @default(cuid())
   inventoryItemId   String
   inventoryItem     InventoryAuditItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
@@ -1000,6 +1045,7 @@ model InventorySourceRevision {
 }
 
 model InventoryImportMembership {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id               String   @id @default(cuid())
   importId         String
   importBatch      InventoryAuditImport @relation(fields: [importId], references: [id], onDelete: Restrict)
@@ -1012,6 +1058,7 @@ model InventoryImportMembership {
 }
 
 model WarehousePhysicalObservation {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                    String   @id @default(cuid())
   userId                String
   eventId               String
@@ -1038,6 +1085,7 @@ model WarehousePhysicalObservation {
 }
 
 model WarehouseObservationCorrection {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id               String   @id @default(cuid())
   observationId    String
   observation      WarehousePhysicalObservation @relation(fields: [observationId], references: [id], onDelete: Restrict)
@@ -1053,6 +1101,7 @@ model WarehouseObservationCorrection {
 }
 
 model OfficeCase {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                String @id @default(cuid())
   caseKey           String @unique
   unitId            String
@@ -1079,6 +1128,7 @@ model OfficeCase {
 }
 
 model OfficeCaseEvent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   caseId      String
   case        OfficeCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
@@ -1092,6 +1142,7 @@ model OfficeCaseEvent {
 }
 
 model OfficeScheduleFact {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id               String @id @default(cuid())
   unitId           String
   unit             WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
@@ -1109,6 +1160,7 @@ model OfficeScheduleFact {
 }
 
 model OfficeDisposition {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                 String @id @default(cuid())
   unitId             String
   unit               WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
@@ -1138,6 +1190,7 @@ model OfficeDisposition {
 }
 
 model OfficeDispositionExecution {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   dispositionId  String
   disposition    OfficeDisposition @relation(fields: [dispositionId], references: [id], onDelete: Restrict)
@@ -1151,6 +1204,7 @@ model OfficeDispositionExecution {
 }
 
 model OfficeExchange {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id                String @id @default(cuid())
   originalUnitId    String
   originalUnit      WarehouseUnit @relation("ExchangeOriginal", fields: [originalUnitId], references: [id], onDelete: Restrict)
@@ -1168,6 +1222,7 @@ model OfficeExchange {
 }
 
 model OfficeExchangeAttempt {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String @id @default(cuid())
   exchangeId      String
   exchange        OfficeExchange @relation(fields: [exchangeId], references: [id], onDelete: Restrict)
@@ -1184,6 +1239,7 @@ model OfficeExchangeAttempt {
 }
 
 model OfficeReturnExpectation {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String @id @default(cuid())
   unitId          String
   unit            WarehouseUnit @relation(fields: [unitId], references: [id], onDelete: Restrict)
@@ -1210,6 +1266,7 @@ model OfficeReturnExpectation {
 }
 
 model OfficeCommandReceipt {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   userId      String
   operationId String
@@ -1221,6 +1278,7 @@ model OfficeCommandReceipt {
 }
 
 model DispatchBoard {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   day            String
   scope          String
@@ -1232,10 +1290,11 @@ model DispatchBoard {
   snapshots      DispatchSnapshot[] @relation("DispatchSnapshots")
   sessions       DispatchFinalsSession[]
 
-  @@unique([day, scope])
+  @@unique([siteId, day, scope])
 }
 
 model DispatchSnapshot {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   boardId        String
   board          DispatchBoard @relation("DispatchSnapshots", fields: [boardId], references: [id], onDelete: Restrict)
@@ -1260,6 +1319,7 @@ model DispatchSnapshot {
 }
 
 model DispatchAllocation {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   snapshotId     String
   snapshot       DispatchSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
@@ -1278,6 +1338,7 @@ model DispatchAllocation {
 }
 
 model DispatchReservation {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   unitId       String @id
   allocationId String @unique
   allocation   DispatchAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
@@ -1289,6 +1350,7 @@ model DispatchReservation {
 }
 
 model DispatchWaveItem {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   allocationId   String @unique
   allocation     DispatchAllocation @relation(fields: [allocationId], references: [id], onDelete: Restrict)
@@ -1303,6 +1365,7 @@ model DispatchWaveItem {
 }
 
 model DispatchFinalsSession {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   boardId        String
   board          DispatchBoard @relation(fields: [boardId], references: [id], onDelete: Restrict)
@@ -1320,6 +1383,7 @@ model DispatchFinalsSession {
 }
 
 model DispatchFinalsScan {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   sessionId      String
   session        DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
@@ -1347,6 +1411,7 @@ model DispatchFinalsScan {
 }
 
 model DispatchFinalsCredit {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   sessionId      String
   session        DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
@@ -1366,6 +1431,7 @@ model DispatchFinalsCredit {
 }
 
 model DispatchLaneSignoff {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id             String @id @default(cuid())
   sessionId      String
   session        DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
@@ -1382,6 +1448,7 @@ model DispatchLaneSignoff {
 }
 
 model DispatchAmendment {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id              String @id @default(cuid())
   sessionId       String
   session         DispatchFinalsSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
@@ -1398,6 +1465,7 @@ model DispatchAmendment {
 }
 
 model DispatchEvent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   boardId     String
   snapshotId  String?
@@ -1412,6 +1480,7 @@ model DispatchEvent {
 }
 
 model DispatchCommandReceipt {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
   id          String @id @default(cuid())
   userId      String
   operationId String
@@ -1420,4 +1489,191 @@ model DispatchCommandReceipt {
   createdAt   DateTime @default(now())
 
   @@unique([userId, operationId])
+}
+
+// Authority metadata is global; operational rows are protected by warehouse RLS.
+model WarehouseSite {
+  id String @id @default(cuid())
+  slug String @unique
+  name String
+  isActive Boolean @default(true)
+  revision Int @default(1)
+  configuration Json @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  memberships WarehouseMembership[]
+  roles WarehouseRole[]
+}
+model WarehouseMembership {
+  id String @id @default(cuid())
+  siteId String
+  userId String
+  isActive Boolean @default(true)
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  site WarehouseSite @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  roles WarehouseMembershipRole[]
+  @@unique([siteId, userId])
+}
+model WarehouseRole {
+  id String @id @default(cuid())
+  siteId String?
+  name String
+  capabilities String[]
+  isActive Boolean @default(true)
+  isTemplate Boolean @default(false)
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  site WarehouseSite? @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  memberships WarehouseMembershipRole[]
+}
+model WarehouseMembershipRole {
+  membershipId String
+  roleId String
+  membership WarehouseMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role WarehouseRole @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  @@id([membershipId, roleId])
+}
+
+model IntegrationActionRecord {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  name String
+  draft Json
+  revision Int @default(1)
+  enabled Boolean @default(true)
+  publishedVersionId String?
+  createdByUserId String
+  updatedByUserId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model IntegrationActionVersion {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  actionId String
+  version Int
+  definition Json
+  contentHash String
+  createdByUserId String
+  createdAt DateTime @default(now())
+  contractApproval Json?
+  @@unique([actionId, version])
+}
+model ProviderConnection {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  integrationId String
+  ownerUserId String
+  ownerSessionId String
+  deviceId String
+  tabId String
+  origin String
+  pathname String
+  transportState String
+  authenticationState String
+  upstreamIdentity Json?
+  upstreamWarehouse Json?
+  allowedActionVersionIds String[]
+  payloadVersionId String?
+  heartbeatAt DateTime
+  expiresAt DateTime
+  revokedAt DateTime?
+  lastError String?
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([ownerUserId, siteId])
+}
+model ProviderAccessGrant {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  providerId String
+  issuerUserId String
+  issuerSessionId String
+  grantee Json
+  actionVersionIds String[]
+  effects String[]
+  deviceLinkId String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+}
+model ConnectedDeviceLink {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  userId String
+  approvedByUserId String
+  deviceIds String[]
+  defaults Json
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+}
+model WorkflowDefinitionRecord {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  name String
+  draft Json
+  revision Int @default(1)
+  enabled Boolean @default(true)
+  publishedVersionId String?
+  createdByUserId String
+  updatedByUserId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model WorkflowDefinitionVersion {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  definitionId String
+  version Int
+  definition Json
+  contentHash String
+  createdByUserId String
+  createdAt DateTime @default(now())
+  @@unique([definitionId, version])
+}
+model WorkflowRunRecord {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id
+  definitionVersionId String
+  createdByUserId String
+  revision Int
+  status String
+  currentStepId String?
+  snapshot Json
+  receivingState Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([siteId, status, createdAt])
+}
+model WorkflowRunEvent {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id @default(cuid())
+  runId String
+  actorUserId String
+  actorSessionId String
+  commandId String
+  kind String
+  detail Json
+  createdAt DateTime @default(now())
+  @@unique([runId, commandId])
+}
+model WorkflowIntentRecord {
+  siteId String @default(dbgenerated("NULLIF(current_setting('temco.site_id'::text, true), ''::text)"))
+  id String @id
+  runId String
+  stepId String
+  attempt Int
+  state String
+  intent Json
+  result Json?
+  revision Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([runId, stepId, attempt])
 }

@@ -166,8 +166,8 @@ export async function getOAuthConsent(principal: Principal, requestId: string) {
     await tx.$queryRaw`SELECT id FROM "OAuthAuthorizationRequest" WHERE id = ${requestId} FOR UPDATE`;
     const request = await tx.oAuthAuthorizationRequest.findUnique({ where: { id: requestId }, include: { client: true } });
     if (!request || request.expiresAt.getTime() <= Date.now() || request.resolvedAt || request.client.disabledAt) throw new AuthorizationError("Authorization request expired or was resolved. Start again in the client.");
-    if (request.boundUserId && (request.boundUserId !== current.userId || request.boundSessionId !== current.sessionId)) throw new AuthorizationError("Authorization request belongs to another signed-in session. Start again.");
-    if (!request.boundUserId) await tx.oAuthAuthorizationRequest.update({ where: { id: request.id }, data: { boundUserId: current.userId, boundSessionId: current.sessionId } });
+    if (request.boundUserId && (request.boundUserId !== current.userId || request.boundSessionId !== current.sessionId || (request.siteId !== null && request.siteId !== current.siteId))) throw new AuthorizationError("Authorization request belongs to another signed-in session. Start again.");
+    if (!request.boundUserId) await tx.oAuthAuthorizationRequest.update({ where: { id: request.id }, data: { boundUserId: current.userId, boundSessionId: current.sessionId, siteId: current.siteId } });
     return { requestId: request.id, clientName: request.client.name, clientId: request.clientId, redirectUri: request.redirectUri, resource: request.resource, scopes: request.scopes,
       allowedScopes: request.scopes.filter((scope) => current.capabilities.includes(scope as typeof CAPABILITIES[number])),
       user: { userId: current.userId, username: current.username, displayName: current.displayName }, expiresAt: request.expiresAt,
@@ -183,7 +183,7 @@ export async function decideOAuthConsent(principal: Principal, input: unknown, c
     const current = await assertCurrentPrincipal(tx, principal);
     await tx.$queryRaw`SELECT id FROM "OAuthAuthorizationRequest" WHERE id = ${data.requestId} FOR UPDATE`;
     const request = await tx.oAuthAuthorizationRequest.findUnique({ where: { id: data.requestId }, include: { client: true } });
-    if (!request || request.resolvedAt || request.expiresAt.getTime() <= Date.now() || request.client.disabledAt || request.boundUserId !== current.userId || request.boundSessionId !== current.sessionId || request.resource !== config.resourceUrl.href) throw new AuthorizationError("Authorization request changed, expired or belongs to another session.");
+    if (!request || request.resolvedAt || request.expiresAt.getTime() <= Date.now() || request.client.disabledAt || request.boundUserId !== current.userId || request.boundSessionId !== current.sessionId || (request.siteId !== null && request.siteId !== current.siteId) || request.resource !== config.resourceUrl.href) throw new AuthorizationError("Authorization request changed, expired or belongs to another session.");
     const metadata = OAuthClientInformationFullSchema.parse(request.client.metadata);
     requireRedirect(metadata, request.redirectUri);
     const redirect = new URL(request.redirectUri);
@@ -198,7 +198,7 @@ export async function decideOAuthConsent(principal: Principal, input: unknown, c
     if (!knownOAuthScopes(data.scopes) || data.scopes.some((scope) => !request.scopes.includes(scope) || !current.capabilities.includes(scope as typeof CAPABILITIES[number]))) throw new AuthorizationError("Choose only requested scopes currently available to you.");
     if (isPrivilegedOAuthScope(data.scopes)) assertRecentAuthentication(current);
     const session = await tx.userSession.findUniqueOrThrow({ where: { id: current.sessionId } });
-    const grant = await tx.oAuthGrant.create({ data: { requestId: request.id, clientId: request.clientId, userId: current.userId, sessionId: current.sessionId!, authVersion: current.authVersion, issuer: config.issuerUrl.href, resource: config.resourceUrl.href, scopes: data.scopes, expiresAt: session.expiresAt } });
+    const grant = await tx.oAuthGrant.create({ data: { requestId: request.id, clientId: request.clientId, userId: current.userId, sessionId: current.sessionId!, authVersion: current.authVersion, issuer: config.issuerUrl.href, resource: config.resourceUrl.href, siteId: request.siteId ?? current.siteId ?? session.activeSiteId, scopes: data.scopes, expiresAt: session.expiresAt } });
     const code = opaque("code");
     await tx.oAuthAuthorizationCode.create({ data: { codeHash: hashOAuthCredential(code), grantId: grant.id, clientId: request.clientId, redirectUri: request.redirectUri, codeChallenge: request.codeChallenge, resource: request.resource, expiresAt: new Date(at.getTime() + 2 * 60_000) } });
     await tx.oAuthAuthorizationRequest.update({ where: { id: request.id }, data: { resolvedAt: at } });

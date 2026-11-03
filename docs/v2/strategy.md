@@ -1,6 +1,6 @@
 # TemcoTools v2 strategy
 
-**Nov3 owner expansion:** implementation and isolated-pilot deployment of warehouse scope, configurable connections/actions, declarative workflows/synthetic Receiving and platform-admin TemcoScan Lab are now authorized. The prior whole-program owner-evidence stop is superseded. See [expanded program and ownership](expanded-program.md); upstream/device evidence gates only dependent live acceptance. Preserve Adam's existing identity and production/main/v1.
+**Nov3 owner expansion:** implementation and isolated-pilot deployment of warehouse scope, configurable connections/actions, declarative workflows/synthetic Receiving and platform-admin TemcoScan Lab are now authorized. The prior whole-program owner-evidence stop is superseded. See [warehouse scope](warehouse-scope.md), [workflow practice](workflow-practice.md), [configured connections](configured-connections.md), [TemcoScan](temcoscan-implementation.md) and [expanded program and ownership](expanded-program.md); upstream/device evidence gates only dependent live acceptance. Preserve Adam's existing identity and production/main/v1.
 
 Planning baseline: 2026-10-31, GitHub [`keen5336/temcotools`](https://github.com/keen5336/temcotools), published `main` and preserved version-one baseline `v1` at `fea1f22af1b2fae788388f2aefed3e3998e98d09`. This document records the agreed direction; implementation/tested state is tracked in [build status](build-status.md). Read with the [implementation plan](implementation-plan.md) and [bounded open questions](open-questions.md).
 
