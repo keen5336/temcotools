@@ -34,6 +34,9 @@ export type WorkflowEffectIntent = {
   id: string; runId: string; siteId: string; stepId: string; attempt: number; definitionVersionId: string; configurationVersion: string;
   actionId: string; actionVersionId: string; actionConfigurationVersion: string; effect: EffectKind; mode: "synthetic" | "application" | "live";
   actorUserId: string; provider?: ProviderBinding; parameters: Record<string, JsonValue>; createdAt: string;
+  /** Added by the server outbox writer, never workflow definition/operator input. */
+  providerOperationId?: string;
+  executorActor?: { userId: string; sessionId: string; siteId: string; authVersion: number; grantId?: string };
 };
 export type WorkflowStepState = { status: WorkflowStepStatus; attempt: number; output?: JsonValue; captures?: WorkflowCapture[]; intent?: WorkflowEffectIntent; result?: WorkflowActionResult; completedAt?: string };
 export type WorkflowRun = {
@@ -86,7 +89,8 @@ function actionReadiness(run: WorkflowRun, runtime: WorkflowRuntime, actionId: s
   if (!action) return { ready: false, reason: "The pinned action/configuration version is unavailable.", fix: "Resolve the retained published version; do not substitute a newer action." };
   if (!action.enabled || !action.permitted) return { ready: false, reason: action.reason || "The action is disabled or current authority does not allow it.", fix: action.fix || "Restore permitted site-scoped access or pause this run." };
   const expectedQualification = run.definition.mode === "synthetic" ? "synthetic" : run.definition.mode === "application" ? "application" : "qualified";
-  if (action.qualification !== expectedQualification) return { ready: false, reason: run.definition.mode === "synthetic" ? "A synthetic run cannot dispatch a live action." : run.definition.mode === "application" ? "This is not a registered internal application action for this run mode." : "The live upstream contract is unqualified.", fix: run.definition.mode === "synthetic" ? "Use the synthetic action adapter only." : run.definition.mode === "application" ? "Select an exact supported internal action version; external effects remain unavailable." : "Qualify the exact identity/action/site contract and obtain live-trial authority." };
+  const approvedApplicationRead = run.definition.mode === "application" && action.effect === "read" && action.qualification === "qualified";
+  if (action.qualification !== expectedQualification && !approvedApplicationRead) return { ready: false, reason: run.definition.mode === "synthetic" ? "A synthetic run cannot dispatch a live action." : run.definition.mode === "application" ? "This is not a registered application action or approved provider READ for this run mode." : "The live upstream contract is unqualified.", fix: run.definition.mode === "synthetic" ? "Use the synthetic action adapter only." : run.definition.mode === "application" ? "Select an exact registered action or approved named provider READ; external mutations remain unavailable." : "Qualify the exact identity/action/site contract and obtain live-trial authority." };
   return { ready: action.ready, reason: action.ready ? "Pinned action is ready." : action.reason || "Action prerequisites are not ready.", fix: action.ready ? "" : action.fix || "Resolve the action's readiness issue." };
 }
 function requirementItem(run: WorkflowRun, runtime: WorkflowRuntime, requirement: WorkflowRequirement, phase: "start" | "step"): WorkflowReadinessItem {

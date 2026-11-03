@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { once } from "node:events";
 import { spawn, execFileSync } from "node:child_process";
@@ -10,6 +10,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { chromium, expect, type Page } from "@playwright/test";
 import { hashPassword } from "../lib/auth/passwords";
 import { resolve } from "node:path";
+import { stableWorkflowJson, validateWorkflowDefinition } from "../lib/workflows/definition";
 const url = process.env.WAREHOUSE_SCOPE_TEST_DATABASE_URL;
 const publicPilot = process.env.EXPANDED_PUBLIC_QUALIFICATION === "1";
 test("integrated mobile warehouse context, platform-only scanner, local workers and Receiving UI", { skip: !url && !publicPilot, timeout: 240_000 }, async t => {
@@ -20,6 +21,14 @@ test("integrated mobile warehouse context, platform-only scanner, local workers 
   const password = "Synthetic expanded browser phrase 2026", passwordHash = await hashPassword(password);
   const users = await Promise.all([true, false].map((platform, i) => owner.user.create({ data: { username: `mobile-${ns}-${i}`, displayName: platform ? "Synthetic platform admin" : "Synthetic site manager", pinHash: "disabled:v2", passwordHash, passwordChangedAt: new Date(), isPlatformAdmin: platform, role: "admin" } })));
   for (const user of users) for (const site of sites) await owner.warehouseMembership.create({ data: { userId: user.id, siteId: site.id, roles: { create: { roleId: "warehouse-manager" } } } });
+  const definitionId = `mobile-form-${ns}`, versionId = `mobile-form-version-${ns}`;
+  const definition = validateWorkflowDefinition({ id: definitionId, versionId, version: 1, configurationVersion: "workflow-local-config-v1", mode: "synthetic", name: "Synthetic reviewed form", steps: [
+    { id: "entry", kind: "form", title: "Record a practice value", saveAs: "entry", fields: [{ key: "identifier", label: "Synthetic reviewed identifier", type: "identifier" }] },
+    { id: "echo", kind: "action", title: "Echo the captured value", action: { id: "workflow.local.echo", versionId: "workflow-local-echo-v1", configurationVersion: "workflow-local-config-v1", effect: "local", capability: "workflow.read" }, parameters: { identifier: { source: "data", path: ["entry", "identifier"] } } },
+  ] });
+  await owner.workflowDefinitionRecord.create({ data: { id: definitionId, siteId: sites[0].id, name: definition.name, draft: definition, createdByUserId: users[0].id, updatedByUserId: users[0].id } });
+  await owner.workflowDefinitionVersion.create({ data: { id: versionId, siteId: sites[0].id, definitionId, version: 1, definition, contentHash: createHash("sha256").update(stableWorkflowJson(definition)).digest("hex"), createdByUserId: users[0].id } });
+  await owner.workflowDefinitionRecord.update({ where: { id: definitionId }, data: { publishedVersionId: versionId } });
   const reserve = createServer(); reserve.listen(0,"127.0.0.1"); await once(reserve,"listening"); const address = reserve.address(); assert.ok(address && typeof address !== "string"); const port = address.port; await new Promise<void>(r => reserve.close(() => r()));
   const origin = `http://127.0.0.1:${port}`, secret = randomBytes(32).toString("hex");
   const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", String(port)], { env: { ...process.env, DATABASE_URL: url!, NODE_ENV: "production", SESSION_SECRET: secret, TEMCO_PILOT_MODE: "read_only_dmp", TEMCO_SESSION_COOKIE_NAME: "temco_expanded_synthetic", NEXT_PUBLIC_APP_URL: origin, API_RELAY_INTERNAL_URL: "http://127.0.0.1:1" }, stdio: ["ignore","pipe","pipe"] });
@@ -57,6 +66,17 @@ test("integrated mobile warehouse context, platform-only scanner, local workers 
       assert.ok(await owner.workflowRunRecord.count({where:{createdByUserId:users[0].id,siteId:sites[0].id}})>0);
       assert.equal(await owner.dmpOperation.count({where:{actorUserId:users[0].id}}),0);
       assert.equal(await owner.labelIssuance.count({where:{actorUserId:users[0].id}}),0);
+    });
+    await t.test("published workflow review pins its version and completes a local form on mobile", async () => {
+      await page.getByRole("group", { name: definition.name, exact: true }).getByRole("button", { name: "Start published workflow", exact: true }).click();
+      await expect(page.getByRole("heading", { name: `Start reviewed version · ${definition.name}`, exact: true })).toBeVisible();
+      await expect(page.getByText(`Definition ${versionId}`, { exact: false })).toBeVisible();
+      await page.getByRole("button", { name: "Start reviewed workflow", exact: true }).click();
+      await page.getByLabel("Synthetic reviewed identifier", { exact: true }).fill("SYNTHETIC-REVIEW-001");
+      await page.getByRole("button", { name: "Save and continue", exact: true }).click();
+      await expect.poll(async () => owner.workflowRunRecord.count({ where: { createdByUserId: users[0].id, definitionVersionId: versionId, status: "completed", siteId: sites[0].id } })).toBe(1);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+1), false);
+      assert.equal(await owner.integrationOperation.count({ where: { actorUserId: users[0].id } }), 0);
     });
     await t.test("guarded full application serves local same-frame Tesseract and Paddle inference", async () => {
       await page.goto(`${origin}/tools/scan-lab`); await expect(page.getByRole("heading",{name:/TemcoScan/})).toBeVisible();

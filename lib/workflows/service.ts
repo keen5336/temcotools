@@ -10,6 +10,11 @@ import { warehouseIdentifierInput, resolveWarehouseIdentifierInTransaction, reco
 import { assertWorkflowJson, copyWorkflowJson, stableWorkflowJson, validateWorkflowDefinition, workflowId, workflowKey, WorkflowError, type JsonValue, type WorkflowDefinition } from "./definition";
 import { advanceWorkflowRun, createWorkflowRun, workflowReadiness, type WorkflowCommand, type WorkflowEffectIntent, type WorkflowRun, type WorkflowRuntime, type WorkflowTransition } from "./engine";
 import { createSyntheticReceiving, createSyntheticReceivingRuntime, executeSyntheticReceivingIntent, syntheticReceivingReadiness, SYNTHETIC_RECEIVING_BINDINGS, SYNTHETIC_RECEIVING_DEFINITION, SYNTHETIC_RECEIVING_DELIVERY, LIVE_RECEIVING_QUALIFICATION_NEEDED, type SyntheticReceivingState } from "./receiving";
+import { contactWorkflowProviderRead, isProviderWorkflowIntent, resolveWorkflowBindings, stampWorkflowProviderIntent, workflowProviderBindingsInput, workflowProviderCatalog, workflowProviderExecuteInput, workflowProviderRuntime } from "./provider-execution";
+import { providerActor } from "@/lib/integrations/dispatch";
+import { getIntegrationOperation, resolveWorkflowProviderInTransaction } from "@/lib/integrations/provider-runtime";
+import type { WorkflowActionResult, ProviderBinding } from "./engine";
+export { workflowProviderExecuteInput } from "./provider-execution";
 
 const operationId = z.string().regex(/^[A-Za-z0-9:_-]{16,128}$/), revision = z.number().int().positive();
 const definitionBody = z.unknown().refine(value => value !== undefined, "Provide a JSON definition.");
@@ -35,7 +40,7 @@ export const workflowTestInput = workflowValidateInput.extend({ data: dataBody.o
 export const workflowPublishInput = z.object({ operationId, id: workflowId, expectedRevision: revision, note: auditNote }).strict();
 export const workflowRollbackInput = workflowPublishInput.extend({ versionId: workflowId });
 export const workflowEnabledInput = workflowPublishInput.extend({ enabled: z.boolean() });
-export const workflowStartInput = z.object({ operationId, definitionId: workflowId.optional(), template: z.enum(["synthetic_receiving", "warehouse_presence"]).optional(), data: dataBody.optional() }).strict().superRefine((input, ctx) => { if (Boolean(input.definitionId) === Boolean(input.template)) ctx.addIssue({ code: "custom", message: "Choose one published workflow or a supported built-in template." }); });
+export const workflowStartInput = z.object({ operationId, definitionId: workflowId.optional(), expectedDefinitionVersionId: workflowId.optional(), template: z.enum(["synthetic_receiving", "warehouse_presence"]).optional(), data: dataBody.optional(), providerBindings: workflowProviderBindingsInput.optional() }).strict().superRefine((input, ctx) => { if (Boolean(input.definitionId) === Boolean(input.template)) ctx.addIssue({ code: "custom", message: "Choose one published workflow or a supported built-in template." }); });
 export const workflowActionCatalogInput = z.object({}).strict();
 export const workflowCommandServiceInput = z.object({ runId: workflowId, commandId: operationId, expectedRevision: revision, definitionVersionId: workflowId, command: operatorCommand }).strict();
 export const workflowRunGetInput = z.object({ runId: workflowId }).strict();
@@ -82,10 +87,14 @@ function runtimeFor(definition: WorkflowDefinition, p: Principal, enabled = true
     return [{ id: step.action.id, versionId: step.action.versionId, configurationVersion: step.action.configurationVersion, siteId: siteOf(p), effect: step.action.effect, enabled, permitted: modeAllowed && capability, ready: modeAllowed && capability && !previewWrite, qualification: modeAllowed ? definition.mode === "application" ? "application" as const : "synthetic" as const : "unqualified" as const, reason: !enabled ? "This workflow definition is disabled for further execution." : previewWrite ? "Draft testing never persists physical observations." : !entry ? "This exact action/configuration version is not registered." : !modeAllowed ? "This action is unavailable in the selected workflow mode; external live effects stay disabled." : !capability ? `Current ${step.action.capability} capability/client scope is missing or revoked.` : "Registered internal action is ready.", fix: previewWrite ? "Start a published application workflow and explicitly confirm an actual observation." : "Select an exact supported action and current site-scoped authority from the catalog." }];
   }) };
 }
+async function runtimeForRun(tx: Prisma.TransactionClient, definition: WorkflowDefinition, p: Principal, enabled = true, bindings: Record<string, ProviderBinding> = {}, preview = false): Promise<WorkflowRuntime> {
+  const base = runtimeFor(definition, p, enabled, preview), external = await workflowProviderRuntime(tx, p, definition, bindings, preview);
+  return { ...base, providers: [...base.providers, ...external.providers], actions: [...base.actions.filter(action => !external.actions.some(value => value.id === action.id && value.versionId === action.versionId && value.configurationVersion === action.configurationVersion)), ...external.actions] };
+}
 function catalogFor(p: Principal) {
   return { siteId: siteOf(p), actions: registeredActions.map(entry => ({ ...entry.pin, name: entry.name, modes: entry.modes, description: entry.description, inputSchema: z.toJSONSchema(entry.input, { io: "input", unrepresentable: "any" }), outputSchema: z.toJSONSchema(entry.output, { io: "output", unrepresentable: "any" }), ready: (p.capabilities as readonly string[]).includes(entry.pin.capability), reason: (p.capabilities as readonly string[]).includes(entry.pin.capability) ? "Current capability is present; each step rechecks it." : `Requires current ${entry.pin.capability} and client scope.` })), handoffs: [{ kind: "human", ready: true, description: "Explicit attributed human confirmation; no device claim." }, { kind: "camera", ready: false, description: "Qualified capture provider pending. Only an explicitly defined manual fallback can complete now." }, { kind: "device", ready: false, description: "Qualified device provider pending. No server camera or printer is assumed." }], externalLiveExecutionAvailable: false };
 }
-export async function getWorkflowActionCatalog(p: Principal, input: unknown = {}) { workflowActionCatalogInput.parse(input); return prisma.$transaction(async tx => catalogFor(await current(tx, p))); }
+export async function getWorkflowActionCatalog(p: Principal, input: unknown = {}) { workflowActionCatalogInput.parse(input); return prisma.$transaction(async tx => { const actor = await current(tx, p), providerReads = await workflowProviderCatalog(tx, actor); return { ...catalogFor(actor), providerReads, externalLiveExecutionAvailable: providerReads.some(value => value.qualification === "qualified" && value.ready), externalReadExecutionAvailable: true, externalMutationExecutionAvailable: false }; }); }
 export const WAREHOUSE_PRESENCE_DEFINITION = validateWorkflowDefinition({
   id: "warehouse-presence", versionId: "warehouse-presence-v1", version: 1, configurationVersion: domainConfig, name: "Look up and confirm physical presence", mode: "application", description: "Reads shared unit history, then records only an explicitly confirmed local physical presence observation. No external WMS or printer effect.",
   steps: [
@@ -143,10 +152,12 @@ async function settleLocal(tx: Prisma.TransactionClient, p: Principal, transitio
     const intent = next.intents[0];
     // No external IO happens in this transaction. A future live dispatcher must
     // commit an outbox first, then recheck authority before any external contact.
-    const fresh = await current(tx, p), runtime = runtimeFor(next.run.definition, fresh, enabled);
+    const fresh = await current(tx, p), runtime = await runtimeForRun(tx, next.run.definition, fresh, enabled, next.run.providerBindings);
     const readiness = workflowReadiness(next.run, runtime);
     if (readiness.blocking.length) throw new WorkflowError(readiness.blocking[0].reason, "workflow_blocked", 409);
+    stampWorkflowProviderIntent(next.run, intent, fresh);
     await tx.workflowIntentRecord.create({ data: { id: intent.id, siteId: siteOf(fresh), runId: intent.runId, stepId: intent.stepId, attempt: intent.attempt, state: "prepared", intent: asJson(intent) } });
+    if (isProviderWorkflowIntent(intent)) return { run: next.run, receiving };
     const settled = await localResult(tx, next.run, intent, receiving, fresh); receiving = settled.state;
     await tx.workflowIntentRecord.update({ where: { id: intent.id }, data: { state: settled.result.outcome, result: asJson(settled.result), revision: { increment: 1 } } });
     const commandId = `sim:${hash(intent.id).slice(0, 48)}`;
@@ -167,7 +178,7 @@ async function viewRun(tx: Prisma.TransactionClient, p: Principal, runId: string
   const definition = await tx.workflowDefinitionRecord.findFirst({ where: { id: version.definitionId, siteId: siteOf(p) }, select: { enabled: true } });
   const receiving = record.receivingState as unknown as SyntheticReceivingState | null;
   const step = run.definition.steps.find(candidate => candidate.id === run.currentStepId), handoff = step?.kind === "confirm" ? { status: "requires_user_interaction" as const, kind: step.handoff, actionUrl: new URL(`/tools/workflows?runId=${encodeURIComponent(run.id)}`, process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").href, siteId: run.siteId, deviceVerified: false, manualFallbackAllowed: step.manualFallback === true, instruction: ["camera", "device"].includes(step.handoff) ? step.manualFallback ? "Actual device capture is unavailable. An authorized person may explicitly record the defined manual fallback; it will not claim camera/device verification." : "This step awaits a qualified actual device adapter. A caller-supplied boolean or device name cannot satisfy it." : step.prompt } : null;
-  return { run, receiving, handoff, definitionEnabled: definition?.enabled === true, readiness: workflowReadiness(run, runtimeFor(run.definition, p, definition?.enabled === true)), receivingReadiness: receiving ? syntheticReceivingReadiness(receiving) : null, events: await tx.workflowRunEvent.findMany({ where: { runId, siteId: siteOf(p) }, orderBy: { createdAt: "desc" }, take: 50 }), intents: await tx.workflowIntentRecord.findMany({ where: { runId, siteId: siteOf(p) }, orderBy: { createdAt: "asc" }, take: 40 }), limitation: run.definition.mode === "application" ? "Registered internal application actions only. Presence records are attributed human observations; no external WMS receipt, close or print occurred." : "Local synthetic practice only. No live WMS receipt, close or physical print has occurred." };
+  return { run, receiving, handoff, definitionEnabled: definition?.enabled === true, readiness: workflowReadiness(run, await runtimeForRun(tx, run.definition, p, definition?.enabled === true, run.providerBindings)), receivingReadiness: receiving ? syntheticReceivingReadiness(receiving) : null, events: await tx.workflowRunEvent.findMany({ where: { runId, siteId: siteOf(p) }, orderBy: { createdAt: "desc" }, take: 50 }), intents: await tx.workflowIntentRecord.findMany({ where: { runId, siteId: siteOf(p) }, orderBy: { createdAt: "asc" }, take: 40 }), limitation: run.definition.mode === "application" ? "Registered internal actions and explicitly bound approved provider READs. Presence is an attributed human observation. No external WMS mutation, receipt, close or print occurred." : "Synthetic practice only; any browser READ requires a separately synthetic-qualified test provider. No live WMS receipt, close or physical print has occurred." };
 }
 
 export async function listWorkflows(p: Principal, input: unknown = {}) {
@@ -203,13 +214,13 @@ export async function saveWorkflowDraft(p: Principal, input: unknown) {
 }
 export async function validateWorkflowDraft(p: Principal, input: unknown) {
   const data = workflowValidateInput.parse(input);
-  return prisma.$transaction(async tx => { const actor = await current(tx, p, true), definition = validateWorkflowDefinition(data.definition); return { valid: true, definition, contentHash: hash(definition), supportedActions: definition.steps.filter(step => step.kind === "action").map(step => ({ stepId: step.id, actionId: step.action.id, supportedLocalAdapter: Boolean(supportedAction(step.action)) })), actionCatalog: catalogFor(actor), liveExecutionAvailable: false }; });
+  return prisma.$transaction(async tx => { const actor = await current(tx, p, true), definition = validateWorkflowDefinition(data.definition), providerReads = await workflowProviderCatalog(tx, actor); return { valid: true, definition, contentHash: hash(definition), supportedActions: definition.steps.filter(step => step.kind === "action").map(step => ({ stepId: step.id, actionId: step.action.id, supportedLocalAdapter: Boolean(supportedAction(step.action)), supportedProviderRead: step.action.effect === "read" && Boolean(step.action.providerBinding) && providerReads.some(value => value.id === step.action.id && value.versionId === step.action.versionId && value.configurationVersion === step.action.configurationVersion && value.capability === step.action.capability) })), actionCatalog: { ...catalogFor(actor), providerReads }, liveExecutionAvailable: providerReads.some(value => value.qualification === "qualified" && value.ready), externalMutationExecutionAvailable: false }; });
 }
 export async function testWorkflowDraft(p: Principal, input: unknown) {
   const data = workflowTestInput.parse(input); assertWorkflowJson(data.data ?? {}, 65_536);
   return prisma.$transaction(async tx => {
     const actor = await current(tx, p, true), definition = validateWorkflowDefinition(data.definition); assertExecutable(definition);
-    const runtime = runtimeFor(definition, actor, true, true), created = createWorkflowRun({ id: `preview-${randomUUID()}`, siteId: siteOf(actor), definition, data: data.data as Record<string, JsonValue> | undefined, providerBindings: bindingsFor(definition) }, runtime);
+    const runtime = await runtimeForRun(tx, definition, actor, true, bindingsFor(definition), true), created = createWorkflowRun({ id: `preview-${randomUUID()}`, siteId: siteOf(actor), definition, data: data.data as Record<string, JsonValue> | undefined, providerBindings: bindingsFor(definition) }, runtime);
     let next = created, receiving = receivingFor(definition, siteOf(actor)), count = 0;
     async function settle() { for (let bound = 0; next.intents.length && bound < 40; bound++) { const intent = next.intents[0], result = await localResult(tx, next.run, intent, receiving, actor); receiving = result.state; next = advanceWorkflowRun(next.run, { commandId: `preview-result-${++count}`, expectedRevision: next.run.revision, definitionVersionId: next.run.definitionVersionId, command: { kind: "action_result", intentId: intent.id, result: result.result } }, { ...runtime, origin: "executor" }); } }
     await settle();
@@ -263,11 +274,12 @@ export async function startWorkflow(p: Principal, input: unknown) {
     if (!record?.enabled || !record.publishedVersionId) throw new WorkflowError("Choose an enabled published workflow.", "workflow_unpublished", 409);
     await tx.$queryRaw`SELECT id FROM "WorkflowDefinitionRecord" WHERE id=${record.id} AND "siteId"=${siteOf(actor)} FOR SHARE`;
     const currentRecord = await tx.workflowDefinitionRecord.findUniqueOrThrow({ where: { id: record.id } });
-    if (!currentRecord.enabled || currentRecord.publishedVersionId !== record.publishedVersionId) throw conflict();
+    if (!currentRecord.enabled || currentRecord.publishedVersionId !== record.publishedVersionId || (data.expectedDefinitionVersionId && currentRecord.publishedVersionId !== data.expectedDefinitionVersionId)) throw conflict();
     const version = await tx.workflowDefinitionVersion.findFirst({ where: { id: record.publishedVersionId, definitionId: record.id, siteId: siteOf(actor) } }); if (!version || hash(version.definition) !== version.contentHash) throw notFound();
     const definition = validateWorkflowDefinition(version.definition); assertExecutable(definition);
     const runId = `run-${hash([siteOf(actor), actor.userId, data.operationId]).slice(0, 40)}`;
-    const transition = createWorkflowRun({ id: runId, siteId: siteOf(actor), definition, data: data.data as Record<string, JsonValue> | undefined, providerBindings: bindingsFor(definition) }, runtimeFor(definition, actor));
+    const providerBindings = { ...bindingsFor(definition), ...await resolveWorkflowBindings(tx, actor, definition, data.providerBindings) };
+    const transition = createWorkflowRun({ id: runId, siteId: siteOf(actor), definition, data: data.data as Record<string, JsonValue> | undefined, providerBindings }, await runtimeForRun(tx, definition, actor, true, providerBindings));
     const receiving = receivingFor(definition, siteOf(actor));
     await tx.workflowRunRecord.create({ data: { id: runId, siteId: siteOf(actor), definitionVersionId: version.id, createdByUserId: actor.userId, revision: transition.run.revision, status: transition.run.status, currentStepId: transition.run.currentStepId, snapshot: asJson(transition.run), ...(receiving ? { receivingState: asJson(receiving) } : {}) } });
     const settled = await settleLocal(tx, actor, transition, receiving, true);
@@ -285,11 +297,65 @@ export async function commandWorkflow(p: Principal, input: unknown) {
     const previous = await tx.workflowRunEvent.findUnique({ where: { runId_commandId: { runId: record.id, commandId: data.commandId } } });
     if (previous) { const receipt = previous.detail as { inputHash?: string }; if (previous.actorUserId !== actor.userId || receipt.inputHash !== hash(data)) throw new WorkflowError("This command ID was already used for different work.", "workflow_command_conflict", 409); return { ...await viewRun(tx, actor, record.id), replayed: true }; }
     const view = await viewRun(tx, actor, record.id), run = view.run; assertExecutable(run.definition);
-    const transition = advanceWorkflowRun(run, { commandId: data.commandId, expectedRevision: data.expectedRevision, definitionVersionId: data.definitionVersionId, command: data.command as WorkflowCommand }, runtimeFor(run.definition, actor, view.definitionEnabled));
+    const transition = advanceWorkflowRun(run, { commandId: data.commandId, expectedRevision: data.expectedRevision, definitionVersionId: data.definitionVersionId, command: data.command as WorkflowCommand }, await runtimeForRun(tx, run.definition, actor, view.definitionEnabled, run.providerBindings));
     const settled = await settleLocal(tx, actor, transition, view.receiving, view.definitionEnabled);
     const saved = await tx.workflowRunRecord.updateMany({ where: { id: record.id, siteId, revision: data.expectedRevision }, data: { revision: settled.run.revision, status: settled.run.status, currentStepId: settled.run.currentStepId, snapshot: asJson(settled.run), ...(settled.receiving ? { receivingState: asJson(settled.receiving) } : {}) } }); if (!saved.count) throw conflict();
     await recordEvent(tx, actor, record.id, data.commandId, "operator_command", { inputHash: hash(data), command: data.command, revision: settled.run.revision, mode: settled.run.definition.mode });
     return { ...await viewRun(tx, actor, record.id), replayed: false };
+  });
+}
+/** Explicit outbox drain/poll. The only input is an existing run/revision/version. */
+export async function executeWorkflowProviderRead(p: Principal, input: unknown) {
+  const data = workflowProviderExecuteInput.parse(input);
+  const prepared = await prisma.$transaction(async tx => {
+    const actor = await current(tx, p), view = await viewRun(tx, actor, data.runId), run = view.run;
+    if (run.createdByUserId !== actor.userId || run.revision !== data.expectedRevision || run.definitionVersionId !== data.definitionVersionId) throw conflict();
+    const intent = run.currentStepId ? run.steps[run.currentStepId]?.intent : undefined;
+    if (!intent || !isProviderWorkflowIntent(intent)) throw new WorkflowError("This run has no retained browser-provider READ intent. Resolve readiness or refresh the run first.", "workflow_provider_unavailable", 409);
+    if (stableWorkflowJson(intent.executorActor) !== stableWorkflowJson(providerActor(actor))) throw new WorkflowError("Execution stays pinned to the original person/session/client grant.", "workflow_provider_actor", 403);
+    const stored = await tx.workflowIntentRecord.findFirst({ where: { id: intent.id, runId: run.id, siteId: siteOf(actor) } });
+    if (!stored || stableWorkflowJson(stored.intent) !== stableWorkflowJson(intent)) throw new WorkflowError("Original committed outbox intent is unavailable.", "workflow_provider_intent", 409);
+    return { actor, view, intent, blocked: run.paused || !view.definitionEnabled || stored.state !== "prepared" || run.status !== "pending" };
+  });
+  if (prepared.blocked) return { ...prepared.view, providerExecution: { status: "retained", operationId: prepared.intent.providerOperationId, instruction: "Original evidence is retained. Resume the original unpaused authorized pending run; unknown or settled work is never replayed." } };
+  let receipt: Awaited<ReturnType<typeof getIntegrationOperation>>;
+  try {
+    // No workflow row lock or DB transaction crosses this broker request.
+    receipt = await contactWorkflowProviderRead(prepared.actor, prepared.intent);
+  } catch (error) {
+    return { ...await getWorkflowRun(p, { runId: data.runId }), providerExecution: { status: "blocked", operationId: prepared.intent.providerOperationId, instruction: error instanceof Error ? error.message : "Original provider is unavailable. Restore its exact connection and grant; no fallback or new request was created." } };
+  }
+  if (["queued", "dispatching"].includes(receipt.operation.state)) return { ...await getWorkflowRun(p, { runId: data.runId }), providerExecution: { status: "pending", operationId: receipt.operation.operationId, receipt } };
+  let result: WorkflowActionResult;
+  const status = (receipt.operation.result as { status?: unknown } | null)?.status;
+  if (receipt.operation.state === "unknown") result = { outcome: "unknown", receiptId: receipt.operation.operationId, reason: "The original provider result is uncertain. Inspect that private operation; no automatic replay or workflow completion occurred." };
+  else if (receipt.operation.state === "reported" && receipt.outputValidation.valid && typeof status === "number" && status >= 200 && status < 300) {
+    try { assertWorkflowJson(receipt.outputValidation.parsedValue, 65_536); result = { outcome: "succeeded", receiptId: receipt.operation.operationId, output: receipt.outputValidation.parsedValue, reason: "Validated named READ response only; this is not physical or mutation completion." }; }
+    catch { result = { outcome: "failed", receiptId: receipt.operation.operationId, noEffectConfirmed: true, reason: "Private READ output exceeds the workflow's bounded JSON result limit. Original response is retained without replay." }; }
+  } else result = { outcome: "failed", receiptId: receipt.operation.operationId, noEffectConfirmed: true, reason: receipt.operation.state === "reported" ? "Correlated READ response failed its original output contract or HTTP status check. Private body is retained." : "The original READ was cancelled/not sent. No warehouse action was performed." };
+  return prisma.$transaction(async tx => {
+    const actor = await current(tx, p), siteId = siteOf(actor);
+    await tx.$queryRaw`SELECT id FROM "WorkflowRunRecord" WHERE id=${data.runId} AND "siteId"=${siteId} FOR UPDATE`;
+    const view = await viewRun(tx, actor, data.runId), run = view.run;
+    if (run.revision !== data.expectedRevision || run.paused || !view.definitionEnabled || run.currentStepId !== prepared.intent.stepId || stableWorkflowJson(run.steps[prepared.intent.stepId]?.intent) !== stableWorkflowJson(prepared.intent)) return { ...view, providerExecution: { status: "retained", operationId: receipt.operation.operationId, receipt, instruction: "The workflow changed during contact. Original evidence was retained without advancing the run; refresh and resume the same intent." } };
+    if (stableWorkflowJson(prepared.intent.executorActor) !== stableWorkflowJson(providerActor(actor))) throw new WorkflowError("Original execution session/client changed.", "workflow_provider_actor", 403);
+    const step = run.definition.steps.find(value => value.id === prepared.intent.stepId);
+    if (step?.kind !== "action" || !prepared.intent.provider || prepared.intent.effect !== "read") throw conflict();
+    await assertCurrentPrincipal(tx, actor, step.action.capability as Parameters<typeof assertCurrentPrincipal>[2]);
+    // Recheck current original grant/configuration even though this result was read outside the writer.
+    await resolveWorkflowProviderInTransaction(tx, actor, { providerId: prepared.intent.provider.providerId, actionVersionId: prepared.intent.actionVersionId, configurationId: prepared.intent.actionConfigurationVersion, expectedBinding: prepared.intent.provider });
+    const original = await tx.integrationOperation.findFirst({ where: { operationId: receipt.operation.operationId, actorUserId: actor.userId, siteId } });
+    if (!original || original.revision !== receipt.operation.revision || original.state !== receipt.operation.state || stableWorkflowJson(original.result) !== stableWorkflowJson(receipt.operation.result)) throw new WorkflowError("Original private receipt changed; poll it again without dispatch.", "workflow_provider_receipt", 409);
+    const changed = await tx.workflowIntentRecord.updateMany({ where: { id: prepared.intent.id, siteId, state: "prepared" }, data: { state: result.outcome, result: asJson(result), revision: { increment: 1 } } });
+    if (!changed.count) return { ...view, providerExecution: { status: "retained", operationId: receipt.operation.operationId, receipt } };
+    const commandId = `provider:${hash(prepared.intent.id).slice(0, 48)}`;
+    const runtime = await runtimeForRun(tx, run.definition, actor, view.definitionEnabled, run.providerBindings);
+    const transition = advanceWorkflowRun(run, { commandId, expectedRevision: run.revision, definitionVersionId: run.definitionVersionId, command: { kind: "action_result", intentId: prepared.intent.id, result } }, { ...runtime, origin: "executor" });
+    const settled = await settleLocal(tx, actor, transition, view.receiving, view.definitionEnabled);
+    const saved = await tx.workflowRunRecord.updateMany({ where: { id: run.id, siteId, revision: run.revision }, data: { revision: settled.run.revision, status: settled.run.status, currentStepId: settled.run.currentStepId, snapshot: asJson(settled.run), ...(settled.receiving ? { receivingState: asJson(settled.receiving) } : {}) } });
+    if (!saved.count) throw conflict();
+    await recordEvent(tx, actor, run.id, commandId, "provider_read_result", { operationId: receipt.operation.operationId, intentId: prepared.intent.id, result, revision: settled.run.revision });
+    return { ...await viewRun(tx, actor, run.id), providerExecution: { status: "applied", operationId: receipt.operation.operationId, receipt } };
   });
 }
 export async function getWorkflowRun(p: Principal, input: unknown) {

@@ -23,7 +23,7 @@ const id = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/);
 const actionKey = z.string().max(100).regex(/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*$/);
 const capability = z.string().max(100).regex(/^[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*){1,3}$/);
 const contractSchema: z.ZodType<ValueContract> = z.lazy(() => z.discriminatedUnion("type", [
-  z.object({ type: z.literal("string"), optional: z.boolean().optional(), maxLength: z.number().int().min(1).max(16_384).optional(), values: z.array(z.string().max(16_384)).min(1).max(100).optional() }).strict(),
+  z.object({ type: z.literal("string"), optional: z.boolean().optional(), maxLength: z.number().int().min(1).max(4 * 1024 * 1024).optional(), values: z.array(z.string().max(16_384)).min(1).max(100).optional() }).strict(),
   z.object({ type: z.enum(["number", "integer"]), optional: z.boolean().optional(), min: z.number().finite().optional(), max: z.number().finite().optional() }).strict(),
   z.object({ type: z.literal("boolean"), optional: z.boolean().optional() }).strict(),
   z.object({ type: z.literal("array"), optional: z.boolean().optional(), maxItems: z.number().int().min(1).max(1000).optional(), items: contractSchema }).strict(),

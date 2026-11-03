@@ -185,3 +185,11 @@ test("physical printer queue keeps requester/run attribution, separates print ri
   const blocked = decidePrinterClaim([job, other], request, authority); assert.equal(blocked.kind, "blocked"); assert.equal(JSON.stringify(blocked).includes(other.id), false);
   for (const state of ["dispatching", "unknown", "acknowledged", "physically-confirmed"] as const) { job.state = state; const previous = decidePrinterClaim([job], request, authority); assert.equal(previous.kind, "existing"); if (previous.kind === "existing") assert.equal(previous.physicalPrintConfirmed, state === "physically-confirmed"); }
 });
+
+test("an explicitly bounded large XML body can validate as private string output without widening request inputs", () => {
+  const base=definition(), xml="<Output>"+"SYNTHETIC".repeat(60_000)+"</Output>";
+  const configured=validateIntegrationAction({...base,output:{type:"string",maxLength:1_048_576}});
+  assert.equal(validateActionOutput(configured,xml),xml);
+  assert.throws(()=>validateActionInputs(configured,{...input,item:"X".repeat(65536)}),/limit|Invalid/);
+  assert.throws(()=>validateActionOutput({...configured,output:{type:"string",maxLength:1024}},xml),/Invalid/);
+});
