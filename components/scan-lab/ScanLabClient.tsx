@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import CameraPreview from "./CameraPreview";
+import CameraPreview, { RoiInputs } from "./CameraPreview";
+import CaptureReview from "./CaptureReview";
 import { CameraSource, cameraError } from "../../lib/scan-lab/camera";
 import type { CameraInfo } from "../../lib/scan-lab/camera";
 import {
@@ -49,6 +50,10 @@ function download(blob: Blob, name: string) {
 export default function ScanLabClient() {
   const video = useRef<HTMLVideoElement>(null);
   const camera = useRef<CameraSource | null>(null);
+  const dock = useRef<HTMLDivElement>(null), previewSlot = useRef<HTMLDivElement>(null), shutter = useRef<HTMLButtonElement>(null);
+  const reviewUrl = useRef<string | undefined>(undefined);
+  const [review, setReview] = useState<{ attempt: Attempt; frameUrl?: string } | null>(null);
+  const [dockHeight, setDockHeight] = useState(0), [inlineHeight, setInlineHeight] = useState(270);
   const workers = useRef(new Map<OcrEngine, OcrWorker>());
   const flight = useRef(new SingleFlight());
   const duplicates = useRef(new DuplicateWindow());
@@ -89,7 +94,28 @@ export default function ScanLabClient() {
     [wedgeSuffix, setWedgeSuffix] = useState(""),
     [wedgeValue, setWedgeValue] = useState("");
 
+  const clearReview = useCallback(() => {
+    if (reviewUrl.current) URL.revokeObjectURL(reviewUrl.current);
+    reviewUrl.current = undefined;
+    if (mounted.current) setReview(null);
+  }, []);
+  const dismissReview = () => {
+    clearReview();
+    requestAnimationFrame(() => { if (mounted.current) shutter.current?.focus({ preventScroll: true }); });
+  };
+  const dockActive = cameraActive && input === "camera";
+  useEffect(() => {
+    const element = dockActive ? dock.current : previewSlot.current;
+    if (!element) return;
+    const observer = new ResizeObserver(() => {
+      const height = Math.ceil(element.getBoundingClientRect().height);
+      if (dockActive) setDockHeight(height); else setInlineHeight(height);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [dockActive]);
   const cancel = useCallback(() => {
+    clearReview();
     flight.current.invalidate();
     stillGeneration.current++;
     workers.current.forEach((w) => w.dispose());
@@ -98,7 +124,7 @@ export default function ScanLabClient() {
       setContinuous(false);
       setProgress({});
     }
-  }, []);
+  }, [clearReview]);
   const stopCamera = useCallback(() => {
     camera.current?.stop();
     if (video.current) video.current.srcObject = null;
@@ -261,7 +287,9 @@ export default function ScanLabClient() {
     });
   }, []);
   const recognize = useCallback(
-    async (compare = false) => {
+    async (compare = false, reviewCapture = false) => {
+      let capturedBlob: Blob | undefined;
+      const shouldReview = reviewCapture && input === "camera" && !continuous && !compare;
       if (flight.current.running) return;
       setBusy(true);
       setError("");
@@ -324,6 +352,7 @@ export default function ScanLabClient() {
               };
               attempt.frameId = await frameHash(processed);
               const blob = await canvasBlob(processed);
+              if (shouldReview) capturedBlob = blob;
               attempt.timings.preprocessMs = performance.now() - prepStart;
               if (!isCurrent())
                 throw new DOMException("Capture cancelled", "AbortError");
@@ -383,6 +412,11 @@ export default function ScanLabClient() {
               performance.now(),
             );
             addAttempt(a);
+            if (shouldReview) {
+              clearReview();
+              reviewUrl.current = capturedBlob ? URL.createObjectURL(capturedBlob) : undefined;
+              setReview({ attempt: a, frameUrl: reviewUrl.current });
+            }
             if (a.error) {
               setError(a.error);
               setContinuous(false);
@@ -398,6 +432,8 @@ export default function ScanLabClient() {
       barcodeEngine,
       cameraActive,
       cameraInfo,
+      clearReview,
+      continuous,
       groundTruth,
       input,
       keepFrame,
@@ -487,7 +523,18 @@ export default function ScanLabClient() {
     setWedgeValue("");
   };
   return (
-    <main className={styles.lab}>
+    <main className={styles.lab} style={dockActive ? { paddingBottom: dockHeight + 24 } : undefined}
+      onFocusCapture={e => {
+        if (!dockActive || review || dock.current?.contains(e.target)) return;
+        const target = e.target;
+        // Do not move pointer targets between pointer-down and click. Keyboard
+        // focus (including text inputs) is revealed after the focus settles.
+        requestAnimationFrame(() => {
+          if (!mounted.current || document.activeElement !== target || !target.matches(":focus-visible")) return;
+          const bounds = target.getBoundingClientRect(), top = dock.current?.getBoundingClientRect().top;
+          if (top !== undefined && bounds.bottom > top - 12) window.scrollBy({ top: bounds.bottom - top + 24 });
+        });
+      }}>
       <span className={styles.badge}>EXPERIMENTAL · PLATFORM ADMIN</span>
       <h1>TemcoScan Lab</h1>
       <p>
@@ -589,6 +636,9 @@ export default function ScanLabClient() {
               </>
             )}
           </div>
+          <div ref={previewSlot} style={dockActive ? { minHeight: inlineHeight } : undefined}>
+          <div ref={dock} className={dockActive ? styles.cameraDock : undefined}
+            role={dockActive ? "region" : undefined} aria-label={dockActive ? "Live capture dock" : undefined}>
           <CameraPreview
             videoRef={video}
             stillUrl={input !== "camera" ? stillUrl : undefined}
@@ -596,7 +646,25 @@ export default function ScanLabClient() {
             mirror={mirror}
             roi={roiEnabled ? roi : undefined}
             onRoi={updateRoi}
+            docked={dockActive}
           />
+          {dockActive && <>
+            <div className={styles.dockActions}>
+              <button ref={shutter} type="button" className={styles.primary}
+                onClick={() => void recognize(false, true)} disabled={busy || continuous}>
+                {busy ? "Recognizing locally…" : "Capture"}
+              </button>
+              <button type="button" onClick={() => { cancel(); stopCamera(); }}>Stop</button>
+            </div>
+            <div className={styles.dockStatus} role="status">
+              {continuous ? "Continuous · results stay in history" : busy ? "Hold steady · processing captured frame" : `${task === "barcode" ? "Barcode" : task === "hybrid" ? "Barcode + OCR" : "OCR"} · single capture opens review`}
+              {continuous && <button type="button" onClick={cancel}>Pause continuous</button>}
+              {busy && !continuous && <button type="button" onClick={cancel}>Cancel capture</button>}
+            </div>
+          </>}
+          </div>
+          </div>
+          {roiEnabled && <RoiInputs roi={roi} onRoi={updateRoi} />}
           <div className={styles.row}>
             <label className={styles.checks}>
               <input
@@ -908,7 +976,7 @@ export default function ScanLabClient() {
             </div>
           ) : (
             <>
-              <button
+              {!dockActive && <button
                 type="button"
                 className={styles.primary}
                 onClick={() => void recognize()}
@@ -919,7 +987,7 @@ export default function ScanLabClient() {
                 }
               >
                 {busy ? "Recognizing locally…" : "Scan / Capture"}
-              </button>
+              </button>}
               <div className={styles.row}>
                 <button
                   type="button"
@@ -1264,6 +1332,7 @@ export default function ScanLabClient() {
           </p>
         </section>
       </div>
+      {review && <CaptureReview attempt={review.attempt} frameUrl={review.frameUrl} onDismiss={dismissReview} />}
     </main>
   );
 }

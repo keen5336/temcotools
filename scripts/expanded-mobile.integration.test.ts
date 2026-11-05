@@ -13,6 +13,12 @@ import { resolve } from "node:path";
 import { stableWorkflowJson, validateWorkflowDefinition } from "../lib/workflows/definition";
 const url = process.env.WAREHOUSE_SCOPE_TEST_DATABASE_URL;
 const publicPilot = process.env.EXPANDED_PUBLIC_QUALIFICATION === "1";
+const dockQualification = process.env.SCAN_LAB_DOCK_QUALIFICATION === "1";
+function dockBrowserArgs() {
+  if (!dockQualification) return [];
+  assert.ok(process.env.SCAN_LAB_CAMERA_FIXTURE, "Explicit synthetic camera fixture is required; never open a real camera in this runner.");
+  return ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-video-capture=${resolve(process.env.SCAN_LAB_CAMERA_FIXTURE)}`];
+}
 test("integrated mobile warehouse context, platform-only scanner, local workers and Receiving UI", { skip: !url && !publicPilot, timeout: 240_000 }, async t => {
   if (publicPilot) return qualifyDeployedScanner(t);
   const target = new URL(url!); assert.equal(target.hostname, "127.0.0.1"); assert.equal(target.pathname, "/temcotools_v2_warehouse_scope_test");
@@ -36,8 +42,8 @@ test("integrated mobile warehouse context, platform-only scanner, local workers 
   const origin = `http://127.0.0.1:${port}`, secret = randomBytes(32).toString("hex");
   const child = spawn(process.execPath, ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", String(port)], { env: { ...process.env, DATABASE_URL: url!, NODE_ENV: "production", SESSION_SECRET: secret, TEMCO_PILOT_MODE: "read_only_dmp", TEMCO_SESSION_COOKIE_NAME: "temco_expanded_synthetic", NEXT_PUBLIC_APP_URL: origin, API_RELAY_INTERNAL_URL: "http://127.0.0.1:1" }, stdio: ["ignore","pipe","pipe"] });
   let output = ""; child.stdout.on("data", b => { output = (output + b).slice(-3000); }); child.stderr.on("data", b => { output = (output + b).slice(-3000); });
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Pacific/Auckland" }), page = await context.newPage();
+  const browser = await chromium.launch({ channel: "chrome", headless: true, args: dockBrowserArgs() });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Pacific/Auckland", ...(dockQualification ? { permissions: ["camera"] } : {}) }), page = await context.newPage();
   const external: string[] = []; await context.route("**/*", route => { const u = new URL(route.request().url()); if ([origin,"null"].includes(u.origin) || ["data:","blob:"].includes(u.protocol)) return route.continue(); external.push(u.origin); return route.abort(); });
   const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
   async function signIn(index: number) {
@@ -48,6 +54,10 @@ test("integrated mobile warehouse context, platform-only scanner, local workers 
   }
   try {
     let ready = false; for (let i=0;i<100;i++) { if (child.exitCode !== null) throw new Error(output); try { if ((await fetch(`${origin}/signin`)).status===200) {ready=true;break;} } catch {} await delay(100); } assert.ok(ready);
+    if (dockQualification) {
+      await signIn(0); await qualifyCameraDock(page, origin);
+      assert.deepEqual(external, []); assert.deepEqual(errors, []); return;
+    }
     await t.test("anonymous and legacy/site admin are denied the experimental route", async () => {
       await page.goto(`${origin}/tools/scan-lab`); assert.equal(new URL(page.url()).pathname, "/signin");
       await signIn(1); await page.goto(`${origin}/tools/scan-lab`); assert.notEqual(new URL(page.url()).pathname, "/tools/scan-lab");
@@ -147,7 +157,7 @@ else{const users=await db.user.findMany({where:{username:{startsWith:prefix}},se
     catch { throw new Error(`The exact synthetic ${mode} failed; private command diagnostics withheld. Namespace ${ns}.`); }
   }
   const data = fixture("seed") as { users: { id: string; username: string }[]; sites: { id: string; name: string }[] };
-  const browser = await chromium.launch({ channel: "chrome", headless: true }), context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Pacific/Auckland" }), page = await context.newPage();
+  const browser = await chromium.launch({ channel: "chrome", headless: true, args: dockBrowserArgs() }), context = await browser.newContext({ viewport: { width: 390, height: 844 }, timezoneId: "Pacific/Auckland", ...(dockQualification ? { permissions: ["camera"] } : {}) }), page = await context.newPage();
   const foreign: string[] = [], errors: string[] = [];
   await context.route("**/*", route => { const u = new URL(route.request().url()); if (u.origin === origin || ["data:", "blob:"].includes(u.protocol)) return route.continue(); if (!["https://static.cloudflareinsights.com"].includes(u.origin)) foreign.push(u.origin); return route.abort(); });
   page.on("pageerror", e => errors.push(e.message));
@@ -159,6 +169,20 @@ else{const users=await db.user.findMany({where:{username:{startsWith:prefix}},se
     await expect(page).toHaveURL(origin+"/", { timeout: 30_000 }); fixture("select", { index: i }); await page.goto(origin);
   }
   try {
+    if (dockQualification) {
+      await t.test("deployed anonymous and site admin stay denied the scanner", async () => {
+        await page.goto(origin+"/tools/scan-lab"); await expect(page).toHaveURL(origin+"/signin");
+        await signIn(1); await page.goto(origin+"/tools/scan-lab"); assert.notEqual(new URL(page.url()).pathname,"/tools/scan-lab");
+      });
+      await t.test("deployed single-camera dock and capture review use synthetic media and real ZXing", async () => {
+        await signIn(0); await qualifyCameraDock(page, origin);
+        await page.goto(origin+"/management/connections#wms-read-setup");
+        await expect(page.getByRole("heading",{name:"WMS LPN inquiry · setup",exact:true})).toBeVisible();
+        assert.deepEqual(foreign,[]); assert.deepEqual(errors,[]);
+        console.log(JSON.stringify({publicOrigin:origin,runtimeHead:head,realChrome:true,phoneWidth:390,landscapeHeight:320,physicalDevice:false,syntheticCamera:true,realDecoder:"zxing",externalUpstreamCalls:0,wmsSetupPreserved:true,ownerUsed:false}));
+      });
+      return;
+    }
     if (process.env.WMS_FOUNDATION_QUALIFICATION === "1") {
       await t.test("deployed WMS setup previews a synthetic LPN via shared service and leaves DMP available without upstream sends", async () => {
         await page.goto(origin+"/management/connections"); await expect(page).toHaveURL(origin+"/signin");
@@ -207,4 +231,73 @@ async function verifyManagementUi(page: Page, origin: string) {
   await page.goto(origin+"/admin/payloads"); const load=page.getByRole("button",{name:"Load generic approved-provider executor",exact:true}); await expect(load).toBeEnabled(); await load.click();
   await expect(page.getByLabel("Payload source",{exact:true})).toHaveValue(/createBrowserProviderExecutor/); await expect(page.getByLabel("Payload source",{exact:true})).toHaveValue(/startGenericProvider/);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+}
+
+// Focused affected UX checks on the real guarded application, not a replacement harness.
+declare global { interface Window { __scanDockFixture?: { calls: number; encodes: number; delay: number; tracks: MediaStreamTrack[]; video?: HTMLVideoElement } } }
+async function qualifyCameraDock(page: Page, origin: string) {
+  await page.addInitScript(() => {
+    const fixture = window.__scanDockFixture = { calls: 0, encodes: 0, delay: 0, tracks: [] as MediaStreamTrack[], video: undefined as HTMLVideoElement | undefined };
+    const get = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+    navigator.mediaDevices.getUserMedia = async constraints => { fixture.calls++; const stream=await get(constraints); fixture.tracks.push(...stream.getTracks()); return stream; };
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function(callback, ...args) { fixture.encodes++; toBlob.call(this, blob => fixture.delay ? setTimeout(() => callback(blob),fixture.delay) : callback(blob), ...args); };
+    // Exercise native-unavailable error honestly; successful captures use the real software decoder.
+    Object.defineProperty(window,"BarcodeDetector",{value:undefined,configurable:true});
+  });
+  await page.goto(origin+"/tools/scan-lab");
+  await page.getByLabel("Task",{exact:true}).selectOption("barcode"); await page.getByLabel("Barcode backend",{exact:true}).selectOption("zxing");
+  await page.getByRole("button",{name:"Start Camera",exact:true}).click();
+  const dock=page.getByRole("region",{name:"Live capture dock",exact:true}), shutter=dock.getByRole("button",{name:"Capture",exact:true});
+  const dialog=page.getByRole("dialog",{name:"Capture review",exact:true});
+  async function visibleTogether() {
+    await expect(shutter).toBeVisible(); await expect(page.getByTestId("camera-stage")).toBeVisible();
+    const values=await page.evaluate(()=>{const stage=document.querySelector('[data-testid="camera-stage"]')!.getBoundingClientRect(),button=Array.from(document.querySelectorAll('button')).find(b=>b.textContent==='Capture')!.getBoundingClientRect();return {rects:[stage,button].map(r=>({top:r.top,bottom:r.bottom,left:r.left,right:r.right})),width:innerWidth,height:innerHeight,overflow:document.documentElement.scrollWidth>innerWidth+1,videos:document.querySelectorAll('video').length,calls:window.__scanDockFixture!.calls,sameVideo:!window.__scanDockFixture!.video||window.__scanDockFixture!.video===document.querySelector('video')};});
+    assert.equal(values.overflow,false);assert.equal(values.videos,1);assert.equal(values.calls,1);assert.equal(values.sameVideo,true);
+    for(const r of values.rects){assert.ok(r.top>=0 && r.bottom<=values.height+1);assert.ok(r.left>=0 && r.right<=values.width+1);}
+  }
+  await visibleTogether(); await page.evaluate(()=>{window.__scanDockFixture!.video=document.querySelector('video')!;});
+  await page.evaluate(()=>window.scrollTo(0,document.body.scrollHeight)); await visibleTogether();
+  const encodes=await page.evaluate(()=>window.__scanDockFixture!.encodes);
+  await shutter.evaluate(button=>{(button as HTMLButtonElement).click();(button as HTMLButtonElement).click();});
+  await expect(dialog).toBeVisible();await expect(dialog).toContainText("Result found");await expect(dialog).toContainText("001234567890");
+  await expect(dialog.getByAltText("Captured processed frame")).toBeVisible();
+  assert.equal(await page.getByTestId("scan-history").locator('details').count(),1);
+  const attempt=JSON.parse((await page.getByTestId("scan-history").locator('pre').first().textContent())!);
+  assert.equal(await dialog.getAttribute('data-attempt-id'),attempt.id);
+  assert.equal(await page.evaluate(()=>window.__scanDockFixture!.encodes),encodes+1);
+  const thumbnail=await dialog.getByAltText("Captured processed frame").getAttribute('src');
+  await page.keyboard.press("Escape");await expect(dialog).toHaveCount(0);await expect(shutter).toBeFocused();await visibleTogether();
+  assert.equal(await page.evaluate(async url=>{try{await fetch(url!);return false;}catch{return true;}},thumbnail),true);
+  await page.setViewportSize({width:844,height:320});await visibleTogether();
+  await dock.getByRole("button",{name:"Collapse preview",exact:true}).click();await visibleTogether();await dock.getByRole("button",{name:"Show preview",exact:true}).click();
+  await page.setViewportSize({width:390,height:844});
+  await page.getByLabel("Crop to ROI",{exact:true}).check();
+  const before=Number(await page.getByLabel("ROI x percent",{exact:true}).inputValue()),roi=page.getByTestId("roi"),box=await roi.boundingBox();assert.ok(box);
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+12,box.y+box.height/2+5);await page.mouse.up();
+  assert.notEqual(Number(await page.getByLabel("ROI x percent",{exact:true}).inputValue()),before);
+  for(const [field,value]of [['width','5'],['height','5'],['x','0'],['y','92']])await page.getByLabel(`ROI ${field} percent`,{exact:true}).fill(value);
+  await shutter.click();await expect(dialog).toBeVisible();await expect(dialog).toContainText("No result detected");
+  await dialog.getByRole("button",{name:"Back to camera / scan again",exact:true}).click();await expect(shutter).toBeFocused();
+  await page.getByLabel("Crop to ROI",{exact:true}).uncheck();
+  await page.getByLabel("Ground truth for next attempts (optional, exact text)",{exact:true}).focus();
+  await expect.poll(async()=>{const b=await page.getByLabel("Ground truth for next attempts (optional, exact text)",{exact:true}).boundingBox(),d=await dock.boundingBox();return Boolean(b&&d&&b.y+b.height<=d.y-8);}).toBe(true);
+  await page.getByLabel("Barcode backend",{exact:true}).selectOption("native");await shutter.click();await expect(dialog).toBeVisible();await expect(dialog).toContainText("Capture / recognition error");await dialog.getByRole("button",{name:"Close capture review",exact:true}).click();
+  await page.getByLabel("Barcode backend",{exact:true}).selectOption("zxing");
+  const historyBefore=await page.getByTestId("scan-history").locator('details').count();
+  await page.evaluate(()=>{window.__scanDockFixture!.delay=500;});await shutter.click();await dock.getByRole("button",{name:"Cancel capture",exact:true}).click();
+  await expect(shutter).toBeEnabled();await expect(dialog).toHaveCount(0);assert.equal(await page.getByTestId("scan-history").locator('details').count(),historyBefore);await page.evaluate(()=>{window.__scanDockFixture!.delay=0;});
+  await page.getByLabel("Continuous camera capture",{exact:true}).check();
+  await expect.poll(()=>page.getByTestId("scan-history").locator('details').count()).toBeGreaterThan(historyBefore+1);await expect(dialog).toHaveCount(0);
+  await dock.getByRole("button",{name:"Pause continuous",exact:true}).click();await expect(shutter).toBeEnabled();await visibleTogether();
+  await dock.getByRole("button",{name:"Stop",exact:true}).click();await expect(dock).toHaveCount(0);
+  assert.equal(await page.evaluate(()=>window.__scanDockFixture!.tracks.every(t=>t.readyState==='ended')),true);
+  await page.getByLabel("Input source",{exact:true}).selectOption("upload");await page.getByRole("button",{name:"Load Code 128 fixture",exact:true}).click();
+  await expect(page.getByRole("button",{name:"Scan / Capture",exact:true})).toBeEnabled();await page.getByRole("button",{name:"Scan / Capture",exact:true}).click();await expect(page.getByLabel("zxing raw text",{exact:true})).toContainText("001234567890");await expect(dialog).toHaveCount(0);
+  await page.getByLabel("Input source",{exact:true}).selectOption("wedge");await page.getByLabel("Isolated wedge input",{exact:true}).fill("SYNTHETIC-WEDGE");await page.getByLabel("Isolated wedge input",{exact:true}).press("Enter");await expect(dialog).toHaveCount(0);
+  await page.getByRole("button",{name:"Start Camera",exact:true}).click();await expect(dock).toBeVisible();await shutter.click();await expect(dialog).toBeVisible();
+  await page.evaluate(()=>{const prior=Object.getOwnPropertyDescriptor(document,"hidden");Object.defineProperty(document,"hidden",{value:true,configurable:true});document.dispatchEvent(new Event("visibilitychange"));if(prior)Object.defineProperty(document,"hidden",prior);else Reflect.deleteProperty(document,"hidden");});
+  await expect(dialog).toHaveCount(0);await expect(dock).toHaveCount(0);assert.equal(await page.evaluate(()=>window.__scanDockFixture!.tracks.every(t=>t.readyState==='ended')),true);
+  await page.getByRole("button",{name:"Start Camera",exact:true}).click();await shutter.click();await expect(dialog).toBeVisible();
+  await page.goto(origin+"/management/connections");await page.goto(origin+"/tools/scan-lab");await expect(dialog).toHaveCount(0);await expect(dock).toHaveCount(0);
 }

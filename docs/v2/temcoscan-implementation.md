@@ -4,6 +4,18 @@ Coordinator status: the historical specialist integration hooks below are comple
 
 The bounded package is a functional client-only scanning experiment. It makes no WMS/API writes, imports no application actions/auth/Prisma modules, and requires no new server endpoint. The immutable [owner handoff](temcoscan-owner-handoff.md) is preserved separately.
 
+## Nov5 field feedback and capture ergonomics
+
+Adam reported: “Temco Scan lab so far has been a HUGE success by the way, it works amazing.” This is positive owner field feedback; no device model, engine, measured accuracy/latency or comprehensive hardware acceptance was supplied. His concrete issue was scrolling between the live view and Capture while holding a device steady. This is lab ergonomics, not a production workflow change.
+
+This increment keeps the one existing video/MediaStream and ROI transforms. While the camera is active, its container becomes a compact bottom dock with preview, adjacent large Capture and reachable Stop, safe-area bottom padding, constrained dynamic-viewport height and compact/expand/collapse controls. The inline slot retains its height; measured dock height reserves bottom space for scrollable settings/history. Keyboard focus is revealed without moving pointer checkbox targets during a click. ROI numeric controls stay in settings; ROI drag remains on the same stage, without panel drag gestures.
+
+Only the dock's intentional single **Capture** opens a native accessible review dialog. It carries that attempt's success/miss/error, raw detections/candidates and a temporary thumbnail of the **already encoded processed Blob**, including ROI/transforms. There is no recapture, second encode, upload or history image attachment. Closing/Escape/**Back to camera / scan again** releases its object URL and returns focus to Capture without restarting the camera. Cancel/stop/background/unmount release the review; the existing SingleFlight generation gate suppresses late/cancelled results. Continuous captures, uploads, wedge and the existing manual compare remain in normal result/history flow and do not open this review. Engines, data, auth and operational behavior are unchanged.
+
+Focused validation and exact deployed source are recorded in [build status](build-status.md). The real app test uses the existing synthetic camera Y4M and real ZXing, not a real handheld. It covers phone and short-landscape bounds, one video/stream, same-attempt thumbnail/result with one encode, focus, ROI, miss/error, cancellation/background handler, continuous/no-dialog, upload/wedge and navigation. Public mode additionally checks anonymous/site-manager denial, preserved WMS setup and exact runtime pins, then removes its own temporary people/sites/sessions. No owner account is used.
+
+**Owner check on the actual handheld:** open [TemcoScan Lab](https://temco-v2.chronchive.com/tools/scan-lab), start the camera, aim and tap Capture without scrolling; dismiss review and immediately capture again. Try portrait/landscape, compact/collapse, an ROI drag and Stop with your normal grip/browser bars. Confirm dock size/thumb reach and label legibility. This new ergonomics check remains pending physical feedback; the positive observation above does not retroactively qualify the new layout.
+
 ## Coordinator integration
 
 Default export: `components/scan-lab/ScanLabClient.tsx` (no props). Create the server route and navigation under the new **real platform-admin** principal/guard. Do not use the legacy manager/site-admin role:

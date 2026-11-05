@@ -16,6 +16,7 @@ interface Props {
   mirror: boolean;
   roi?: Rect;
   onRoi: (roi: Rect) => void;
+  docked?: boolean;
 }
 export default function CameraPreview({
   videoRef,
@@ -24,6 +25,7 @@ export default function CameraPreview({
   mirror,
   roi,
   onRoi,
+  docked = false,
 }: Props) {
   const stage = useRef<HTMLDivElement>(null);
   const drag = useRef<{
@@ -51,7 +53,7 @@ export default function CameraPreview({
   return (
     <div>
       <div className={styles.row}>
-        <strong>Inline preview</strong>
+        <strong>{docked ? "Live preview" : "Inline preview"}</strong>
         <button type="button" onClick={() => setExpanded((v) => !v)}>
           {expanded ? "Compact" : "Expand"}
         </button>
@@ -63,7 +65,7 @@ export default function CameraPreview({
         ref={stage}
         data-testid="camera-stage"
         className={styles.preview}
-        style={{ height: collapsed ? 36 : expanded ? 390 : 220 }}
+        style={{ height: docked ? collapsed ? "min(64px, 18dvh)" : expanded ? "min(240px, 36dvh)" : "min(180px, 28dvh)" : collapsed ? 36 : expanded ? 390 : 220 }}
         onPointerMove={(e) => {
           if (!drag.current) return;
           const fit = fittedRect(size, view),
@@ -145,8 +147,12 @@ export default function CameraPreview({
           </div>
         )}
       </div>
-      {roi && (
-        <div className={styles.roiInputs}>
+    </div>
+  );
+}
+
+export function RoiInputs({ roi, onRoi }: { roi: Rect; onRoi: (roi: Rect) => void }) {
+  return <div className={styles.roiInputs}>
           {(["x", "y", "width", "height"] as const).map((k) => (
             <label key={k}>
               {k} %
@@ -163,8 +169,5 @@ export default function CameraPreview({
               />
             </label>
           ))}
-        </div>
-      )}
-    </div>
-  );
+        </div>;
 }

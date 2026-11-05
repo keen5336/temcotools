@@ -279,3 +279,92 @@
     padding: 6px;
   }
 }
+
+/* One existing video node changes layout; settings/history remain scrollable. */
+.cameraDock {
+  position: fixed;
+  z-index: 45;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 0;
+  width: min(480px, calc(100% - 16px));
+  max-height: calc(100dvh - 12px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 4px 10px max(8px, env(safe-area-inset-bottom));
+  border: 1px solid var(--lab-line);
+  border-radius: 14px 14px 0 0;
+  background: var(--lab-panel);
+  box-shadow: 0 -6px 24px #0009;
+}
+.cameraDock .row {
+  margin: 4px 0;
+  gap: 6px;
+}
+.cameraDock .row strong {
+  font-size: 13px;
+}
+.cameraDock .row button {
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.dockActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 6px;
+}
+.dockActions .primary {
+  margin: 0;
+}
+.dockStatus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  min-height: 22px;
+  padding-top: 4px;
+}
+.dockStatus button {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.review {
+  padding: 14px;
+  margin: auto;
+  width: min(560px, calc(100% - 20px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--lab-accent);
+  border-radius: 14px;
+  background: var(--lab-panel);
+  color: var(--lab-ink);
+}
+.review::backdrop {
+  background: #02080dc9;
+}
+.reviewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.reviewHeader h2 {
+  margin: 0;
+}
+.reviewBody {
+  overflow-wrap: anywhere;
+}
+.reviewFrame {
+  display: block;
+  width: 100%;
+  max-height: min(180px, 28dvh);
+  object-fit: contain;
+  background: #02080d;
+  border-radius: 6px;
+}

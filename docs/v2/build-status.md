@@ -2,6 +2,10 @@
 
 Standing owner mandate: continue useful authorized implementation, review, correction, tests, commits, pushes and isolated-pilot deployment. Stage completion is a progress checkpoint. Keep GPT-6.1 Sol/xhigh and the existing tier; focused helpers are authorized, with one integration/deployment owner. No new supervisor, arbitrary scope or repeated “continue” gate.
 
+## Nov5 Scan Lab ergonomics increment
+
+Owner field feedback reports strong success with the lab, with a concrete need to see the camera and press Capture on one screen. The bounded UI increment adds a compact bottom camera/shutter dock and accessible single-capture review, reusing the one video/stream, processed Blob and existing SingleFlight/recognizers. Continuous/upload/wedge/compare stay in normal result/history flow. No OCR/auth/data/WMS change, panel drag gestures or physical benchmark claim. [Field feedback, exact behavior and owner handheld steps](temcoscan-implementation.md#nov5-field-feedback-and-capture-ergonomics). Local affected checks passed; native dev rollout/public path verification is in progress. Runtime below remains the previous verified WMS increment until admission evidence updates it.
+
 ## Nov5 finite WMS foundation increment
 
 Owner prioritizes one real read-only Descartes WMS LPN inquiry on the existing dev deployment. This increment improves Connections setup/fixture preview and current provider/action/receipt presentation using the existing shared services; no redesign, new upstream contract or WMS write. [Exact owner steps and missing browser/native input](wms-lpn-quickstart.md). Nov5 read-only pilot inventory found zero action versions, runtime/provider configurations, payloads and managed files; no private source contract is available there. A signed-in browser screen and native FMHH are not an evidenced browser lookup/identity contract. Delivered and deployed as `04aa037a304b59cfd53504b950d4cde9b70d3f1d`. Live WMS lookup is pending the actual original work tab and contract; the representative fixture is explicitly synthetic. No workflow redesign or scanner acceptance gate was added.
