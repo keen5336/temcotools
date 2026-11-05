@@ -1,6 +1,6 @@
 # Connecting an approved work-browser provider
 
-This guide describes the generic provider software being integrated after runtime7d. Check [build status](build-status.md) for its actual deployed revision. The existing DMP relay and its bookmarks remain independent and usable. No Route Planner/WMS/MARS identity or action contract is qualified by this guide or by a synthetic fixture.
+This guide describes the integrated generic provider software. For the finite Nov5 WMS inquiry setup and exact missing evidence, start with the [LPN quickstart](wms-lpn-quickstart.md). Check [build status](build-status.md) for its actual deployed revision. The existing DMP relay and its bookmarks remain independent and usable. No Route Planner/WMS/MARS identity or action contract is qualified by this guide or by a synthetic fixture.
 
 The work machine keeps its upstream login. The v2 server and an MCP client never receive that site's browser cookies, auth headers, browser storage or a copied session. Install the one **Connect TemcoTools** bookmarklet from the payload/site manager, then run it on a supported page. Only origin and pathname are dispatch metadata; query/fragment/DOM are not collected. An unsupported, ambiguous, disabled or unpublished mapping performs no operational work. Normal site CSP must permit the injected script and socket; the app does not bypass it.
 

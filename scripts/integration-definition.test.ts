@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { WMS_LPN_FIXTURE, WMS_LPN_OUTPUT, WMS_LPN_SAMPLE } from "../lib/integrations/wms-lpn-fixture";
 import { boundedIntegrationPath, exactIntegrationOrigin, integrationActionHash, integrationPathMatches, mapActionRequest, validateActionInputs, validateActionOutput, validateIntegrationAction, type IntegrationActionDefinition, type IntegrationEffect } from "../lib/integrations/definition";
 import { canReadOperationReceipt, canViewProvider, chooseProviderRoute, decidePrinterClaim, decideProviderDispatch, type DispatchContext, type DispatchDecision, type OperationReceipt, type PrinterQueueJob, type ProviderRecord, type StoredActionPublication, type StoredActionVersion, type StoredContractApproval, type StoredDeviceLink, type StoredProviderGrant, type StoredProviderRoute } from "../lib/integrations/provider-policy";
 
@@ -192,4 +193,16 @@ test("an explicitly bounded large XML body can validate as private string output
   assert.equal(validateActionOutput(configured,xml),xml);
   assert.throws(()=>validateActionInputs(configured,{...input,item:"X".repeat(65536)}),/limit|Invalid/);
   assert.throws(()=>validateActionOutput({...configured,output:{type:"string",maxLength:1024}},xml),/Invalid/);
+});
+
+ test("representative LPN preview preserves identifiers and rejects credential/output drift without defining a live WMS contract", () => {
+  const definition = validateIntegrationAction(WMS_LPN_FIXTURE);
+  const request = mapActionRequest(definition, { lpn: "00001234 / A+B" }, "SYNTHETIC-DEPOT");
+  assert.equal(definition.origin, "https://wms-fixture.example.invalid");
+  assert.equal(definition.effect, "read");
+  const query = new URL(request.path, definition.origin).searchParams;
+  assert.equal(query.get("lpn"), "00001234 / A+B"); assert.equal(query.get("warehouse"), "SYNTHETIC-DEPOT");
+  assert.deepEqual(validateActionOutput(definition, WMS_LPN_OUTPUT), WMS_LPN_OUTPUT);
+  assert.throws(() => validateActionInputs(definition, { ...WMS_LPN_SAMPLE, cookie: "forbidden" }));
+  assert.throws(() => validateActionOutput(definition, { ...WMS_LPN_OUTPUT, warehouse: null }));
 });

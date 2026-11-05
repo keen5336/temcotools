@@ -2,6 +2,10 @@
 
 Standing owner mandate: continue useful authorized implementation, review, correction, tests, commits, pushes and isolated-pilot deployment. Stage completion is a progress checkpoint. Keep GPT-6.1 Sol/xhigh and the existing tier; focused helpers are authorized, with one integration/deployment owner. No new supervisor, arbitrary scope or repeated “continue” gate.
 
+## Nov5 finite WMS foundation increment
+
+Owner prioritizes one real read-only Descartes WMS LPN inquiry on the existing dev deployment. This increment improves Connections setup/fixture preview and current provider/action/receipt presentation using the existing shared services; no redesign, new upstream contract or WMS write. [Exact owner steps and missing browser/native input](wms-lpn-quickstart.md). Nov5 read-only pilot inventory found zero action versions, runtime/provider configurations, payloads and managed files; no private source contract is available there. A signed-in browser screen and native FMHH are not an evidenced browser lookup/identity contract. Local typed fixture/executor/receipt checks passed; rollout/public-path validation is in progress. The runtime below remains the verified prior release until updated with admission evidence.
+
 ## Current runtime and preservation
 
 **Live/tested runtime: `94782b71356a8859cbd75bb7c1461c5527c7729c`**, Linux/amd64,40 migrations. UI https://temco-v2.chronchive.com/ · MCP https://temco-v2.chronchive.com/mcp. Later documentation commits do not change those images. [Exact native pins and usable paths](pilot-launch-status.md).

@@ -33,8 +33,7 @@ current revision checks. Old versions and active intents are never rewritten.
 
 Browser provider registration stores **disconnected, unqualified configuration**.
 Its input cannot claim authentication, actual upstream identity/warehouse,
-heartbeat or action readiness. Generic Route Planner, MARS and WMS providers have
-no enabled live transport in this release. A platform contract review is a saved
+heartbeat or action readiness. The integrated generic transport can execute approved READs after exact configuration and human activation; actual Route Planner, MARS and WMS contracts remain unqualified. See the [WMS LPN quickstart](wms-lpn-quickstart.md). A platform contract review is a saved
 qualification decision, not proof that a generic transport has been installed or
 that a live call passed. `connections.simulate` validates the selected current
 published version and local fixture data, and explicitly reports `sent: false`.

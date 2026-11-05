@@ -159,6 +159,28 @@ else{const users=await db.user.findMany({where:{username:{startsWith:prefix}},se
     await expect(page).toHaveURL(origin+"/", { timeout: 30_000 }); fixture("select", { index: i }); await page.goto(origin);
   }
   try {
+    if (process.env.WMS_FOUNDATION_QUALIFICATION === "1") {
+      await t.test("deployed WMS setup previews a synthetic LPN via shared service and leaves DMP available without upstream sends", async () => {
+        await page.goto(origin+"/management/connections"); await expect(page).toHaveURL(origin+"/signin");
+        await signIn(0); await page.goto(origin+"/management/connections#wms-read-setup");
+        await expect(page.getByRole("heading",{name:"WMS LPN inquiry · setup",exact:true})).toBeVisible();
+        await expect(page.getByRole("button",{name:"Prepare named action (no send)",exact:true})).toBeDisabled();
+        const actions:string[]=[]; page.on("request",request=>{if(request.url().includes("/api/application/"))actions.push(new URL(request.url()).pathname.split("/").at(-1)!);});
+        await page.getByText("Try the representative LPN fixture · no upstream send",{exact:true}).click();
+        await page.getByRole("button",{name:"Preview synthetic LPN inquiry",exact:true}).click();
+        const preview=page.getByLabel("LPN fixture result",{exact:true}); await expect(preview).toContainText('"sent": false');
+        await expect(preview).toContainText('"lpn": "SYNTHETIC-LPN-0001"'); await expect(preview).toContainText('"reportedStatus": "FIXTURE_ONLY"');
+        await expect(preview).toContainText('"validatedOutput"'); await expect(preview).toContainText("wms-fixture.example.invalid");
+        await page.getByRole("button",{name:"Refresh provider status",exact:true}).click();
+        await expect(page.getByText("Action acknowledged.",{exact:false})).toBeVisible();
+        assert.equal(actions.includes("integrations.preview"),true); assert.equal(actions.some(a=>a.startsWith("connections.operation.")),false);
+        await page.getByRole("link",{name:"Connect / reconnect work browser",exact:true}).click(); await expect(page).toHaveURL(origin+"/tools/api-relay");
+        await expect(page.locator("main").last()).toContainText("DMP");
+        assert.deepEqual(foreign,[]); assert.deepEqual(errors,[]); assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+        console.log(JSON.stringify({publicOrigin:origin,runtimeHead:head,realChrome:true,viewport:390,wmsLive:false,fixturePreview:true,operationDispatches:0,legacyDmpPage:true,externalRequests:0,ownerUsed:false}));
+      });
+      return;
+    }
     await t.test("deployed anonymous and local admin cannot open Lab", async () => {
       await page.goto(origin+"/tools/scan-lab"); await expect(page).toHaveURL(origin+"/signin");
       await signIn(1); await page.goto(origin+"/tools/scan-lab"); assert.notEqual(new URL(page.url()).pathname,"/tools/scan-lab"); await expect(page.getByRole("link", {name:"TemcoScan Lab",exact:true})).toHaveCount(0);
