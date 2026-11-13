@@ -44,6 +44,11 @@
     const distance = selected.join('\n').match(/Total\s+Distance\s*\(mi\)\s*:\s*([\d,]+(?:\.\d+)?)/i)?.[1];
     const miles = distance == null ? null : Math.round(Number(distance.replace(/,/g, '')));
     const pageTypeLabels = { sth: 'STH - Outside Delivery', 'home-delivery': 'Home Delivery', revisit: 'Revisit' };
+    const stopFields = {
+      sth: [['Order', 'order'], ['DWO', 'dwo'], ['Service Type', 'serviceType']],
+      'home-delivery': [['Order', 'order'], ['MSN', 'msn'], ['Service Type', 'serviceType']],
+      revisit: [['Order', 'order'], ['Service Type', 'serviceType']]
+    };
     const pageTypeFor = serviceType => {
       const normalized = serviceType.trim().toUpperCase();
       if (normalized.startsWith('MO')) return 'revisit';
@@ -119,12 +124,16 @@
         <li>We appreciate all feedback regarding any issues with stores and teams in the comment section! Both the delivery provider and Home Depot read the comments daily! And we use them to coach and provide feedback to our stores and delivery teams.</li></ul>
       <div class="survey-team"><b>Your Delivery Team:</b><span class="survey-team-name" contenteditable="true" spellcheck="false" role="textbox" aria-label="Delivery team member 1"></span><b>&amp;</b><span class="survey-team-name" contenteditable="true" spellcheck="false" role="textbox" aria-label="Delivery team member 2"></span></div>
     </footer>`;
-    const pageHeader = (title, pageType = '') => `<header class="section-header"><img src="${LOGO}" width="192" height="48" alt="TEMCO Logistics"><div><b>${escape(title)}</b>${pageType ? `<span class="service-page-type">${escape(pageTypeLabels[pageType])}</span>` : ''}<span>${escape(route)} &nbsp; ${escape(date)}</span></div></header>`;
+    const pageHeader = (title, pageType = '') => `<header class="section-header"><img src="${LOGO}" width="192" height="48" alt="TEMCO Logistics"><div><b>${escape(title)}</b>${pageType ? `<span class="service-page-type">${escape(pageTypeLabels[pageType])}</span>` : ''}${pageType === 'sth' ? '' : `<span>${escape(route)} &nbsp; ${escape(date)}</span>`}</div></header>`;
+    const itemTable = stop => {
+      const descriptionOnly = stop.pageType === 'revisit';
+      return `<table class="items"><colgroup>${descriptionOnly ? '<col>' : '<col style="width:9%"><col style="width:19%"><col>'}</colgroup><thead><tr>${descriptionOnly ? '' : '<th scope="col">Qty</th><th scope="col">SKU</th>'}<th scope="col">Description</th></tr></thead><tbody>${stop.items.length ? stop.items.map(item => `<tr>${descriptionOnly ? '' : `<td>${escape(item.qty)}</td><td>${escape(item.sku)}</td>`}<td>${escape(item.description)}</td></tr>`).join('') : `<tr><td colspan="${descriptionOnly ? 1 : 3}">No item rows could be read from the source text. Check this stop against the original manifest.</td></tr>`}</tbody></table>`;
+    };
     const stopPages = stops.map(stop => `<section class="page stop-page" data-page-type="${stop.pageType}">
       <div class="stop-content">${pageHeader('STOP ' + stop.stop, stop.pageType)}
       <h1>${escape(stop.customer)}</h1><div class="address">${escape(stop.address)}</div>
-      <table class="details"><tbody>${[['Order', stop.order], ['DWO', stop.dwo], ['MSN', stop.msn], ['ETA', stop.eta], ['Service Type', stop.serviceType], ['Weight', stop.weight], ['Pallets', stop.pallets]].map(([label, detail]) => `<tr><th scope="row">${label}</th><td>${value(detail)}</td></tr>`).join('')}</tbody></table>
-      <h2>Items</h2><table class="items"><colgroup><col style="width:9%"><col style="width:19%"><col></colgroup><thead><tr><th scope="col">Qty</th><th scope="col">SKU</th><th scope="col">Description</th></tr></thead><tbody>${stop.items.length ? stop.items.map(item => `<tr><td>${escape(item.qty)}</td><td>${escape(item.sku)}</td><td>${escape(item.description)}</td></tr>`).join('') : '<tr><td colspan="3">No item rows could be read from the source text. Check this stop against the original manifest.</td></tr>'}</tbody></table>
+      <table class="details"><tbody>${stopFields[stop.pageType].map(([label, key]) => `<tr><th scope="row">${label}</th><td>${value(stop[key])}</td></tr>`).join('')}</tbody></table>
+      <h2>Items</h2>${itemTable(stop)}
       </div>${surveyPanel()}</section>`).join('');
     const warnings = [];
     if (miles == null) warnings.push('Mileage was not found; the cover leaves it blank.');

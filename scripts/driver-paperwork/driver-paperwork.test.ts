@@ -202,6 +202,40 @@ for (const [service, expected] of [
   });
 }
 
+for (const [service, fields, columns, showRouteDate] of [
+  ["STH - Outside Delivery", ["Order", "DWO", "Service Type"], ["Qty", "SKU", "Description"], false],
+  ["Home Delivery", ["Order", "MSN", "Service Type"], ["Qty", "SKU", "Description"], true],
+  ["MO - Revisit", ["Order", "Service Type"], ["Description"], true],
+] as const) {
+  test(`${service} prints only its selected fields and item columns`, () => {
+    const page = harness({ text: manifest.replace("Service Type\tSTH", `Service Type\t${service}`) });
+    page.run();
+    page.deliver();
+    assert.deepEqual(page.alerts, []);
+    const html = page.popups[0].html;
+    const stop = html.slice(html.indexOf('<section class="page stop-page"'));
+    assert.deepEqual([...stop.matchAll(/<th scope="row">([^<]+)</g)].map(match => match[1]), [...fields]);
+    assert.deepEqual([...stop.matchAll(/<th scope="col">([^<]+)</g)].map(match => match[1]), [...columns]);
+    const header = stop.match(/<header class="section-header">([\s\S]+?)<\/header>/)![1];
+    assert.equal(header.includes("SH31"), showRouteDate);
+    assert.equal(header.includes("11/07/2026"), showRouteDate);
+    const items = stop.match(/<table class="items">([\s\S]+?)<\/table>/)![1];
+    assert.equal(items.includes("00010"), columns.length === 3);
+    assert.match(items, /Washer &amp; dryer kit/);
+    assert.equal([...items.matchAll(/<td>/g)].length, columns.length);
+    assert(stop.includes('class="survey-panel"'));
+  });
+}
+
+test("a revisit with no item rows uses a single-column warning", () => {
+  const text = manifest.replace("Service Type\tSTH", "Service Type\tMO - Revisit").replace("1\t00010\tWasher & dryer kit", "");
+  const page = harness({ text });
+  page.run();
+  page.deliver();
+  assert.deepEqual(page.alerts, []);
+  assert.match(page.popups[0].html, /<td colspan="1">No item rows/);
+});
+
 test("network failure closes the loading window and permits a fresh download", () => {
   const page = harness();
   page.run();

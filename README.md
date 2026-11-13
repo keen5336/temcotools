@@ -171,8 +171,11 @@ the route, review the booklet, and choose **Print / Save PDF**. Parsing, editabl
 fields and the embedded TEMCO logo retain the November 7 version. Stop pages are
 identified as **STH - Outside Delivery**, **Home Delivery**, or **Revisit** from
 their Service Type. Values beginning with `MO` select Revisit, `STH` selects
-Outside Delivery, and other delivery stops select Home Delivery. All three use
-the existing stop layout and fields; the cover and its totals are unchanged.
+Outside Delivery, and other delivery stops select Home Delivery. STH sheets show
+Order, DWO and Service Type, with no route/date in the upper-right header. Home
+Delivery sheets show Order, MSN and Service Type. Revisit sheets show Order and
+Service Type, with description-only item lists. STH and Home Delivery retain
+quantity and SKU columns. The cover, its totals and route summary are unchanged.
 Customer stop sheets include the yellow delivery-survey reminder, with embedded
 TEMCO and Home Depot logos and editable delivery-team names. Long item lists
 continue onto additional stop sheets, each with its own bottom survey panel.
