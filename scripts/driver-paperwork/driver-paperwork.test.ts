@@ -156,6 +156,44 @@ test("a downloaded payload renders the existing booklet from local manifest text
   assert.equal(page.scripts[0].removed, true);
 });
 
+test("a mixed route identifies all three page types while retaining stop order, fields, and cover totals", () => {
+  const start = manifest.indexOf("1\nLocation #");
+  const stop = manifest.slice(start);
+  const services = ["STH - Outside Delivery", "Home Delivery", "MO - Revisit"];
+  const text = manifest.slice(0, start) + services.map((service, index) => stop
+    .replace(/^1\n/, `${index + 1}\n`)
+    .replace("ORDER-1", `ORDER-${index + 1}`)
+    .replace("Service Type\tSTH", `Service Type\t${service}`)).join("\n");
+  const page = harness({ text });
+  page.run();
+  page.deliver();
+  assert.deepEqual(page.alerts, []);
+  const html = page.popups[0].html;
+  assert.deepEqual([...html.matchAll(/data-page-type="([^"]+)"/g)].map(match => match[1]), ["sth", "home-delivery", "revisit"]);
+  assert.deepEqual([...html.matchAll(/class="service-page-type">([^<]+)</g)].map(match => match[1]), ["STH - Outside Delivery", "Home Delivery", "Revisit"]);
+  assert.deepEqual([...html.matchAll(/<b>STOP (\d+)<\/b>/g)].map(match => match[1]), ["1", "2", "3"]);
+  for (const service of services) assert(html.includes(`<th scope="row">Service Type</th><td>${service}</td>`));
+  assert.equal([...html.matchAll(/Washer &amp; dryer kit/g)].length, 3);
+  assert.match(html, /<span>STH<\/span><strong>1<\/strong>/);
+  assert.match(html, /<span>APP<\/span><strong>2<\/strong>/);
+});
+
+for (const [service, expected] of [
+  ["MO", "revisit"],
+  ["  mo - inspection", "revisit"],
+  ["MO - STH follow-up", "revisit"],
+  ["sth - Outside Delivery", "sth"],
+  ["APP - Home Delivery", "home-delivery"],
+] as const) {
+  test(`Service Type ${service.trim()} selects the ${expected} page`, () => {
+    const page = harness({ text: manifest.replace("Service Type\tSTH", `Service Type\t${service}`) });
+    page.run();
+    page.deliver();
+    assert.deepEqual(page.alerts, []);
+    assert(page.popups[0].html.includes(`data-page-type="${expected}"`));
+  });
+}
+
 test("network failure closes the loading window and permits a fresh download", () => {
   const page = harness();
   page.run();

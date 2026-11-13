@@ -42,6 +42,13 @@
     const date = header.match(/\bDATE\s*:\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i)?.[1] || '';
     const distance = selected.join('\n').match(/Total\s+Distance\s*\(mi\)\s*:\s*([\d,]+(?:\.\d+)?)/i)?.[1];
     const miles = distance == null ? null : Math.round(Number(distance.replace(/,/g, '')));
+    const pageTypeLabels = { sth: 'STH - Outside Delivery', 'home-delivery': 'Home Delivery', revisit: 'Revisit' };
+    const pageTypeFor = serviceType => {
+      const normalized = serviceType.trim().toUpperCase();
+      if (normalized.startsWith('MO')) return 'revisit';
+      if (/^STH\b/.test(normalized)) return 'sth';
+      return 'home-delivery';
+    };
     const stops = [];
     const seen = new Map();
     for (const section of selected) {
@@ -54,13 +61,15 @@
           const match = line.match(/^[ \t]*(\d+(?:\.\d+)?)\t+(\d+)\t+(.*)$/);
           return match ? [{ qty: match[1], sku: match[2], description: match[3].replace(/\t+/g, ' ').trim() }] : [];
         });
+        const serviceType = field(block, 'Service Type');
         const stop = {
           stop: markers[i][1],
           order: field(block, 'Customer Order #'),
           dwo: field(block, 'DWO #'),
           msn: field(block, 'MSN #'),
           eta: field(block, 'ETA'),
-          serviceType: field(block, 'Service Type'),
+          serviceType,
+          pageType: pageTypeFor(serviceType),
           customer: customer?.[1].trim() || '',
           address: customer?.[2].trim() || '',
           weight: customer?.[3] || '',
@@ -100,9 +109,9 @@
       [['Charlie', '909-528-0327'], ['Jose', '909-675-2309']]
     ];
     const contactsHtml = contacts.map(row => '<div class="contact-row">' + row.map(contact => contact ? `<div><b>${escape(contact[0])}</b> <span>${escape(contact[1])}</span></div>` : '<div></div>').join('') + '</div>').join('');
-    const pageHeader = title => `<header class="section-header"><img src="${LOGO}" width="192" height="48" alt="TEMCO Logistics"><div><b>${escape(title)}</b><span>${escape(route)} &nbsp; ${escape(date)}</span></div></header>`;
-    const stopPages = stops.map(stop => `<section class="page stop-page">
-      ${pageHeader('STOP ' + stop.stop)}
+    const pageHeader = (title, pageType = '') => `<header class="section-header"><img src="${LOGO}" width="192" height="48" alt="TEMCO Logistics"><div><b>${escape(title)}</b>${pageType ? `<span class="service-page-type">${escape(pageTypeLabels[pageType])}</span>` : ''}<span>${escape(route)} &nbsp; ${escape(date)}</span></div></header>`;
+    const stopPages = stops.map(stop => `<section class="page stop-page" data-page-type="${stop.pageType}">
+      ${pageHeader('STOP ' + stop.stop, stop.pageType)}
       <h1>${escape(stop.customer)}</h1><div class="address">${escape(stop.address)}</div>
       <table class="details"><tbody>${[['Order', stop.order], ['DWO', stop.dwo], ['MSN', stop.msn], ['ETA', stop.eta], ['Service Type', stop.serviceType], ['Weight', stop.weight], ['Pallets', stop.pallets]].map(([label, detail]) => `<tr><th scope="row">${label}</th><td>${value(detail)}</td></tr>`).join('')}</tbody></table>
       <h2>Items</h2><table class="items"><colgroup><col style="width:9%"><col style="width:19%"><col></colgroup><thead><tr><th scope="col">Qty</th><th scope="col">SKU</th><th scope="col">Description</th></tr></thead><tbody>${stop.items.length ? stop.items.map(item => `<tr><td>${escape(item.qty)}</td><td>${escape(item.sku)}</td><td>${escape(item.description)}</td></tr>`).join('') : '<tr><td colspan="3">No item rows could be read from the source text. Check this stop against the original manifest.</td></tr>'}</tbody></table>

@@ -168,7 +168,11 @@ session data. Updating it does not require replacing installed bookmarks.
 
 Run the bookmark on a Home Depot HTML route manifest with selectable text, enter
 the route, review the booklet, and choose **Print / Save PDF**. Parsing, editable
-fields, the embedded TEMCO logo and print layout retain the November 7 version.
+fields and the embedded TEMCO logo retain the November 7 version. Stop pages are
+identified as **STH - Outside Delivery**, **Home Delivery**, or **Revisit** from
+their Service Type. Values beginning with `MO` select Revisit, `STH` selects
+Outside Delivery, and other delivery stops select Home Delivery. All three use
+the existing stop layout and fields; the cover and its totals are unchanged.
 Manifest contents stay in the source browser; they are not sent to TemcoTools.
 The loader opens the booklet window before downloading the program so a slow
 connection does not lose popup permission. Load failures close that window and
