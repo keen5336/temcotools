@@ -55,7 +55,7 @@ export default function DriverPaperworkClient() {
         <li>Open the Home Depot route manifest page with selectable text.</li>
         <li>Click your saved <strong>TEMCO Driver Paperwork</strong> bookmark and enter a route, such as <strong>SH31</strong>.</li>
         <li>Review the booklet. You can type into Dock/Wave, Special Attention, and the signature line.</li>
-        <li>Choose <strong>Print / Save PDF</strong>. Use Letter paper at 100% scale and turn off browser headers and footers.</li>
+        <li>Choose <strong>Print / Save PDF</strong>. Use Letter paper at 100% scale and turn off browser headers and footers. Print in color for the yellow survey panel on customer stop sheets.</li>
       </ol>
       <p className="text-sm text-base-content/70">Allow pop-ups for the manifest page. The bookmark needs an internet connection to load and cannot read a browser PDF viewer or an image-only manifest.</p>
       <p className="text-sm text-base-content/70">Your manifest stays in your browser. Route and customer details are not uploaded to TemcoTools.</p>

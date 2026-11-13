@@ -173,6 +173,10 @@ identified as **STH - Outside Delivery**, **Home Delivery**, or **Revisit** from
 their Service Type. Values beginning with `MO` select Revisit, `STH` selects
 Outside Delivery, and other delivery stops select Home Delivery. All three use
 the existing stop layout and fields; the cover and its totals are unchanged.
+Customer stop sheets include the yellow delivery-survey reminder, with embedded
+TEMCO and Home Depot logos and editable delivery-team names. Long item lists
+continue onto additional stop sheets, each with its own bottom survey panel.
+The cover and route summary do not include this panel. Use color printing.
 Manifest contents stay in the source browser; they are not sent to TemcoTools.
 The loader opens the booklet window before downloading the program so a slow
 connection does not lose popup permission. Load failures close that window and

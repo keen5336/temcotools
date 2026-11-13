@@ -57,6 +57,7 @@ function harness({ text = manifest, answer = "SH31", blocked = false } = {}) {
         open() { html = ""; },
         write(value: string) { html += value; },
         close() {},
+        querySelectorAll() { return []; },
         getElementById() { return { addEventListener() {} }; },
       },
       get html() { return html; },
@@ -174,6 +175,13 @@ test("a mixed route identifies all three page types while retaining stop order, 
   assert.deepEqual([...html.matchAll(/<b>STOP (\d+)<\/b>/g)].map(match => match[1]), ["1", "2", "3"]);
   for (const service of services) assert(html.includes(`<th scope="row">Service Type</th><td>${service}</td>`));
   assert.equal([...html.matchAll(/Washer &amp; dryer kit/g)].length, 3);
+  assert.equal([...html.matchAll(/class="survey-panel"/g)].length, 3);
+  assert.equal([...html.matchAll(/alt="The Home Depot"/g)].length, 3);
+  assert.match(html, /background:#ffeb73/);
+  assert.match(html, /print-color-adjust:exact/);
+  assert.match(html, /Your Delivery Team:/);
+  const cover = html.slice(html.indexOf('<section class="page cover">'), html.indexOf('<section class="page manifest-page">'));
+  assert(!cover.includes('survey-panel'));
   assert.match(html, /<span>STH<\/span><strong>1<\/strong>/);
   assert.match(html, /<span>APP<\/span><strong>2<\/strong>/);
 });
