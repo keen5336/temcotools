@@ -166,29 +166,67 @@ once; the new bookmark downloads the current program from
 JavaScript, served without caching or login cookies, and contains no customer or
 session data. Updating it does not require replacing installed bookmarks.
 
-Run the bookmark on a Home Depot HTML route manifest with selectable text, enter
-the route, review the booklet, and choose **Print / Save PDF**. Parsing, editable
-fields and the embedded TEMCO logo retain the November 7 version. Stop pages are
+Run the bookmark on a Home Depot HTML route manifest with selectable text. Its
+injected panel lists route IDs with driver names; choose one or **All routes**,
+then **Create booklet**. All routes creates one window with a separate cover,
+route summary and customer sheets for each route. Parsing and printing stay
+local to the source browser. Stop pages are
 identified as **STH - Outside Delivery**, **Home Delivery**, or **Revisit** from
 their Service Type. Values beginning with `MO` select Revisit, `STH` selects
 Outside Delivery, and other delivery stops select Home Delivery. STH sheets show
 Order, DWO and Service Type, with no route/date in the upper-right header. Home
 Delivery sheets show Order, MSN and Service Type. Revisit sheets show Order and
 Service Type, with description-only item lists. STH and Home Delivery retain
-quantity and SKU columns. The cover, its totals and route summary are unchanged.
+quantity and SKU columns by default. Cover totals retain the original counting rules.
 Customer stop sheets include the yellow delivery-survey reminder, with embedded
 TEMCO and Home Depot logos and editable delivery-team names. Long item lists
 continue onto additional stop sheets, each with its own bottom survey panel.
 The cover and route summary do not include this panel. Use color printing.
 Manifest contents stay in the source browser; they are not sent to TemcoTools.
-The loader opens the booklet window before downloading the program so a slow
-connection does not lose popup permission. Load failures close that window and
-allow a fresh attempt. The source site's script policy must permit the TemcoTools
+The panel uses shadow DOM, following the DMP widget pattern. The **Create booklet**
+click opens the print window, so loading the panel needs no popup permission.
+Previously installed hosted loaders also work; their loading placeholder closes
+when the panel appears. Re-running the bookmark refreshes the saved templates and
+code and replaces the panel. Create reads the latest manifest text. A missing,
+incomplete or conflicting selected route fails the entire batch before printing.
+The source site's script policy must permit the TemcoTools
 payload; PDF viewers and image-only manifests are unsupported.
 
-Run `npm run test:driver-paperwork` for loading, error handling, and synthetic
-manifest checks. The original standalone installer and qualification artifacts
-are preserved outside the repository.
+Managers and admins can edit **Templates & payload** on the same tool page:
+
+- The visual editor supports paragraphs, lists, bold, italic, underline and
+  dynamic fields. Cover instructions, contacts, survey copy and per-type stop
+  notes/fields/columns can be changed without a release.
+- **Advanced JavaScript** edits the executable renderer and panel. It must define
+  `createDriverPaperworkRuntime(config, assets)` and return `buildBooklet(text,
+  routeIds)`, `paginate(window)` and `mount()`. The two embedded logo data URLs
+  are supplied as `assets.temco` and `assets.homeDepot`. Keep this factory
+  self-contained. JavaScript executes with the manifest tab's privileges;
+  editing is restricted to trusted managers/admins. The server compiles code
+  for syntax validation without executing it.
+- **Preview draft** runs the actual draft code and templates with synthetic
+  data in an opaque-origin sandbox. Network access, forms and popups are
+  blocked. A successful preview is required by the editor before saving; it
+  does not establish behavior against every possible live manifest.
+- **Save templates & code** publishes both as one append-only database revision.
+  Current database roles authorize each write, version checks reject stale
+  saves, and operation IDs support read-only reconciliation of a lost response.
+  History lists the latest 50 revisions; older revisions can be loaded by
+  number. Restoring creates a draft and then a new revision, preserving history.
+
+Apply migration `20261114010000_driver_paperwork_templates` before starting this
+revision. No existing tables or user roles are changed. With no saved revisions,
+the built-in templates and `scripts/driver-paperwork/runtime.mjs` are used.
+The public payload includes the latest published code/templates, never editor
+history or account data. A database failure returns 503 rather than silently
+replacing the saved template with defaults. Open panels keep their loaded
+version until the bookmark is run again.
+
+Run `npm run test:driver-paperwork` for loading, validation, batch parsing and
+rendering checks. The PostgreSQL integration test is opt-in with
+`PAPERWORK_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55473/paperwork_qa`;
+use a dedicated disposable database with all migrations applied. It resets only
+the paperwork revision table and synthetic QA accounts in that guarded database.
 
 ## DMP API Relay
 

@@ -31,6 +31,20 @@ model User {
   labelPrintersUpdated  LabelPrinter[]     @relation("LabelPrinterUpdatedBy")
   labelTemplatesCreated LabelTemplate[]    @relation("LabelTemplateCreatedBy")
   labelTemplatesUpdated LabelTemplate[]    @relation("LabelTemplateUpdatedBy")
+  paperworkRevisions    DriverPaperworkRevision[]
+}
+
+// Append-only published snapshots. Restoring an older template creates a new version.
+model DriverPaperworkRevision {
+  version         Int      @id
+  template        Json
+  program         String
+  contentHash     String
+  operationId     String   @unique
+  baseVersion     Int
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  createdByUser   User?    @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 }
 
 model LabelPrinter {

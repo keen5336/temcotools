@@ -1,12 +1,14 @@
 "use client";
 
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import { useState, useSyncExternalStore } from "react";
 import { buildDriverPaperworkBookmarklet } from "@/lib/driver-paperwork/bookmarklet";
 
 const subscribe = () => () => {};
+const TemplateEditor = dynamic(() => import("./TemplateEditor"));
 
-export default function DriverPaperworkClient() {
+export default function DriverPaperworkClient({ canEdit = false }: { canEdit?: boolean }) {
   const origin = useSyncExternalStore(subscribe, () => window.location.origin, () => "");
   const bookmarklet = origin ? buildDriverPaperworkBookmarklet(origin) : "";
   const [notice, setNotice] = useState("");
@@ -53,12 +55,13 @@ export default function DriverPaperworkClient() {
       <h2 id="use-heading" className="text-lg font-semibold">Create driver paperwork</h2>
       <ol className="list-decimal pl-5 space-y-2">
         <li>Open the Home Depot route manifest page with selectable text.</li>
-        <li>Click your saved <strong>TEMCO Driver Paperwork</strong> bookmark and enter a route, such as <strong>SH31</strong>.</li>
+        <li>Click your saved <strong>TEMCO Driver Paperwork</strong> bookmark. In the panel, choose a route and driver, or <strong>All routes</strong>, then choose <strong>Create booklet</strong>.</li>
         <li>Review the booklet. You can type into Dock/Wave, Special Attention, and the signature line.</li>
         <li>Choose <strong>Print / Save PDF</strong>. Use Letter paper at 100% scale and turn off browser headers and footers. Print in color for the yellow survey panel on customer stop sheets.</li>
       </ol>
       <p className="text-sm text-base-content/70">Allow pop-ups for the manifest page. The bookmark needs an internet connection to load and cannot read a browser PDF viewer or an image-only manifest.</p>
       <p className="text-sm text-base-content/70">Your manifest stays in your browser. Route and customer details are not uploaded to TemcoTools.</p>
     </section>
+    {canEdit && <TemplateEditor />}
   </div>;
 }
