@@ -157,6 +157,39 @@ production. It adds an empty-by-default favorites array to each user; existing
 tool access and server-side authorization remain unchanged.
 Run `npm run test:favorites` for catalog, permission, and ordering checks.
 
+## Driver Paperwork
+
+Open **Driver Paperwork** under Operations Tools (`/tools/driver-paperwork`) to
+install **TEMCO Driver Paperwork**. Replace the earlier self-contained bookmark
+once; the new bookmark downloads the current program from
+`/api/driver-paperwork/payload` on every invocation. The payload is public
+JavaScript, served without caching or login cookies, and contains no customer or
+session data. Updating it does not require replacing installed bookmarks.
+
+Run the bookmark on a Home Depot HTML route manifest with selectable text, enter
+the route, review the booklet, and choose **Print / Save PDF**. Parsing, editable
+fields and the embedded TEMCO logo retain the November 7 version. Stop pages are
+identified as **STH - Outside Delivery**, **Home Delivery**, or **Revisit** from
+their Service Type. Values beginning with `MO` select Revisit, `STH` selects
+Outside Delivery, and other delivery stops select Home Delivery. STH sheets show
+Order, DWO and Service Type, with no route/date in the upper-right header. Home
+Delivery sheets show Order, MSN and Service Type. Revisit sheets show Order and
+Service Type, with description-only item lists. STH and Home Delivery retain
+quantity and SKU columns. The cover, its totals and route summary are unchanged.
+Customer stop sheets include the yellow delivery-survey reminder, with embedded
+TEMCO and Home Depot logos and editable delivery-team names. Long item lists
+continue onto additional stop sheets, each with its own bottom survey panel.
+The cover and route summary do not include this panel. Use color printing.
+Manifest contents stay in the source browser; they are not sent to TemcoTools.
+The loader opens the booklet window before downloading the program so a slow
+connection does not lose popup permission. Load failures close that window and
+allow a fresh attempt. The source site's script policy must permit the TemcoTools
+payload; PDF viewers and image-only manifests are unsupported.
+
+Run `npm run test:driver-paperwork` for loading, error handling, and synthetic
+manifest checks. The original standalone installer and qualification artifacts
+are preserved outside the repository.
+
 ## DMP API Relay
 
 **DMP API Relay** connects an authenticated DMP browser tab exclusively to its
