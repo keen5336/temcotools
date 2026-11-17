@@ -1,53 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getIronSession } from "iron-session";
-import { cookies } from "next/headers";
-import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/db";
-import { sessionOptions, type SessionData } from "@/lib/session";
-import { revokeApiRelaySession } from "@/lib/api-relay/control";
-import { randomUUID } from "node:crypto";
+import { NextRequest } from "next/server";
+import { authContext, authFailure, authReply, readAuthBody, sameOrigin } from "@/lib/auth/context";
+import { signInLegacy, signInPassword } from "@/lib/auth/identity";
+import { installSession } from "@/lib/auth/cookie";
 
-export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body.username !== "string" || typeof body.pin !== "string") {
-    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
-  }
-
-  const { username, pin } = body as { username: string; pin: string };
-
-  const user = await prisma.user.findUnique({ where: { username } });
-
-  if (!user) {
-    return NextResponse.json({ error: "Invalid username or PIN." }, { status: 401 });
-  }
-
-  if (!user.isActive) {
-    return NextResponse.json(
-      { error: "Account is deactivated. Contact an administrator." },
-      { status: 403 }
-    );
-  }
-
-  const pinValid = await bcrypt.compare(pin, user.pinHash);
-  if (!pinValid) {
-    return NextResponse.json({ error: "Invalid username or PIN." }, { status: 401 });
-  }
-
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLoginAt: new Date() },
-  });
-
-  const cookieStore = await cookies();
-  const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
-  await revokeApiRelaySession(session);
-  session.apiRelaySessionId = randomUUID();
-  session.userId = user.id;
-  session.username = user.username;
-  session.displayName = user.displayName;
-  session.role = user.role;
-  session.isActive = user.isActive;
-  await session.save();
-
-  return NextResponse.json({ ok: true });
+export async function POST(request: NextRequest) {
+  try {
+    sameOrigin(request); const body = await readAuthBody(request);
+    // Existing cached v1 login forms can still enter the restricted upgrade
+    // flow; an old PIN never establishes an operational session.
+    const legacy = body.method === "legacy" || (body.password === undefined && typeof body.pin === "string");
+    const row = legacy
+      ? await signInLegacy({ username: body.username, pin: body.pin, deviceName: body.deviceName }, authContext(request))
+      : await signInPassword({ username: body.username, password: body.password, deviceName: body.deviceName }, authContext(request));
+    await installSession(row);
+    return authReply({ ok: true, redirectTo: legacy ? "/account/update" : "/", upgradeRequired: legacy });
+  } catch (error) { return authFailure(error); }
 }

@@ -11,6 +11,11 @@ model User {
   username              String             @unique
   displayName           String
   pinHash               String
+  passwordHash          String?
+  passwordEnrolledAt    DateTime?
+  passwordChangedAt     DateTime?
+  legacyDisabledAt      DateTime?
+  authVersion           Int                @default(1)
   role                  Role               @default(user)
   isActive              Boolean            @default(true)
   createdAt             DateTime           @default(now())
@@ -32,6 +37,62 @@ model User {
   labelTemplatesCreated LabelTemplate[]    @relation("LabelTemplateCreatedBy")
   labelTemplatesUpdated LabelTemplate[]    @relation("LabelTemplateUpdatedBy")
   paperworkRevisions    DriverPaperworkRevision[]
+  authSessions          AuthSession[]
+  accountCodes          AccountCode[]
+}
+
+model AuthSession {
+  id                String   @id
+  userId            String
+  authVersion       Int
+  kind              String
+  deviceName        String
+  createdAt         DateTime @default(now())
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  reauthenticatedAt DateTime?
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+}
+
+model AccountCode {
+  id          String   @id @default(cuid())
+  userId      String
+  purpose     String
+  tokenHash   String   @unique
+  authVersion Int
+  operationId String   @unique
+  issuedById  String?
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consumedAt])
+}
+
+model AuthRateLimit {
+  key         String   @id
+  windowStart DateTime
+  attempts    Int
+}
+
+model AuthAudit {
+  id          String   @id @default(cuid())
+  action      String
+  actorUserId String?
+  targetUserId String?
+  sessionId   String?
+  reason      String?
+  createdAt   DateTime @default(now())
+
+  @@index([targetUserId, createdAt])
+}
+
+model AuthPolicy {
+  id                 String  @id
+  legacyLoginEnabled Boolean @default(true)
 }
 
 // Append-only published snapshots. Restoring an older template creates a new version.

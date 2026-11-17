@@ -1,133 +1,36 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 
-const LAST_USERNAME_KEY = "temco_last_username";
-
-export default function PinLoginForm() {
-  const router = useRouter();
-  const [username, setUsername] = useState("");
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const usernameRef = useRef<HTMLInputElement>(null);
-  const pinRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const saved = localStorage.getItem(LAST_USERNAME_KEY);
-    if (saved) {
-      setUsername(saved);
-      pinRef.current?.focus();
-    } else {
-      usernameRef.current?.focus();
-    }
-  }, []);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    if (!username.trim()) {
-      setError("Username is required.");
-      return;
-    }
-    if (!/^\d{4,6}$/.test(pin)) {
-      setError("PIN must be 4 to 6 digits.");
-      return;
-    }
-
-    setLoading(true);
+export default function PinLoginForm({ legacyAllowed }: { legacyAllowed: boolean }) {
+  const [username, setUsername] = useState(""), [credential, setCredential] = useState("");
+  const [legacy, setLegacy] = useState(false), [deviceName, setDeviceName] = useState("My Zebra / computer");
+  const [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  useEffect(() => { const saved = localStorage.getItem("temco_last_username"); if (saved) setUsername(saved); }, []);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setBusy(true); setError("");
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), pin }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Login failed.");
-        setPin("");
-        pinRef.current?.focus();
-        return;
-      }
-
-      localStorage.setItem(LAST_USERNAME_KEY, username.trim());
-      router.push("/");
-      router.refresh();
-    } catch (err) {
-      console.error("Login request failed:", err);
-      setError("Network error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
+      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username.trim(), deviceName, ...(legacy ? { method: "legacy", pin: credential } : { password: credential }) }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Sign-in failed.");
+      localStorage.setItem("temco_last_username", username.trim());
+      location.assign(result.redirectTo === "/account/update" ? "/account/update" : "/");
+    } catch (error) { setError(error instanceof Error ? error.message : "Sign-in could not be confirmed. Try signing in again."); setCredential(""); }
+    finally { setBusy(false); }
   }
-
-  function handlePinInput(e: React.ChangeEvent<HTMLInputElement>) {
-    const value = e.target.value.replace(/\D/g, "").slice(0, 6);
-    setPin(value);
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {error && (
-        <div role="alert" className="alert alert-error text-sm">
-          {error}
-        </div>
-      )}
-
-      <div className="form-control">
-        <label htmlFor="username" className="label">
-          <span className="label-text font-medium">Username</span>
-        </label>
-        <input
-          ref={usernameRef}
-          id="username"
-          type="text"
-          autoComplete="username"
-          autoCapitalize="none"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          onBlur={() => {
-            if (username.trim()) pinRef.current?.focus();
-          }}
-          className="input input-bordered w-full"
-          placeholder="Enter username"
-          disabled={loading}
-        />
-      </div>
-
-      <div className="form-control">
-        <label htmlFor="pin" className="label">
-          <span className="label-text font-medium">PIN</span>
-        </label>
-        <input
-          ref={pinRef}
-          id="pin"
-          type="password"
-          inputMode="numeric"
-          autoComplete="current-password"
-          value={pin}
-          onChange={handlePinInput}
-          className="input input-bordered w-full tracking-widest"
-          placeholder="••••"
-          disabled={loading}
-          maxLength={6}
-        />
-        <div className="label">
-          <span className="label-text-alt text-base-content/50">4 to 6 digits</span>
-        </div>
-      </div>
-
-      <button
-        type="submit"
-        disabled={loading}
-        className="btn btn-primary w-full"
-      >
-        {loading ? "Signing in…" : "Sign In"}
-      </button>
+  return <div className="space-y-4">
+    <form onSubmit={submit} className="space-y-4">
+      <h2 className="font-semibold">{legacy ? "Update an old PIN account" : "Sign in"}</h2>
+      {legacy && <p className="text-sm text-base-content/65">Use your previous username and PIN to start setup. An administrator will give you a private one-use code. After updating, your old PIN stops working.</p>}
+      {error && <p role="alert" className="alert alert-error text-sm">{error}</p>}
+      <label className="form-control block"><span className="label font-medium">Username</span><input className="input input-bordered w-full" autoComplete="username" autoCapitalize="none" value={username} onChange={event => setUsername(event.target.value)} required maxLength={80} disabled={busy} /></label>
+      <label className="form-control block"><span className="label font-medium">{legacy ? "Previous PIN" : "Password or passphrase"}</span><input className="input input-bordered w-full" type="password" inputMode={legacy ? "numeric" : "text"} autoComplete="current-password" value={credential} onChange={event => setCredential(event.target.value)} required maxLength={legacy ? 6 : 256} disabled={busy} /></label>
+      <label className="form-control block"><span className="label font-medium">Device name</span><input className="input input-bordered w-full" value={deviceName} onChange={event => setDeviceName(event.target.value)} maxLength={80} required disabled={busy} /></label>
+      {!legacy && <p className="text-xs text-base-content/65">Stay signed in on this assigned device for up to 30 days, including across shifts. Sign out on shared devices.</p>}
+      <button className="btn btn-primary w-full" disabled={busy}>{busy ? "Signing in…" : legacy ? "Start account update" : "Sign in"}</button>
     </form>
-  );
+    {legacyAllowed && <button type="button" className="btn btn-ghost btn-sm w-full" disabled={busy} onClick={() => { setLegacy(!legacy); setCredential(""); setError(""); }}>{legacy ? "Use updated password login" : "Use old PIN to update my account"}</button>}
+    <Link className="link block text-center text-sm" href="/account/update">Have a setup/recovery code, or need help?</Link>
+  </div>;
 }

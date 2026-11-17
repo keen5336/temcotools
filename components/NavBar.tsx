@@ -20,7 +20,10 @@ export default function NavBar({ session }: NavBarProps) {
   const api = useApiRelays();
 
   async function handleSignOut() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error();
+    } catch { alert("Sign-out could not be confirmed. Reload to check your current sign-in state."); return; }
     suspend();
     api.suspend();
     router.push("/signin");
@@ -73,6 +76,7 @@ export default function NavBar({ session }: NavBarProps) {
               </li>
             )}
             <li><Link href="/configuration">Configuration</Link></li>
+            <li><Link href="/account/security">Account security</Link></li>
             {session.role === "admin" && <li><Link href="/admin/api-relays">API Relay Management</Link></li>}
             <li>
               <Link href="/tools/api-relay">API Relays</Link>

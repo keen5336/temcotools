@@ -1,71 +1,28 @@
-/**
- * Bootstrap script: creates the initial admin user if one does not already exist.
- *
- * Usage:
- *   npx tsx scripts/bootstrap-admin.ts
- *
- * Required environment variables:
- *   BOOTSTRAP_ADMIN_USERNAME     - username for the admin account
- *   BOOTSTRAP_ADMIN_DISPLAY_NAME - display name shown in the UI
- *   BOOTSTRAP_ADMIN_PIN          - 4-6 digit PIN (will be hashed before storing)
- *   DATABASE_URL                 - PostgreSQL connection string
- *
- * This script is idempotent: it will not recreate the user if the username
- * already exists. Run it once after the first database migration.
- */
-
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import bcrypt from "bcryptjs";
+/** Creates an unenrolled first administrator; use account-enrollment next. */
+import "dotenv/config";
+import { parseArgs } from "node:util";
 
 async function main() {
-  const username = process.env.BOOTSTRAP_ADMIN_USERNAME;
-  const displayName = process.env.BOOTSTRAP_ADMIN_DISPLAY_NAME;
-  const pin = process.env.BOOTSTRAP_ADMIN_PIN;
-
-  if (!username || !displayName || !pin) {
-    console.error(
-      "Error: BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_DISPLAY_NAME, and BOOTSTRAP_ADMIN_PIN must all be set."
-    );
-    process.exit(1);
-  }
-
-  if (!/^\d{4,6}$/.test(pin)) {
-    console.error("Error: BOOTSTRAP_ADMIN_PIN must be 4 to 6 digits.");
-    process.exit(1);
-  }
-
-  const connectionString = process.env.DATABASE_URL!;
-  const adapter = new PrismaPg({ connectionString });
-  const prisma = new PrismaClient({ adapter });
-
+  const { values } = parseArgs({ options: { "expect-host": { type: "string" }, "expect-database": { type: "string" }, apply: { type: "boolean", default: false } } });
+  const username = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim();
+  const displayName = process.env.BOOTSTRAP_ADMIN_DISPLAY_NAME?.trim();
+  const target = new URL(process.env.DATABASE_URL || "");
+  if (!username || username.length > 80 || !displayName || displayName.length > 100 || !values["expect-host"] || !values["expect-database"] || target.host !== values["expect-host"] || decodeURIComponent(target.pathname.slice(1)) !== values["expect-database"]) throw new Error("Missing or mismatched bootstrap arguments.");
+  const { prisma } = await import("../lib/db");
   try {
     const existing = await prisma.user.findUnique({ where: { username } });
-
     if (existing) {
-      console.log(`Admin user "${username}" already exists — skipping.`);
-      return;
+      if (existing.role !== "admin" || !existing.isActive) throw new Error("Existing username is not an active administrator.");
+      console.log("Active administrator already exists; unchanged. Use account-enrollment for setup/recovery."); return;
     }
-
-    const pinHash = await bcrypt.hash(pin, 12);
-
-    await prisma.user.create({
-      data: {
-        username,
-        displayName,
-        pinHash,
-        role: "admin",
-        isActive: true,
-      },
+    if (!values.apply) { console.log("Dry run: would create an unenrolled administrator. Add --apply to create it."); return; }
+    await prisma.$transaction(async tx => {
+      const { lockAuthWrites } = await import("../lib/auth/sessions"); await lockAuthWrites(tx);
+      if (await tx.user.count({ where: { role: "admin", isActive: true } })) throw new Error("Bootstrap is only for a database without an active administrator.");
+      await tx.user.create({ data: { username, displayName, pinHash: "disabled:enrollment", legacyDisabledAt: new Date(), role: "admin" } });
+      await tx.authAudit.create({ data: { action: "operator_admin_created", reason: "First administrator bootstrap" } });
     });
-
-    console.log(`Admin user "${username}" created successfully.`);
-  } finally {
-    await prisma.$disconnect();
-  }
+    console.log("Unenrolled administrator created. Use account-enrollment to deliver a private setup code. No PIN or password was created.");
+  } finally { await prisma.$disconnect(); }
 }
-
-main().catch((err) => {
-  console.error("Bootstrap failed:", err);
-  process.exit(1);
-});
+main().catch(() => { console.error("Bootstrap did not confirm completion. Check target arguments and current account state before retrying. No credentials are printed."); process.exitCode = 1; });

@@ -1,6 +1,6 @@
 # TemcoTools
 
-Internal warehouse operations web app for Temco, built with Next.js, TypeScript, Tailwind CSS, Prisma ORM, and a PIN-based authentication system.
+Internal warehouse operations web app for Temco, built with Next.js, TypeScript, Tailwind CSS, Prisma ORM, and internal password authentication with staged legacy-account migration.
 
 ## Tech Stack
 
@@ -9,7 +9,7 @@ Internal warehouse operations web app for Temco, built with Next.js, TypeScript,
 - **Styling**: Tailwind CSS
 - **Database ORM**: Prisma
 - **Database**: PostgreSQL
-- **Authentication**: Internal PIN-based auth (iron-session + bcryptjs)
+- **Authentication**: Scrypt passwords, revocable database sessions and iron-session cookies
 
 ## Prerequisites
 
@@ -40,7 +40,7 @@ Edit `.env` with your actual values:
 | `SESSION_SECRET` | Random secret for encrypting session cookies — generate with `openssl rand -base64 32` (must be ≥ 32 chars) |
 | `BOOTSTRAP_ADMIN_USERNAME` | Username for the initial admin account |
 | `BOOTSTRAP_ADMIN_DISPLAY_NAME` | Display name shown in the UI for the initial admin |
-| `BOOTSTRAP_ADMIN_PIN` | 4–6 digit PIN for the initial admin (will be hashed before storing) |
+| `NEXT_PUBLIC_APP_URL` | Canonical app origin used to verify account mutations |
 
 ### 3. Set up the database
 
@@ -67,13 +67,13 @@ npx prisma generate
 
 ### 4. Create the first admin user
 
-Run the bootstrap script once after the initial migration:
+Follow [the account migration and first-admin runbook](docs/account-migration.md). For a new installation, preview first-admin creation with the exact database target:
 
 ```bash
-npm run bootstrap
+npm run bootstrap -- --expect-host localhost:5432 --expect-database ops_tools
 ```
 
-This reads `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_DISPLAY_NAME`, and `BOOTSTRAP_ADMIN_PIN` from your `.env` file, hashes the PIN, and creates the admin user. It is safe to run multiple times — it will skip creation if the username already exists.
+This reads the administrator identity from `.env`. Add `--apply` to create an unenrolled account, then use the guarded offline enrollment command in the runbook to deliver a private setup code. No initial PIN/password is created; existing users are never promoted by bootstrap.
 
 ### 5. Run the development server
 
@@ -81,14 +81,14 @@ This reads `BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_DISPLAY_NAME`, and `BOOT
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in with the username and PIN you configured.
+Open [http://localhost:3000](http://localhost:3000) and complete account setup with your private code, then sign in with your new password.
 
 ## Project Structure
 
 ```
 ├── app/
 │   ├── (auth)/
-│   │   └── signin/               # PIN login page (public)
+│   │   └── signin/               # Password login and legacy setup entry (public)
 │   ├── admin/
 │   │   └── users/                # User management (admin only)
 │   ├── tools/
@@ -97,7 +97,7 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 │   │   └── report-engine/        # CSV pipeline / report builder tool
 │   ├── api/
 │   │   ├── auth/
-│   │   │   ├── login/            # POST — validates username + PIN, sets session cookie
+│   │   │   ├── login/            # POST — password sign-in or restricted legacy setup
 │   │   │   └── logout/           # POST — destroys session cookie
 │   │   └── admin/users/          # Admin user management API
 │   ├── layout.tsx
@@ -116,13 +116,17 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 
 ## Authentication & Authorization
 
-- Users log in with a **username** and a **4–6 digit PIN**.
-- PINs are hashed with bcrypt before being stored; plaintext PINs are never persisted.
-- Sessions are stored in encrypted httpOnly cookies (via iron-session).
-- `requireAuth()` — redirects unauthenticated or inactive users to `/signin`.
-- `requireAdmin()` — additionally redirects non-admin users to `/`.
-- Admins manage users at `/admin/users`: create, edit, set/reset PIN, change role, activate/deactivate.
-- Deactivated accounts cannot log in.
+- Username + password/passphrase (minimum **12 characters**); no email required.
+- Salted scrypt password hashes; 30-day database-backed, revocable sessions.
+- Old PINs and pre-upgrade cookies authorize setup only. Independent private,
+  one-use admin codes protect enrollment; completion permanently disables the PIN.
+- `requireAuth()` resolves the current account/session and routes legacy users to
+  `/account/update`; revoked, inactive or expired sessions cannot use tools.
+- Admins manage accounts, setup/recovery codes and the global legacy-entry switch
+  at `/admin/users`. Sensitive account/publishing changes need recent password
+  confirmation; users manage signed-in devices at `/account/security`.
+- Follow [the migration and first-admin runbook](docs/account-migration.md) before
+  deploying this release. New code on a feature branch does not update production.
 
 ## Available Scripts
 
@@ -132,7 +136,9 @@ Open [http://localhost:3000](http://localhost:3000) and sign in with the usernam
 | `npm run build` | Build for production |
 | `npm run start` | Start production server |
 | `npm run lint` | Run ESLint |
-| `npm run bootstrap` | Create initial admin user (run once after first migration) |
+| `npm run bootstrap -- ...` | Guarded first-admin creation (dry run by default) |
+| `npm run account-enrollment -- ...` | Offline first-admin setup/recovery with private file delivery |
+| `npm run test:auth` | Authentication policy and guarded PostgreSQL/HTTP tests |
 | `npm run --silent mcp` | Start the TemcoTools MCP server over stdio |
 | `npm run relay` | Start the label relay WebSocket service (port 3002) |
 | `npm run test:relay` | Test relay authentication, routing, queuing, and failures |
@@ -327,7 +333,7 @@ Bootstrap the first administrator once using `scripts/bootstrap-admin.ts` with
 
 1. Set all environment variables on your hosting platform (`DATABASE_URL`, `SESSION_SECRET`).
 2. Run `npx prisma migrate deploy` as part of your deployment pipeline.
-3. Run `npm run bootstrap` once to create the initial admin user.
+3. Follow `docs/account-migration.md` for first-admin enrollment and staff migration.
 4. Build with `npm run build`.
 
 ## Pick Wave Actions

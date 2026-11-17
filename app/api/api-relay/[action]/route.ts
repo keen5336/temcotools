@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { apiRelayControl } from "@/lib/api-relay/control";
 import { listRelayDefinitions } from "@/lib/api-relay/definitions";
@@ -17,8 +16,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (action === "lease" && !session.apiRelaySessionId) return relayReply({ ok: true });
     const body = await relayBody(request);
     if (!session.apiRelaySessionId) {
-      if (!["status", "pair"].includes(action)) throw new RelayError("Pair an external tab first.", 409);
-      session.apiRelaySessionId = randomUUID(); await session.save();
+      throw new RelayError("Sign in with your updated account before using relays.", 401);
     }
     const owner = { userId: user.id, sessionId: session.apiRelaySessionId };
     if (action === "status") return relayReply(await getRelayStatus(owner));

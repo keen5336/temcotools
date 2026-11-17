@@ -1,6 +1,7 @@
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import PinLoginForm from "@/components/PinLoginForm";
+import { legacyEnabled } from "@/lib/auth/sessions";
 
 export default async function SignInPage({
   searchParams,
@@ -9,6 +10,7 @@ export default async function SignInPage({
 }) {
   const session = await getSession();
   if (session.userId) redirect("/");
+  if (session.upgradeRequired) redirect("/account/update");
 
   const params = await searchParams;
 
@@ -25,7 +27,7 @@ export default async function SignInPage({
             </div>
           )}
 
-          <PinLoginForm />
+          <PinLoginForm legacyAllowed={await legacyEnabled()} />
         </div>
       </div>
     </div>

@@ -118,7 +118,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], managedOrigi
         json(res, 200, { token, expiresIn: pairMs / 1000 }); return;
       }
       if (action === "connections") {
-        json(res, 200, { connections: [...connections.values()].filter((c) => c.owner.userId === owner.userId && live(c.owner)).map((c) => ({ id: c.id, origin: c.origin, pathname: c.pathname, relayId: c.relayId, relayRevision: c.relayRevision, ready: c.ready, dmpUser: c.subject || null, pending: c.pending.size, connectedAt: c.connectedAt })) }); return;
+        json(res, 200, { connections: [...connections.values()].filter((c) => c.owner.userId === owner.userId && live(c.owner)).map((c) => ({ id: c.id, creatingSessionId: c.owner.sessionId, origin: c.origin, pathname: c.pathname, relayId: c.relayId, relayRevision: c.relayRevision, ready: c.ready, dmpUser: c.subject || null, pending: c.pending.size, connectedAt: c.connectedAt })) }); return;
       }
       const c = owned(owner, data.connectionId);
       if (action === "disconnect") { disconnect(c); json(res, 200, { ok: true }); return; }

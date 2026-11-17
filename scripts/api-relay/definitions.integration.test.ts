@@ -21,8 +21,14 @@ test("managed relays enforce live admin roles, immutable history, concurrency, b
     await assert.rejects(saveRelayDefinition("relay-admin", { ...first, name: "Different edit" }), /another edit/);
     await assert.rejects(saveRelayDefinition("relay-admin", make(0)), /changed/);
     await assert.rejects(saveRelayDefinition("relay-admin", { ...make(), id: "overlap", pathPrefix: "/ops/orders" }), /overlaps/);
-    const binding = { relayId: "warehouse", relayRevision: 1, origin: "https://warehouse.test", pathname: "/ops/items", owner: { userId: "relay-user" } };
+    const { hashPassword } = await import("../../lib/auth/passwords");
+    await prisma.user.update({ where: { id: "relay-user" }, data: { passwordHash: await hashPassword("Synthetic relay cedar 71"), passwordEnrolledAt: new Date(), legacyDisabledAt: new Date() } });
+    const session = await prisma.authSession.create({ data: { id: randomUUID(), userId: "relay-user", authVersion: 1, kind: "password", deviceName: "Test", expiresAt: new Date(Date.now() + 60_000) } });
+    const binding = { relayId: "warehouse", relayRevision: 1, origin: "https://warehouse.test", pathname: "/ops/items", owner: { userId: "relay-user", sessionId: session.id } };
     assert.equal((await validateRelayBinding(binding)).id, "warehouse");
+    await prisma.authSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+    await assert.rejects(validateRelayBinding(binding), /session expired or was revoked/);
+    await prisma.authSession.update({ where: { id: session.id }, data: { revokedAt: null } });
     const concurrent = await Promise.allSettled([saveRelayDefinition("relay-admin", make(1)), saveRelayDefinition("relay-admin", make(1))]);
     assert.equal(concurrent.filter(result => result.status === "fulfilled").length, 1);
     assert.equal(concurrent.filter(result => result.status === "rejected").length, 1);

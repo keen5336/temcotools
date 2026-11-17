@@ -30,7 +30,7 @@ services:
     environment:
       ADMIN_FILE_MANAGER_ROOT: /data/admin-files
       DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
-      SESSION_SECRET: ${SESSION_SECRET:-changeme-at-least-32-characters-long}
+      SESSION_SECRET: ${SESSION_SECRET:?Set a strong SESSION_SECRET}
       TRUST_PROXY: "true"
       PROTOCOL: "https"
       NODE_ENV: "production"

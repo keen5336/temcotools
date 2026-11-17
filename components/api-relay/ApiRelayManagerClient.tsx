@@ -49,6 +49,7 @@ export default function ApiRelayManagerClient() {
     } finally { setBusy(false); }
   }
   return <div className="space-y-6">
+    <p className="text-sm">Saving requires a recent password check. <Link href="/account/security" target="_blank" className="link">Confirm your password in Account security</Link>, then return to your draft.</p>
     <div className="flex flex-wrap gap-3"><Link className="btn btn-sm btn-outline" href="/configuration">Connections & configuration</Link><button className="btn btn-sm" disabled={busy} onClick={() => void reload()}>Reload current definitions</button><button className="btn btn-sm btn-primary" disabled={busy || !data} onClick={() => { edit(blank(), ""); setMessage(""); }}>New relay</button></div>
     {message && <p role="status" className="alert alert-info">{message}</p>}
     {!data ? <p>Loading relay definitions…</p> : <div className="grid lg:grid-cols-[240px_minmax(0,1fr)] gap-6">

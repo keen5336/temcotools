@@ -2,14 +2,20 @@ import { getIronSession } from "iron-session";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { sessionOptions, type SessionData } from "@/lib/session";
+import { resolveSession } from "./sessions";
 
-export async function getSession() {
+export async function getCookieSession() {
   const cookieStore = await cookies();
   return getIronSession<SessionData>(cookieStore, sessionOptions);
 }
 
+export async function getSession() {
+  return resolveSession(await getCookieSession());
+}
+
 export async function requireAuth() {
   const session = await getSession();
+  if (session.upgradeRequired) redirect("/account/update");
   if (!session.userId) {
     redirect("/signin");
   }

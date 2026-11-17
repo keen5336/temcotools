@@ -3,6 +3,7 @@ import { listRelayDefinitions, validateRelayBinding } from "./definitions";
 import { buildRelayRequest } from "./config";
 import { RelayError, resolveRelayDefinition } from "./model";
 import type { RelayConnection, RelayStatus } from "./types";
+import { livePasswordSession } from "@/lib/auth/sessions";
 
 export async function relayConnections(owner: RelayOwner): Promise<RelayConnection[]> {
   return (await apiRelayControl("connections", owner)).connections;
@@ -18,6 +19,7 @@ export async function getRelayStatus(owner: RelayOwner): Promise<RelayStatus> {
       try {
         const rule = resolveRelayDefinition(definitions, connection.origin, connection.pathname);
         if (rule.id !== connection.relayId || rule.revision !== connection.relayRevision) throw new Error();
+        if (!connection.creatingSessionId || !await livePasswordSession(connection.creatingSessionId, owner.userId)) throw new Error();
         current.push(connection);
       } catch { await apiRelayControl("disconnect", owner, { connectionId: connection.id }); }
     }
@@ -30,7 +32,7 @@ export async function getRelayStatus(owner: RelayOwner): Promise<RelayStatus> {
 export async function requestViaRelay(owner: RelayOwner, connectionId: string, operation: string, input: unknown = {}) {
   const connection = (await relayConnections(owner)).find(row => row.id === connectionId);
   if (!connection) throw new RelayError("Select one of your connected API relays.", 404);
-  const definition = await validateRelayBinding({ ...connection, owner });
+  const definition = await validateRelayBinding({ ...connection, owner: { userId: owner.userId, sessionId: connection.creatingSessionId } });
   const request = buildRelayRequest(definition.operations, operation, input);
   return apiRelayControl("request", owner, { connectionId, request });
 }

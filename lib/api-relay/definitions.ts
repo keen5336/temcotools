@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { dmpConfig } from "./config";
 import { DEFAULT_RELAY_PROGRAM, RelayError, relaySaveInput, relayDefinitionsOverlap, resolveRelayDefinition, validateRelayFields, type RelayDefinition } from "./model";
+import { livePasswordSession } from "@/lib/auth/sessions";
 
 export function builtinDmpDefinition(): RelayDefinition {
   const config = dmpConfig();
@@ -58,10 +59,11 @@ export async function saveRelayDefinition(userId: string, input: unknown) {
   });
 }
 
-export async function validateRelayBinding(binding: { relayId?: string; relayRevision?: number; origin?: string; pathname?: string; owner?: { userId?: string } }) {
+export async function validateRelayBinding(binding: { relayId?: string; relayRevision?: number; origin?: string; pathname?: string; owner?: { userId?: string; sessionId?: string } }) {
   if (!binding.relayId || !binding.origin || !binding.pathname || !binding.owner?.userId) throw new RelayError("Reconnect this tab using Connect Temco.", 403);
   const [definitions, user] = await Promise.all([listRelayDefinitions(), prisma.user.findUnique({ where: { id: binding.owner.userId }, select: { isActive: true } })]);
   if (!user?.isActive) throw new RelayError("The Temco account is inactive.", 403);
+  if (!binding.owner.sessionId || !await livePasswordSession(binding.owner.sessionId, binding.owner.userId)) throw new RelayError("The Temco session expired or was revoked. Sign in and reconnect.", 403);
   const definition = resolveRelayDefinition(definitions, binding.origin, binding.pathname);
   if (definition.id !== binding.relayId || definition.revision !== binding.relayRevision) throw new RelayError("The relay configuration changed. Reconnect this tab; requests were not replayed.", 409);
   return definition;
