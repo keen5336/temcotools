@@ -1,6 +1,6 @@
 # Managed API relays
 
-Open **Configuration** from Relay Mode or your account menu. Install **Connect
+Open **Configuration** from Relay or your account menu. Install **Connect
 Temco** once, then run it on a signed-in external system. It sends only the
 page's origin and pathname to the loader, without a referrer, query string,
 fragment, DOM content or cookies. The server selects one enabled matching relay
@@ -9,7 +9,7 @@ injection. The script checks the actual tab before running admin-authored code.
 
 Choose **Connect** in the injected panel and approve the Temco account shown in
 the pairing window. Keep that external tab and a signed-in TemcoTools tab open.
-Your dashboard and header show each system's status across tools. Configuration
+The header's Relay menu shows each system's status across tools. Configuration
 lists connected tabs, upstream account identifiers, and disconnect controls.
 External pages must allow the script, WebSocket and popup under their CSP/COOP
 policies; this feature does not bypass those policies.
@@ -136,9 +136,9 @@ The development executor uses port 3003, overridable by
 Compose keeps the broker on loopback. Caddy must route the existing exact
 `/api/api-relay/ws` path to the broker and all other routes to Next. Never expose
 `/control`; the internal authorization route requires the derived control key
-and returns 404 without it. Deploy the app and API relay broker together at the
-same revision in an authorized maintenance window. Validate live external-system
-behavior and physical printing separately from migration and service health.
+and returns 404 without it. Deploy the app and API relay broker together when
+relay code changes, using matching relay code in an authorized maintenance
+window. Validate live external-system behavior and physical printing separately from migration and service health.
 
 Run `npm run test:api-relay`, `npm run test:relay` and `npm run test:favorites`.
 For PostgreSQL tests, apply all migrations to the disposable fixture database

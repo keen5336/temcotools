@@ -20,8 +20,8 @@ export default function LabelRelayMenu() {
     return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
   }, [open]);
   return <div ref={container} className="relative shrink-0">
-    <button ref={button} type="button" className="btn btn-ghost btn-sm gap-2 px-2 sm:px-3" aria-label="Relay Mode" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(current => !current)}>
-      <span aria-hidden="true" className={`h-2 w-2 rounded-full ${connected || ready ? "bg-success" : settings.enabled || api.error ? "bg-warning" : "bg-base-content/30"}`} />Relay Mode
+    <button ref={button} type="button" className="btn btn-ghost btn-sm gap-2 px-2 sm:px-3" aria-label="Relay" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(current => !current)}>
+      <span aria-hidden="true" className={`h-2 w-2 rounded-full ${connected || ready ? "bg-success" : settings.enabled || api.error ? "bg-warning" : "bg-base-content/30"}`} />Relay
       {ready > 0 && <span className="badge badge-xs badge-success">{ready}</span>}
     </button>
     {open && <div id={panelId} role="region" aria-label="Relay connections" className="fixed inset-x-3 top-16 z-50 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-box border border-base-300 bg-base-100 p-4 shadow-xl space-y-4 sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80">

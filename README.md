@@ -253,10 +253,9 @@ the paperwork revision table and synthetic QA accounts in that guarded database.
 
 ## API Relays and Configuration
 
-**Relay Mode** in the header shows the label relay switch/status and your API
-relay connections across TemcoTools. The dashboard shows connection status after
-sign-in. Open **Configuration** (`/configuration`) for connected tabs, activation
-instructions, the universal **Connect Temco** bookmarklet, and this device's
+**Relay** in the header shows the label relay switch/status and your API
+relay connections across TemcoTools. Open **Configuration** (`/configuration`)
+for connected tabs, activation instructions, the universal **Connect Temco** bookmarklet, and this device's
 label relay name/printers. Managers and admins also manage shared printers and
 label templates there. The earlier `/management/labels` link redirects to it.
 
@@ -268,9 +267,9 @@ environment defaults remain available until its managed definition is saved;
 a disabled definition never falls back to environment settings.
 
 Apply migration `20261117020000_managed_api_relays` before using this revision.
-The app and API relay service must use this same code revision; the broker
+The app and API relay service must use matching relay code; the broker
 reauthorizes pairing and queued dispatch through the app. Apply the migration
-before updating both services in the same rollout.
+before updating both services when relay code changes.
 
 See [`scripts/api-relay/README.md`](scripts/api-relay/README.md) for operation
 formats, integration hooks, routing, permissions and local qualification.
