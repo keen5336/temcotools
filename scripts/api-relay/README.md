@@ -137,8 +137,8 @@ Compose keeps the broker on loopback. Caddy must route the existing exact
 `/api/api-relay/ws` path to the broker and all other routes to Next. Never expose
 `/control`; the internal authorization route requires the derived control key
 and returns 404 without it. Deploy the app and API relay broker together at the
-same revision in an authorized maintenance window. This change has not been
-rolled out and makes no live external-system or physical-printer acceptance claim.
+same revision in an authorized maintenance window. Validate live external-system
+behavior and physical printing separately from migration and service health.
 
 Run `npm run test:api-relay`, `npm run test:relay` and `npm run test:favorites`.
 For PostgreSQL tests, apply all migrations to the disposable fixture database

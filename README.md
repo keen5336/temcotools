@@ -269,8 +269,8 @@ a disabled definition never falls back to environment settings.
 
 Apply migration `20261117020000_managed_api_relays` before using this revision.
 The app and API relay service must use this same code revision; the broker
-reauthorizes pairing and queued dispatch through the app. This candidate has
-**not been deployed**; production remains on the previous release.
+reauthorizes pairing and queued dispatch through the app. Apply the migration
+before updating both services in the same rollout.
 
 See [`scripts/api-relay/README.md`](scripts/api-relay/README.md) for operation
 formats, integration hooks, routing, permissions and local qualification.
