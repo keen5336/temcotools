@@ -1,0 +1,3 @@
+export function connectTemcoBookmarklet(origin: string) {
+  return `javascript:(()=>{if(window.__temcoApiRelay?.busy?.()){alert('Relay work is still running. Wait for its original result.');return;}var u=new URL(${JSON.stringify(`${origin}/api/api-relay/loader`)});u.searchParams.set('origin',location.origin);u.searchParams.set('pathname',location.pathname);var s=document.createElement('script');s.referrerPolicy='no-referrer';s.src=u.href;s.onerror=()=>alert('Temco relay could not load. Check this page policy and your connection.');(document.head||document.documentElement).appendChild(s)})();`;
+}

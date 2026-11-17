@@ -90,6 +90,7 @@ services:
       SESSION_SECRET: ${SESSION_SECRET:-}
       DMP_ORIGINS: ${DMP_ORIGINS-https://dmp.extapps.homedepot.com}
       API_RELAY_HOST: "0.0.0.0"
+      API_RELAY_APP_URL: http://app:3000
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3003/health || exit 1"]
       interval: 15s

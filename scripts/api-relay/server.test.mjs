@@ -196,3 +196,45 @@ test("broker disconnect fails jobs without replaying to a spare tab", async (t) 
   assert.match((await result).error, /not retried/);
   assert.equal(spare.messages.length, 0);
 });
+
+test("managed sites need a current one-use pairing token and keep their definition binding", async t => {
+  const f = await fixture(t, { allowedOrigins: [], managedOrigins: true, authorize: async binding => binding.relayId === "warehouse" && binding.relayRevision === 3 });
+  const site = "https://warehouse.test";
+  const token = await f.control("pair", alice, { origin: site, pathname: "/ops", relayId: "warehouse", relayRevision: 3, identity, subjectPath: "user.id" });
+  assert.equal(token.status, 200);
+  const client = await f.connect(token.token, site); const paired = await client.next("paired");
+  client.send({ type: "identity", subject: "warehouse-alice" }); await client.next("ready");
+  const connection = (await f.control("connections")).connections[0];
+  assert.equal(connection.id, paired.connectionId); assert.equal(connection.relayId, "warehouse"); assert.equal(connection.relayRevision, 3); assert.equal(connection.pathname, "/ops");
+  const stale = await f.control("pair", alice, { origin: site, pathname: "/ops", relayId: "warehouse", relayRevision: 2, identity, subjectPath: "user.id" });
+  const refused = await f.connect(stale.token, site); assert.equal((await once(refused.ws, "close"))[0], 1008);
+});
+
+test("queued work rechecks policy after an admin revision change and is never sent", async t => {
+  let allowed = true, checks = 0;
+  const f = await fixture(t, { maxConcurrent: 1, authorize: async () => { checks++; return allowed; } });
+  const client = await f.paired();
+  const first = f.request(client, "/first"); const job = await client.next("request");
+  const queued = f.request(client, "/must-not-run");
+  await f.control("connections"); allowed = false;
+  f.respond(client, job, "first finished");
+  assert.equal((await first).body, "first finished");
+  assert.match((await queued).error, /configuration or account changed/);
+  assert.equal(client.messages.some(message => message.type === "request" && message.request.path === "/must-not-run"), false);
+  assert.ok(checks >= 3);
+});
+
+test("authorization outages fail closed before dispatch without retry", async t => {
+  let outage = false;
+  const f = await fixture(t, { authorize: async () => { if (outage) throw new Error("offline"); return true; } });
+  const client = await f.paired(); outage = true;
+  assert.match((await f.request(client)).error, /authorization is unavailable/);
+  assert.equal(client.messages.some(message => message.type === "request"), false);
+});
+
+test("managed-origin mode without an authorization provider refuses pairing", async t => {
+  const f = await fixture(t, { managedOrigins: true });
+  const client = await f.connect(await f.token());
+  assert.equal((await once(client.ws, "close"))[0], 1008);
+  assert.equal((await f.control("connections")).connections.length, 0);
+});

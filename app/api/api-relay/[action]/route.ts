@@ -1,51 +1,40 @@
 import { randomUUID } from "node:crypto";
-import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { NextRequest } from "next/server";
 import { apiRelayControl } from "@/lib/api-relay/control";
-import { buildDmpRequest, dmpConfig } from "@/lib/api-relay/config";
+import { listRelayDefinitions } from "@/lib/api-relay/definitions";
+import { relayBody, relayFailure, relayReply, relayUser } from "@/lib/api-relay/http";
+import { RelayError, resolveRelayDefinition } from "@/lib/api-relay/model";
+import { getRelayStatus, requestViaRelay } from "@/lib/api-relay/service";
 
 export const runtime = "nodejs";
 export const maxDuration = 150;
-const reply = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ action: string }> }) {
-  // Cookie-authenticated control operations must originate in Temco, including
-  // pairing approval; cross-site pages cannot silently pair a logged-in user.
-  const appOrigin = process.env.API_RELAY_PUBLIC_ORIGIN || process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
-  if (req.headers.get("origin") !== new URL(appOrigin).origin) return reply({ error: "Same-origin request required." }, 403);
+export async function POST(request: NextRequest, { params }: { params: Promise<{ action: string }> }) {
   try {
-    const session = await getSession();
-    const user = session.userId && session.isActive ? await prisma.user.findUnique({ where: { id: session.userId }, select: { id: true, isActive: true } }) : null;
-    if (!user?.isActive) return reply({ error: "Sign in to use API relay." }, 401);
+    const { session, user } = await relayUser(request);
     const { action } = await params;
-    if (!["status", "pair", "lease", "request", "disconnect"].includes(action)) return reply({ error: "Unknown action." }, 404);
-    const config = dmpConfig();
-    if (action === "status") {
-      const data = session.apiRelaySessionId ? await apiRelayControl("connections", { userId: user.id, sessionId: session.apiRelaySessionId }) : { connections: [] };
-      return reply({ ...data, configured: config.configured, origins: config.origins, operations: Object.entries(config.operations).map(([id, op]) => ({ id, label: op.label })) });
+    if (!["status", "pair", "lease", "request", "disconnect"].includes(action)) return relayReply({ error: "Unknown action." }, 404);
+    if (action === "lease" && !session.apiRelaySessionId) return relayReply({ ok: true });
+    const body = await relayBody(request);
+    if (!session.apiRelaySessionId) {
+      if (!["status", "pair"].includes(action)) throw new RelayError("Pair an external tab first.", 409);
+      session.apiRelaySessionId = randomUUID(); await session.save();
     }
-    if (action === "lease" && !session.apiRelaySessionId) return reply({ ok: true });
-    if (!config.configured || !config.identity) return reply({ error: "Configure DMP origins and its signed-in identity endpoint before pairing." }, 503);
-    const raw = await req.text();
-    if (Buffer.byteLength(raw) > 160000) return reply({ error: "Request is too large." }, 413);
-    const body = raw ? JSON.parse(raw) : {};
-    if (!body || typeof body !== "object" || Array.isArray(body)) return reply({ error: "Invalid request." }, 400);
-    if (action === "pair") {
-      if (!config.origins.includes(body.origin)) return reply({ error: "This DMP site is not configured." }, 400);
-      if (!session.apiRelaySessionId) { session.apiRelaySessionId = randomUUID(); await session.save(); }
-      return reply(await apiRelayControl("pair", { userId: user.id, sessionId: session.apiRelaySessionId }, { origin: body.origin, identity: config.identity, subjectPath: config.subjectPath }));
-    }
-    if (!session.apiRelaySessionId) return reply({ error: "Pair a DMP tab first." }, 409);
     const owner = { userId: user.id, sessionId: session.apiRelaySessionId };
-    if (action === "lease") return reply(await apiRelayControl("lease", owner));
-    if (typeof body.connectionId !== "string" || body.connectionId.length > 100) return reply({ error: "Select a DMP connection." }, 400);
-    if (action === "disconnect") return reply(await apiRelayControl("disconnect", owner, { connectionId: body.connectionId }));
-    if (typeof body.operation !== "string") return reply({ error: "Select a DMP operation." }, 400);
-    const request = buildDmpRequest(body.operation, body.input);
-    return reply(await apiRelayControl("request", owner, { connectionId: body.connectionId, request }));
-  } catch (error) {
-    const status = error && typeof error === "object" && "status" in error ? Number(error.status) : error instanceof TypeError ? 503 : 400;
-    return reply({ error: status === 503 ? "API relay service is unavailable." : error instanceof Error ? error.message : "API relay failed." }, status);
-  }
+    if (action === "status") return relayReply(await getRelayStatus(owner));
+    if (action === "lease") return relayReply(await apiRelayControl("lease", owner));
+    if (action === "pair") {
+      // Old DMP bookmarks omit the binding. They can use only the current DMP
+      // rule at /; the universal bookmark always supplies the exact revision.
+      const origin = typeof body.origin === "string" ? body.origin : "";
+      const pathname = typeof body.pathname === "string" ? body.pathname : "/";
+      const definition = resolveRelayDefinition(await listRelayDefinitions(), origin, pathname);
+      if (body.relayId === undefined ? definition.id !== "dmp" : body.relayId !== definition.id || body.relayRevision !== definition.revision) throw new RelayError("The relay rule changed. Run Connect Temco again.", 409);
+      return relayReply(await apiRelayControl("pair", owner, { origin, pathname, relayId: definition.id, relayRevision: definition.revision, identity: { path: definition.identityPath, method: "GET", timeoutMs: 10000 }, subjectPath: definition.subjectPath }));
+    }
+    if (typeof body.connectionId !== "string" || body.connectionId.length > 100) throw new RelayError("Select an API relay connection.");
+    if (action === "disconnect") return relayReply(await apiRelayControl("disconnect", owner, { connectionId: body.connectionId }));
+    if (typeof body.operation !== "string") throw new RelayError("Select a named API operation.");
+    return relayReply(await requestViaRelay(owner, body.connectionId, body.operation, body.input));
+  } catch (error) { return relayFailure(error); }
 }

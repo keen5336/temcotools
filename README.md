@@ -251,17 +251,29 @@ rendering checks. The PostgreSQL integration test is opt-in with
 use a dedicated disposable database with all migrations applied. It resets only
 the paperwork revision table and synthetic QA accounts in that guarded database.
 
-## DMP API Relay
+## API Relays and Configuration
 
-**DMP API Relay** connects an authenticated DMP browser tab exclusively to its
-paired Temco user. A small bookmarklet loads the current executor from Temco;
-the server supplies named API operations and the tab returns correlated results
-over a separate WebSocket service. Multiple requests can run concurrently.
+**Relay Mode** in the header shows the label relay switch/status and your API
+relay connections across TemcoTools. The dashboard shows connection status after
+sign-in. Open **Configuration** (`/configuration`) for connected tabs, activation
+instructions, the universal **Connect Temco** bookmarklet, and this device's
+label relay name/printers. Managers and admins also manage shared printers and
+label templates there. The earlier `/management/labels` link redirects to it.
 
-Configuration and deployment routing are documented in
-[`scripts/api-relay/README.md`](scripts/api-relay/README.md). Defaults use Home
-Depot DMP, `/identity/me` (`subject`), and deliveries for location 5288. Run the broker
-with `npm run api-relay` and its tests with `npm run test:api-relay`.
+Administrators manage external systems at `/admin/api-relays`: exact allowed
+origins and URL paths, account checks, named API operations and injection code.
+Connect Temco selects the current site-specific payload each time it runs.
+Definitions have revision checks and append-only history. The existing DMP
+environment defaults remain available until its managed definition is saved;
+a disabled definition never falls back to environment settings.
+
+Apply migration `20261117020000_managed_api_relays` before using this revision.
+The app and API relay service must use this same code revision; the broker
+reauthorizes pairing and queued dispatch through the app. This candidate has
+**not been deployed**; production remains on the previous release.
+
+See [`scripts/api-relay/README.md`](scripts/api-relay/README.md) for operation
+formats, integration hooks, routing, permissions and local qualification.
 
 ## MCP Server
 
@@ -372,15 +384,15 @@ other database names or nonlocal hosts.
 
 Use relay mode when a scanner cannot reach a label printer but a laptop can:
 
-1. Sign in on the laptop and open **Relay Mode** in the header, beside your name.
-2. Select the printers reachable from that laptop and turn on **Label Relay Mode**.
+1. Sign in on the laptop and open **Configuration** from the header.
+2. Under **Label relay on this device**, select the reachable printers and device name, then turn on **Label Relay Mode**. The header keeps the same switch and connection status.
 3. Keep TemcoTools open and the laptop awake. You can close the dropdown and navigate between tools; the relay stays connected. Its browser must allow the configured printer endpoints, just as for direct printing.
 4. On the scanner's Pick Wave or MARS Label page, choose the printer and turn on **Use label relay**. This preference is shared across label pages and saved on that device.
 
 The laptop's settings are also saved; reopening TemcoTools while signed in restores the enabled state.
 The receiver lives in the shared app layout, so page navigation and dropdown visibility
 do not interrupt it. Turning it off, signing out, or closing the tab disconnects it.
-All signed-in users can use it. There is no separate relay page or home-page card.
+All signed-in users can use it. Device setup and recent label receipts are in Configuration.
 Multiple laptops may serve a printer, but each label is sent to exactly one laptop.
 Concurrent scans are queued (up to eight jobs per laptop) and delivered one at a time.
 The scanner waits for the laptop's result. Failed or uncertain jobs are never retried

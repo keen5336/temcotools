@@ -1,116 +1,145 @@
-# DMP API relay
+# Managed API relays
 
-Open **DMP API Relay** in Operations Tools. Drag its bookmarklet to the bookmarks
-bar. On a signed-in DMP page, run the bookmark and choose **Connect**. A Temco
-popup asks which signed-in Temco account to connect. The bookmark contains only
-the loader URL. The latest executor is served with `Cache-Control: no-store`;
-there are no saved pairing credentials or embedded DMP operations in it.
+Open **Configuration** from Relay Mode or your account menu. Install **Connect
+Temco** once, then run it on a signed-in external system. It sends only the
+page's origin and pathname to the loader, without a referrer, query string,
+fragment, DOM content or cookies. The server selects one enabled matching relay
+and serves its current injection code. Unsupported or ambiguous pages refuse
+injection. The script checks the actual tab before running admin-authored code.
 
-## Configuration
+Choose **Connect** in the injected panel and approve the Temco account shown in
+the pairing window. Keep that external tab and a signed-in TemcoTools tab open.
+Your dashboard and header show each system's status across tools. Configuration
+lists connected tabs, upstream account identifiers, and disconnect controls.
+External pages must allow the script, WebSocket and popup under their CSP/COOP
+policies; this feature does not bypass those policies.
 
-Defaults use the DMP endpoints supplied for this integration. Override these
-variables on the **app** service if the upstream changes:
+## Administration
 
-```dotenv
-DMP_ORIGINS=https://dmp.extapps.homedepot.com
-DMP_IDENTITY_PATH=/identity/me
-DMP_IDENTITY_SUBJECT_PATH=subject
-API_RELAY_PUBLIC_ORIGIN=https://temco.chronchive.com
-API_RELAY_INTERNAL_URL=http://api-relay:3003
-```
+Only current, active **administrators** can read or save `/admin/api-relays` and
+its `/api/admin/api-relays` API. Manager access to printers/templates does not
+grant relay management. Definitions contain:
 
-`DMP_ORIGINS` is a comma-separated list of exact HTTPS origins, shared with the
-broker. An identity response must be successful JSON with a stable string or
-numeric subject at the configured dot-separated property path. DMP returns
-`subject` (user ID) and `email`; the relay binds only the stable `subject` and
-does not need the email. Explicitly empty origin/identity configuration disables
-pairing. These endpoints were provided by the user; live DMP access has not yet
-been verified.
+- A stable ID and display name; an explicit enabled flag.
+- Exact HTTPS origins (no wildcards or paths) and a canonical pathname prefix.
+  `/ops` matches `/ops` and `/ops/orders`, not `/ops-other`. Overlapping rules
+  for the same origin are rejected, including disabled rules.
+- A site-relative GET endpoint returning signed-in identity JSON and its stable
+  account ID field, such as `subject` or `user.id`.
+- Named operations with labels, HTTP methods, relative paths, optional headers,
+  JSON body templates, scalar defaults and timeouts.
+- Injection JavaScript defining `function startTemcoSiteRelay(config)`. The
+  default calls `startDmpRelay(config)`, the shared, system-independent browser
+  executor. Customize the function to add site-specific UI/setup. This source
+  executes with the external page's privileges. It is public loader code and
+  must contain no credentials or private server configuration. The server
+  compiles it for syntax without executing it; compilation is not proof of
+  behavior on a particular external site.
 
-The server owns a registry of named operations. `session` checks the configured
-identity endpoint. `deliveries` sends:
+Save explicitly applies one revision. A stale editor gets a conflict. Each
+successful save records the actor, complete snapshot and operation ID in
+append-only history. Loading history creates a draft; save it to make a new
+revision. A repeated identical operation ID returns the original receipt. An
+uncertain response requires reading current state, with no automatic save retry.
+New definitions start disabled. Disable a definition and save to stop new
+connections/dispatch. Old installed code must reconnect after a revision change.
 
-```
-GET /api/dashboard/v1/driversDeliveries?DeliveryDate={deliveryDate}&LocationNumber={locationNumber}
-```
+Until an admin saves `dmp`, the existing `DMP_ORIGINS`, `DMP_IDENTITY_PATH`,
+`DMP_IDENTITY_SUBJECT_PATH` and `DMP_API_OPERATIONS` settings define virtual DMP
+revision 0. Reads create no rows. A saved DMP definition replaces these defaults,
+including when it is disabled. The default origin remains
+`https://dmp.extapps.homedepot.com`, identity `/identity/me` field `subject`, and
+DMP deliveries for location `5288`. Existing DMP-only bookmarks still use the
+current DMP definition; install Connect Temco to activate other systems.
 
-For input `{"deliveryDate":"10/24/2026"}`, location defaults to `5288` and the
-date is encoded as `10%2F24%2F2026`. A caller can supply a different location;
-the current DMP account's access determines whether DMP permits it. Add or
-override operations with `DMP_API_OPERATIONS` (a JSON object):
+## Named operations and other pages
 
 ```json
 {
-  "lookup-order": {
+  "lookup": {
     "label": "Look up order",
-    "path": "/api/orders/{orderNumber}",
-    "timeoutMs": 30000
+    "path": "/api/orders/{orderNumber}"
   },
   "search": {
     "label": "Search inventory",
     "method": "POST",
     "path": "/api/inventory/search",
     "headers": { "Content-Type": "application/json" },
-    "body": { "query": { "$param": "query" } }
+    "body": { "query": { "$param": "query" } },
+    "timeoutMs": 30000
   }
 }
 ```
 
-These paths are illustrative, not verified DMP endpoints. Path placeholders are
-URL-encoded; body `$param` values retain their scalar type. Callers provide an
-operation name and scalar inputs, never an arbitrary URL, method, JavaScript,
-cookie or authentication header. Additional integration logic can call
-`buildDmpRequest()` and `apiRelayControl()` from server-side domain services,
-using an owner obtained from the authenticated Temco session.
+These example endpoints require qualification against the intended system.
+Path parameters are URL-encoded; `$param` body values retain their scalar types.
+Callers cannot choose arbitrary methods, destinations or authentication headers.
 
-## Local development and deployment
+Every Temco client page under the shared layout can use `useApiRelays()` from
+`components/api-relay/ApiRelayProvider.tsx`: `status`, `refresh`, `disconnect`,
+and `request(connectionId, operationName, parameters)`. The API Relays tool is a
+generic operation workbench, retaining the DMP delivery date/location controls.
+For a server-side domain route, derive `RelayOwner` from the authenticated user
+and `apiRelaySessionId`, then call `requestViaRelay()` in
+`lib/api-relay/service.ts`. Never accept a caller-supplied owner or use the raw
+broker control API to bypass current definition validation.
 
-Run `npm run dev` and `npm run api-relay` in separate terminals with the same
-`SESSION_SECRET` (at least 32 characters). For local mock DMP pages, a localhost
-HTTP origin is allowed outside production. The broker reads environment from
-its process; it does not automatically load `.env` when launched directly.
-The development executor uses WebSocket port 3003; override with
-`API_RELAY_PUBLIC_PORT` if necessary.
+## Ownership and dispatch
 
-Compose includes the separate `api-relay` service, using the app image and
-shared secret. Port 3003 is published only to loopback. Caddy must route the
-exact `/api/api-relay/ws` path there (see the Caddyfile example), with all other
-API paths still routed to Next. Never expose the broker's `/control` endpoint
-publicly. Its requests require a derived shared secret; the Next routes check
-the current user against PostgreSQL and construct the owner themselves.
-No database migration is required. `scripts/deploy.sh` starts the new service
-when an explicitly authorized deployment is performed.
+Connections belong to the paired Temco user and creating login session. Other
+sessions of the same user can see/use them; other users cannot list, request or
+disconnect them. A 256-bit pairing token is hashed in memory, exact-origin,
+single-use and expires after 90 seconds. The popup verifies its opener, nonce,
+site and current definition revision. Tokens appear only in postMessage and the
+first WebSocket frame, never a URL or browser storage.
 
-## Ownership and request lifecycle
+The shared provider checks status/renews its session lease every 10 seconds,
+independent of menu or page visibility. A lease lasts two minutes and each
+connection lasts at most eight hours. Logout revokes that login's connections.
+Loss of all Temco tabs or background timer suspension can expire the lease.
+Unknown broker availability clears confirmed status rather than showing stale
+connections as online.
 
-- Connections and their results belong to a Temco **user**, with explicit
-  connection selection when several of that user's DMP tabs are connected.
-  Another user gets neither the connection list nor access via a guessed ID.
-- Pairing uses a 256-bit token, stored hashed in the broker, bound to the
-  authenticated Temco user/session and exact DMP Origin. It expires after 90
-  seconds and can be redeemed once, in the WebSocket's first message. The
-  token is passed by `postMessage` to the initiating DMP window with an exact
-  target origin and matching window/nonce; it never appears in a URL or storage.
-- A Temco tab renews the creating session's lease every 10 seconds. The lease
-  lasts two minutes to tolerate background browser timer throttling. Logout/account switching revokes the session's pairings;
-  if the broker is unreachable, expiry provides bounded revocation. Closing
-  all Temco tabs or background timer suspension may also expire the lease.
-  The broker caps a connection's lifetime at eight hours.
-- DMP identity is checked on initial connection, before and after API calls,
-  and every 15 seconds. A different identity or failed identity lookup ends
-  the connection and aborts outstanding work. The DMP page/session is the
-  execution authority; this is not an independent DMP identity attestation.
-- Four jobs run concurrently per DMP tab; up to 32 outstanding jobs are allowed.
-  Each job gets a server-generated ID, a queue deadline, cancellation, and a
-  request timeout. Responses can arrive out of order. There is no replay,
-  automatic retry, reassignment, or persistent response history. A timeout or
-  connection loss can leave a DMP mutation's outcome uncertain.
-- Requests use same-origin credentials, reject redirects, and stay on the
-  DMP origin. DMP cookies are not exported. Responses are bounded to 2 MiB;
-  the protocol currently carries text/JSON, not binary downloads. DMP-specific
-  CSRF headers or token discovery are not configured until its API is known.
-- The DMP site's CSP must allow loading the Temco script and connecting to the
-  Temco WebSocket. COOP can sever the popup's opener. These policies require a
-  live DMP check; a blocked load gives a browser-side error, not a bypass.
+The broker obtains fresh authorization from the app before redeeming a managed
+pairing and before every job leaves its queue. Disabled/changed rules, inactive
+users, missing authorization or an authorization outage prevent dispatch. Work
+already sent may have affected the external system; it is never replayed.
+The external executor also checks the actual page origin/path before fetching
+and verifies upstream identity initially, periodically, and before/after calls.
 
-Run `npm run test:api-relay` for broker isolation/concurrency and executor tests.
+Four requests can run per tab, with at most 32 pending, bounded queue/request
+timeouts, cancellation, out-of-order IDs and 2 MiB text/JSON responses. Redirects
+and off-origin paths fail. Authentication cookies stay in their original tab.
+No request or response is persisted. Re-running the bookmark cannot replace an
+executor with in-flight work; it asks the operator to wait for the original
+result. Disconnects, timeouts and errors cause no automatic retry/reassignment.
+
+## Local setup and future deployment
+
+Apply migration `20261117020000_managed_api_relays`. Run the app and
+`npm run api-relay` with the same `SESSION_SECRET` (at least 32 characters).
+
+```dotenv
+API_RELAY_PUBLIC_ORIGIN=https://temco.chronchive.com
+API_RELAY_INTERNAL_URL=http://api-relay:3003
+# On the broker; used for current binding/account checks:
+API_RELAY_APP_URL=http://app:3000
+```
+
+The broker no longer requires a static DMP-origin list; a live one-use pairing
+token admits a managed origin, and the app revalidates its definition. In local
+development, HTTP loopback origins are allowed; a production HTTP fixture needs
+explicit `API_RELAY_ALLOW_LOCALHOST=1`. Production requires HTTPS by default.
+The development executor uses port 3003, overridable by
+`API_RELAY_PUBLIC_PORT`. Configure the public origin when using another app port.
+
+Compose keeps the broker on loopback. Caddy must route the existing exact
+`/api/api-relay/ws` path to the broker and all other routes to Next. Never expose
+`/control`; the internal authorization route requires the derived control key
+and returns 404 without it. Deploy the app and API relay broker together at the
+same revision in an authorized maintenance window. This change has not been
+rolled out and makes no live external-system or physical-printer acceptance claim.
+
+Run `npm run test:api-relay`, `npm run test:relay` and `npm run test:favorites`.
+For PostgreSQL tests, apply all migrations to the disposable fixture database
+and set `API_RELAY_TEST_DATABASE_URL` to `relay_qa` at `127.0.0.1:55475`.

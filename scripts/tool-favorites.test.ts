@@ -8,9 +8,11 @@ test("catalog identifiers and destinations are unique", () => {
   assert.equal(new Set(TOOLS.map((t) => t.href)).size, TOOLS.length);
 });
 test("restricted tools follow the current role", () => {
-  assert.equal(toolsForRole("user").some((t) => t.id === "users" || t.id === "labels"), false);
+  assert.equal(toolsForRole("user").some((t) => t.id === "users" || t.id === "api-relay-manager"), false);
+  assert.equal(toolsForRole("user").some((t) => t.id === "labels" && t.href === "/configuration"), true);
   assert.equal(toolsForRole("manager").some((t) => t.id === "labels"), true);
   assert.equal(toolsForRole("manager").some((t) => t.id === "files"), false);
+  assert.equal(toolsForRole("manager").some((t) => t.id === "api-relay-manager"), false);
   assert.equal(toolsForRole("admin").some((t) => t.id === "users"), true);
 });
 test("set operations are idempotent and append new favorites without losing others", () => {
@@ -24,8 +26,8 @@ test("reordering retains a favorite added concurrently in another tab", () => {
   assert.deepEqual(changeFavorites(["mars", "pick-waves", "api-relay"], "user", { action: "reorder", order: ["pick-waves", "mars"] }), ["pick-waves", "mars", "api-relay"]);
 });
 test("hidden role-specific favorites are retained without leaking into navigation", () => {
-  const stored = changeFavorites(["users", "mars", "labels", "pick-waves"], "user", { action: "reorder", order: ["pick-waves", "mars"] });
-  assert.deepEqual(stored, ["users", "pick-waves", "labels", "mars"]);
+  const stored = changeFavorites(["users", "mars", "api-relay-manager", "pick-waves"], "user", { action: "reorder", order: ["pick-waves", "mars"] });
+  assert.deepEqual(stored, ["users", "pick-waves", "api-relay-manager", "mars"]);
   assert.deepEqual(visibleFavoriteIds(stored, "user"), ["pick-waves", "mars"]);
   assert.deepEqual(visibleFavoriteIds(stored, "admin"), stored);
 });

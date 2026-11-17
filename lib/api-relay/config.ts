@@ -1,6 +1,6 @@
 import { validateRequest } from "../../scripts/api-relay/protocol.mjs";
 
-type Operation = { label: string; method?: string; path: string; headers?: Record<string, string>; body?: unknown; timeoutMs?: number; defaults?: Record<string, string | number | boolean> };
+export type Operation = { label: string; method?: string; path: string; headers?: Record<string, string>; body?: unknown; timeoutMs?: number; defaults?: Record<string, string | number | boolean> };
 export function dmpConfig() {
   const origins = (process.env.DMP_ORIGINS ?? "https://dmp.extapps.homedepot.com").split(",").map((s) => s.trim()).filter(Boolean);
   for (const origin of origins) {
@@ -34,8 +34,12 @@ export function dmpConfig() {
 export function buildDmpRequest(name: string, input: unknown = {}) {
   const config = dmpConfig();
   if (!config.configured) throw new Error("DMP API relay is not configured.");
-  if (!Object.hasOwn(config.operations, name)) throw new Error("Unknown DMP operation.");
-  const op = config.operations[name];
+  return buildRelayRequest(config.operations, name, input);
+}
+
+export function buildRelayRequest(operations: Record<string, Operation>, name: string, input: unknown = {}) {
+  if (!Object.hasOwn(operations, name)) throw new Error("Unknown relay operation.");
+  const op = operations[name];
   if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length > 50) throw new Error("Parameters must be an object.");
   const params = { ...op.defaults, ...input as Record<string, unknown> };
   const parameter = (key: string) => {

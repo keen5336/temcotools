@@ -5,7 +5,7 @@ export type Tool = { id: string; name: string; href: string; description: string
 // presentation only; each tool still enforces its own server authorization.
 export const TOOLS: readonly Tool[] = [
   { id: "driver-paperwork", name: "Driver Paperwork", href: "/tools/driver-paperwork", description: "Install the bookmarklet to prepare and print driver paperwork from a route manifest." },
-  { id: "api-relay", name: "DMP API Relay", href: "/tools/api-relay", description: "Connect your signed-in DMP tab and run API operations through your own account." },
+  { id: "api-relay", name: "API Relays", href: "/tools/api-relay", description: "Use your connected external systems through their configured API operations." },
   { id: "mars", name: "MARS Tracking", href: "/tools/mars", description: "Import MARS spreadsheets, browse current units, run audits, and reconcile discrepancies." },
   { id: "rtv-label", name: "MARS Label Tool", href: "/tools/rtv-label", description: "Generate and print MARS return shipping labels." },
   { id: "report-engine", name: "Report Engine", href: "/tools/report-engine", description: "Build data transformation pipelines on CSV files and export formatted reports." },
@@ -16,7 +16,8 @@ export const TOOLS: readonly Tool[] = [
   { id: "pick-waves", name: "Pick Waves", href: "/tools/pick-waves", description: "Upload pick lists, map route staging locations, scan items, and print staging labels." },
   { id: "route-recon", name: "Route Recon", href: "/tools/route-recon", description: "Organize pick lists by route and print readable item reports with scannable LPN barcodes." },
   { id: "files", name: "File Manager", href: "/admin/files", description: "Upload, download, organize, and clear shared swap-space files.", roles: ["admin"] },
-  { id: "labels", name: "Label Configuration", href: "/management/labels", description: "Manage shared printer destinations and workflow label templates.", roles: ["admin", "manager"] },
+  { id: "labels", name: "Configuration", href: "/configuration", description: "Connect external systems and configure label relay, printers and templates." },
+  { id: "api-relay-manager", name: "API Relay Management", href: "/admin/api-relays", description: "Manage allowed sites, named API operations and injection payloads.", roles: ["admin"] },
   { id: "users", name: "User Management", href: "/admin/users", description: "Manage users, roles, and access.", roles: ["admin"] },
   { id: "scanner-diagnostic", name: "Scanner Diagnostic", href: "/admin/scanner-diagnostic", description: "Test focus-free scanner events, keyboard suppression, and scan acknowledgement.", roles: ["admin"] },
 ];

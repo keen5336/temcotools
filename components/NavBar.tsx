@@ -7,6 +7,7 @@ import { useTheme, THEMES } from "@/components/ThemeProvider";
 import LabelRelayMenu from "@/components/labels/LabelRelayMenu";
 import { useLabelRelay } from "@/components/labels/LabelRelayProvider";
 import MobileToolDrawer from "@/components/tools/MobileToolDrawer";
+import { useApiRelays } from "@/components/api-relay/ApiRelayProvider";
 
 interface NavBarProps {
   session: SessionData;
@@ -16,10 +17,12 @@ export default function NavBar({ session }: NavBarProps) {
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { suspend } = useLabelRelay();
+  const api = useApiRelays();
 
   async function handleSignOut() {
     await fetch("/api/auth/logout", { method: "POST" });
     suspend();
+    api.suspend();
     router.push("/signin");
     router.refresh();
   }
@@ -69,13 +72,10 @@ export default function NavBar({ session }: NavBarProps) {
                 <Link href="/admin/files">File Manager</Link>
               </li>
             )}
-            {(session.role === "admin" || session.role === "manager") && (
-              <li>
-                <Link href="/management/labels">Label Configuration</Link>
-              </li>
-            )}
+            <li><Link href="/configuration">Configuration</Link></li>
+            {session.role === "admin" && <li><Link href="/admin/api-relays">API Relay Management</Link></li>}
             <li>
-              <Link href="/tools/api-relay">DMP API Relay</Link>
+              <Link href="/tools/api-relay">API Relays</Link>
             </li>
             <li>
               <Link href="/tools/route-recon">Route Recon</Link>

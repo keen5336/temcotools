@@ -47,6 +47,34 @@ model DriverPaperworkRevision {
   createdByUser   User?    @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 }
 
+model ApiRelayDefinition {
+  id           String   @id
+  name         String
+  enabled      Boolean  @default(false)
+  origins      String[]
+  pathPrefix   String
+  identityPath String
+  subjectPath  String
+  operations   Json
+  program      String
+  revision     Int      @default(1)
+  updatedAt    DateTime @updatedAt
+}
+
+model ApiRelayRevision {
+  id              String   @id @default(cuid())
+  relayId         String
+  revision        Int
+  baseRevision    Int
+  operationId     String   @unique
+  contentHash     String
+  snapshot        Json
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  @@unique([relayId, revision])
+}
+
 model LabelPrinter {
   id              String   @id @default(cuid())
   name            String   @unique

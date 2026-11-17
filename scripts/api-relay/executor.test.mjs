@@ -7,7 +7,7 @@ const protocol = readFileSync(new URL("./protocol.mjs", import.meta.url), "utf8"
 const executor = readFileSync(new URL("./executor.mjs", import.meta.url), "utf8").replace(/^export /gm, "");
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fixture(t) {
+function fixture(t, options = {}) {
   const elements = [], events = new Map(), sockets = [], requests = [], responses = new Map();
   const popup = { closed: false, close() { this.closed = true; } };
   const element = (tag) => {
@@ -23,23 +23,26 @@ function fixture(t) {
     message(message) { return this.onmessage({ data: JSON.stringify(message) }); }
   }
   let identity = "user-one";
-  const context = vm.createContext({ window, document: { createElement: element, createTextNode: (s) => s, body: element("body") }, location: { origin: "https://dmp.test" }, WebSocket: Socket, URL, AbortController, TextEncoder, TextDecoder, crypto: { randomUUID: () => "test-nonce" }, alert: (s) => { throw new Error(s); }, setTimeout, clearTimeout, setInterval, clearInterval, fetch: async (url, options) => {
+  const location = { origin: "https://dmp.test", pathname: "/ops" };
+  const context = vm.createContext({ window, document: { createElement: element, createTextNode: (s) => s, body: element("body") }, location, WebSocket: Socket, URL, AbortController, TextEncoder, TextDecoder, crypto: { randomUUID: () => "test-nonce" }, alert: (s) => { throw new Error(s); }, setTimeout, clearTimeout, setInterval, clearInterval, fetch: async (url, options) => {
     requests.push({ url, ...options });
     if (new URL(url).pathname === "/identity/me") return new Response(JSON.stringify({ subject: identity }), { status: 200, headers: { "Content-Type": "application/json" } });
     if (responses.has(new URL(url).pathname)) return responses.get(new URL(url).pathname)(options);
     return new Response("data", { status: 200 });
   } });
-  vm.runInContext(`(()=>{${protocol}\n${executor}\nstartDmpRelay({temcoOrigin:'https://temco.test',wsUrl:'wss://temco.test/api/api-relay/ws',allowedOrigins:['https://dmp.test'],maxConcurrent:4,maxResponseBytes:64});})();`, context);
+  const config = { temcoOrigin: "https://temco.test", wsUrl: "wss://temco.test/api/api-relay/ws", allowedOrigins: ["https://dmp.test"], maxConcurrent: 4, maxResponseBytes: 64, ...options };
+  const inject = () => vm.runInContext(`(()=>{${protocol}\n${executor}\nstartDmpRelay(${JSON.stringify(config)});})();`, context);
+  inject();
   t.after(() => window.__temcoApiRelay?.stop());
   const connect = elements.find((e) => e.tag === "button" && e.textContent === "Connect");
   connect.onclick();
-  const pair = async (overrides = {}) => events.get("message")({ origin: "https://temco.test", source: popup, data: { type: "temco-api-relay-pair", nonce: "test-nonce", token: "token" }, ...overrides });
+  const pair = async (overrides = {}) => events.get("message")({ origin: "https://temco.test", source: popup, data: { type: "temco-api-relay-pair", nonce: "test-nonce", token: "token", relayId: config.relayId, relayRevision: config.relayRevision }, ...overrides });
   const ready = async () => {
     await pair(); const ws = sockets.at(-1); ws.onopen();
     await ws.message({ type: "paired", identity: { path: "/identity/me", timeoutMs: 1000 }, subjectPath: "subject" });
     await ws.message({ type: "ready" }); return ws;
   };
-  return { sockets, requests, responses, pair, ready, popup, identity: (value) => { identity = value; }, events, window };
+  return { sockets, requests, responses, pair, ready, popup, identity: (value) => { identity = value; }, events, window, location, inject };
 }
 
 test("executor accepts pairing only from the expected Temco popup and nonce", async (t) => {
@@ -101,4 +104,28 @@ test("executor aborts cancelled work without retrying", async (t) => {
   await ws.message({ type: "cancel", requestId: "slow" }); await tick();
   assert.match(ws.sent.find((m) => m.requestId === "slow").error, /cancelled/);
   assert.equal(f.requests.filter((r) => r.url.endsWith("/slow")).length, 1);
+});
+
+test("managed executor rejects a different definition revision in the pairing window", async t => {
+  const f = fixture(t, { relayId: "warehouse", relayRevision: 3, pathPrefix: "/ops" });
+  await f.pair({ data: { type: "temco-api-relay-pair", nonce: "test-nonce", token: "token", relayId: "warehouse", relayRevision: 2 } });
+  assert.equal(f.sockets.length, 0);
+});
+
+test("moving outside the configured page path stops calls before accessing the external API", async t => {
+  const f = fixture(t, { relayId: "warehouse", relayRevision: 3, pathPrefix: "/ops" }), ws = await f.ready();
+  f.location.pathname = "/private";
+  await ws.message({ type: "request", requestId: "blocked", request: { path: "/api/must-not-run" } }); await tick(); await tick();
+  assert.equal(f.requests.some(request => request.url.endsWith("/api/must-not-run")), false);
+  assert.equal(ws.readyState, 3);
+});
+
+test("reinjecting cannot replace or cancel an executor with in-flight work", async t => {
+  const f = fixture(t), ws = await f.ready();
+  f.responses.set("/slow", ({ signal }) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))));
+  await ws.message({ type: "request", requestId: "original", request: { path: "/slow" } }); await tick();
+  const original = f.window.__temcoApiRelay;
+  assert.equal(original.busy(), true);
+  assert.throws(() => f.inject(), /still running/);
+  assert.equal(f.window.__temcoApiRelay, original); assert.equal(ws.readyState, 1);
 });

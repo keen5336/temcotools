@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
 import { sessionOptions, type SessionData } from "@/lib/session";
 import { revokeApiRelaySession } from "@/lib/api-relay/control";
+import { randomUUID } from "node:crypto";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
   const cookieStore = await cookies();
   const session = await getIronSession<SessionData>(cookieStore, sessionOptions);
   await revokeApiRelaySession(session);
-  delete session.apiRelaySessionId;
+  session.apiRelaySessionId = randomUUID();
   session.userId = user.id;
   session.username = user.username;
   session.displayName = user.displayName;
