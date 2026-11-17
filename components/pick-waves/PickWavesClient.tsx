@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { PICK_WAVE_STAGING_LOCATIONS } from "@/lib/pick-wave-constants";
+import PickWaveLocationsEditor from "./PickWaveLocationsEditor";
 
 export interface PickWaveSummary {
   id: string;
@@ -21,9 +21,10 @@ export interface PickWaveSummary {
 
 interface SpreadsheetPreview { itemCount: number; routeNumbers: string[]; missingColumns: string[] }
 
-export default function PickWavesClient({ initialWaves }: { initialWaves: PickWaveSummary[] }) {
+export default function PickWavesClient({ initialWaves, initialLocations }: { initialWaves: PickWaveSummary[]; initialLocations: string[] }) {
   const router = useRouter();
   const [waves, setWaves] = useState(initialWaves);
+  const [locations, setLocations] = useState(initialLocations);
   const [showArchived, setShowArchived] = useState(false);
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -52,6 +53,12 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
 
   function assignLocation(routeNumber: string, stagingLocation: string) {
     setAssignments((current) => ({ ...current, [routeNumber]: stagingLocation }));
+  }
+
+  function updateLocations(next: string[]) {
+    setLocations(next);
+    setAssignments((current) => Object.fromEntries(Object.entries(current).map(([route, location]) => [route, next.includes(location) ? location : ""])));
+    router.refresh();
   }
 
   function handleCreate(event: React.FormEvent<HTMLFormElement>) {
@@ -115,7 +122,7 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
             <div className="overflow-x-auto border border-base-200 rounded-xl">
               <table className="table table-sm"><thead><tr><th>Route Number</th><th>Staging Location</th></tr></thead><tbody>{preview.routeNumbers.map((routeNumber) => {
                 const currentLocation = assignments[routeNumber] ?? "";
-                return <tr key={routeNumber}><td className="font-semibold">{routeNumber}</td><td><select className="select select-bordered select-sm w-full" value={currentLocation} onChange={(event) => assignLocation(routeNumber, event.target.value)}><option value="">No Location</option>{PICK_WAVE_STAGING_LOCATIONS.map((location) => <option key={location} value={location} disabled={assignedLocations.has(location) && location !== currentLocation}>{location}</option>)}</select></td></tr>;
+                return <tr key={routeNumber}><td className="font-semibold">{routeNumber}</td><td><select className="select select-bordered select-sm w-full" value={currentLocation} onChange={(event) => assignLocation(routeNumber, event.target.value)}><option value="">No Location</option>{locations.map((location) => <option key={location} value={location} disabled={assignedLocations.has(location) && location !== currentLocation}>{location}</option>)}</select></td></tr>;
               })}</tbody></table>
             </div>
           </div> : null}
@@ -148,6 +155,8 @@ export default function PickWavesClient({ initialWaves }: { initialWaves: PickWa
           </div>
         </div>
       </section>
+
+      <PickWaveLocationsEditor locations={locations} onChange={updateLocations} />
     </div>
   );
 }

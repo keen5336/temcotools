@@ -157,6 +157,29 @@ production. It adds an empty-by-default favorites array to each user; existing
 tool access and server-side authorization remain unchanged.
 Run `npm run test:favorites` for catalog, permission, and ordering checks.
 
+## Pick wave staging locations
+
+At the bottom of **Pick Waves** (`/tools/pick-waves`), use **Staging Locations**
+to add or remove shared location choices. Changes are saved in PostgreSQL and
+used by both new-wave imports and existing-wave route maps. Active signed-in
+users can manage this list, just as they can create waves and edit route maps.
+Names use up to 32 letters, numbers, spaces, hyphens or underscores and are
+normalized to uppercase. Use **Refresh locations** to load changes from another user.
+
+Removing a location prevents new assignments to it. Existing saved assignments
+remain available for scanning and printing; an existing route can keep its
+removed location or switch to another choice. Removing a location also clears
+any unsaved import assignments to it on the current page. **No Location** remains
+available even when the shared list is empty.
+
+Apply migration `20261117010000_pick_wave_staging_locations` before starting this
+revision. It seeds 9-A through 14-D (A–D in each row), plus 7-A through 7-E and
+8-A through 8-E, once. The app does not recreate removed choices on restart.
+Run `npm run test:pick-wave-locations` for validation tests. Set
+`PICK_WAVE_TEST_DATABASE_URL` to the isolated `pick_wave_qa` database on
+`127.0.0.1:55474` to include PostgreSQL import, mapping and scan checks after
+applying migrations to that fixture database.
+
 ## Driver Paperwork
 
 Open **Driver Paperwork** under Operations Tools (`/tools/driver-paperwork`) to

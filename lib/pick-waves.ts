@@ -3,7 +3,9 @@ import JSZip from "jszip";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
-import { PICK_WAVE_STAGING_LOCATIONS } from "@/lib/pick-wave-constants";
+import { listPickWaveLocations } from "@/lib/pick-wave-locations";
+import { normalizeRouteMappings, PickWaveValidationError, type PickWaveRouteInput } from "@/lib/pick-wave-validation";
+export { PickWaveValidationError, type PickWaveRouteInput } from "@/lib/pick-wave-validation";
 
 type WorksheetValue = ExcelJS.CellValue | null | undefined;
 export type PickWaveWorkbookBuffer = Parameters<ExcelJS.Workbook["xlsx"]["load"]>[0];
@@ -20,11 +22,6 @@ export interface PickWaveImportedItem {
   description: string | null;
 }
 
-export interface PickWaveRouteInput {
-  routeNumber: string;
-  stagingLocation: string | null;
-}
-
 const COLUMN_ALIASES: Record<string, keyof Omit<PickWaveImportedItem, "rowNumber">> = {
   route: "routeNumber", routenumber: "routeNumber", routeno: "routeNumber",
   contact: "contact", contactname: "contact", customer: "contact", customername: "contact",
@@ -35,8 +32,6 @@ const COLUMN_ALIASES: Record<string, keyof Omit<PickWaveImportedItem, "rowNumber
   part: "partNumber", partnumber: "partNumber", partno: "partNumber", sku: "partNumber",
   description: "description", itemdescription: "description", productdescription: "description",
 };
-
-export class PickWaveValidationError extends Error {}
 
 export async function parsePickWaveWorkbook(fileBuffer: PickWaveWorkbookBuffer) {
   const workbook = await loadWorkbook(fileBuffer);
@@ -133,7 +128,7 @@ export async function createPickWave(options: {
   if (!name) throw new PickWaveValidationError("A pick-wave name is required.");
   if (name.length > 120) throw new PickWaveValidationError("Pick-wave name must be 120 characters or fewer.");
   const parsed = await parsePickWaveWorkbook(options.fileBuffer);
-  const routeMappings = normalizeRouteMappings(options.routeMappings);
+  const routeMappings = normalizeRouteMappings(options.routeMappings, await listPickWaveLocations());
   const spreadsheetRoutes = [...new Set(parsed.items.map((item) => item.routeNumber).filter((route): route is string => Boolean(route)))];
   const mappedRoutes = new Set(routeMappings.map((mapping) => mapping.routeNumber.toLowerCase()));
   const missingRoutes = spreadsheetRoutes.filter((route) => !mappedRoutes.has(route.toLowerCase()));
@@ -235,7 +230,11 @@ export async function savePickWaveScansToList(id: string, userId: string) {
 }
 
 export async function replacePickWaveRoutes(id: string, inputs: PickWaveRouteInput[]) {
-  const routeMappings = normalizeRouteMappings(inputs);
+  const [locations, existing] = await Promise.all([
+    listPickWaveLocations(),
+    prisma.pickWaveRouteMapping.findMany({ where: { pickWaveId: id }, select: { routeNumber: true, stagingLocation: true } }),
+  ]);
+  const routeMappings = normalizeRouteMappings(inputs, locations, existing);
   const itemRoutes = await prisma.pickWaveItem.findMany({ where: { pickWaveId: id, routeNumber: { not: null } }, distinct: ["routeNumber"], select: { routeNumber: true } });
   const spreadsheetRoutes = itemRoutes.map((item) => item.routeNumber).filter((route): route is string => Boolean(route));
   const mappedRoutes = new Set(routeMappings.map((mapping) => mapping.routeNumber.toLowerCase()));
@@ -279,24 +278,6 @@ export async function scanPickWave(options: { id: string; scannedValue: string; 
     const mapping = item.routeNumber ? await tx.pickWaveRouteMapping.findFirst({ where: { pickWaveId: options.id, routeNumber: { equals: item.routeNumber, mode: "insensitive" } }, select: { stagingLocation: true } }) : null;
     return { matched: true as const, alreadyScanned, item: { ...item, scannedAt: item.scannedAt ?? new Date() }, stagingLocation: mapping?.stagingLocation ?? null };
   });
-}
-
-function normalizeRouteMappings(inputs: PickWaveRouteInput[]) {
-  const unique = new Map<string, PickWaveRouteInput>();
-  const usedLocations = new Set<string>();
-  for (const input of inputs) {
-    const routeNumber = input.routeNumber.trim();
-    const stagingLocation = input.stagingLocation?.trim() || null;
-    if (!routeNumber) throw new PickWaveValidationError("Each route mapping needs a route number.");
-    if (stagingLocation && !PICK_WAVE_STAGING_LOCATIONS.includes(stagingLocation)) throw new PickWaveValidationError(`“${stagingLocation}” is not a valid staging location.`);
-    const routeKey = routeNumber.toLowerCase();
-    if (unique.has(routeKey)) throw new PickWaveValidationError(`Route “${routeNumber}” was assigned more than once.`);
-    const locationKey = stagingLocation?.toLowerCase();
-    if (locationKey && usedLocations.has(locationKey)) throw new PickWaveValidationError(`Staging location “${stagingLocation}” was assigned more than once.`);
-    unique.set(routeKey, { routeNumber, stagingLocation });
-    if (locationKey) usedLocations.add(locationKey);
-  }
-  return [...unique.values()];
 }
 
 function normalizeHeader(value: WorksheetValue) {
