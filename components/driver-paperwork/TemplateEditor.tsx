@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { buildTemplatePreview } from "@/lib/driver-paperwork/preview";
 import { FIELD_LABELS, PAGE_LABELS, PAGE_TYPES, TEMPLATE_FIELDS, templateSchema, type PageType, type PaperworkTemplates, type RichNode } from "@/lib/driver-paperwork/templates";
 import RichTextEditor from "./RichTextEditor";
@@ -119,7 +118,6 @@ export default function TemplateEditor() {
   return <section className="rounded-box border border-base-300 bg-base-100 p-5 space-y-4" aria-labelledby="template-heading">
     <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 id="template-heading" className="text-lg font-semibold">Templates &amp; payload</h2><p className="text-sm text-base-content/70">Saved version {data.current.version}{dirty ? " · Unsaved changes" : ""}</p></div><button className="btn btn-sm btn-outline" disabled={busy} onClick={() => { void reload(); }}>Reload saved version</button></div>
     <p>Edit cover instructions, survey wording and the three stop templates. Insert fields to fill in route or customer details automatically. Save publishes both the templates and JavaScript for everyone using the bookmarklet.</p>
-    <p className="text-sm">Publishing requires a recent password check. <Link href="/account/security" target="_blank" className="link">Confirm your password in Account security</Link>, then return to this draft.</p>
     <div className="flex gap-2" role="tablist" aria-label="Template editor mode"><button role="tab" aria-selected={tab === "visual"} className={`btn btn-sm ${tab === "visual" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("visual")}>Visual templates</button><button role="tab" aria-selected={tab === "javascript"} className={`btn btn-sm ${tab === "javascript" ? "btn-primary" : "btn-ghost"}`} onClick={() => setTab("javascript")}>Advanced JavaScript</button></div>
     <div inert={busy}>
       {tab === "javascript" ? <div className="space-y-3"><p className="text-sm">This code runs in the manifest tab. Keep <code>createDriverPaperworkRuntime(config, assets)</code> and its <code>buildBooklet</code>, <code>paginate</code> and <code>mount</code> methods. The visual templates are passed as <code>config</code>; the two logos are in <code>assets.temco</code> and <code>assets.homeDepot</code>.</p><textarea className="textarea textarea-bordered w-full font-mono text-xs" aria-label="JavaScript payload" spellCheck={false} rows={24} value={draft.program} onChange={event => setDraft({ ...draft, program: event.target.value })} /></div>

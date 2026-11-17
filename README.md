@@ -123,8 +123,9 @@ Open [http://localhost:3000](http://localhost:3000) and complete account setup w
 - `requireAuth()` resolves the current account/session and routes legacy users to
   `/account/update`; revoked, inactive or expired sessions cannot use tools.
 - Admins manage accounts, setup/recovery codes and the global legacy-entry switch
-  at `/admin/users`. Sensitive account/publishing changes need recent password
-  confirmation; users manage signed-in devices at `/account/security`.
+  at `/admin/users`, including individual browser/MCP devices and sign-out-all.
+  Administrator changes use the current session without a timed password gate;
+  users manage their own devices at `/account/security`.
 - Follow [the migration and first-admin runbook](docs/account-migration.md) before
   deploying this release. New code on a feature branch does not update production.
 
@@ -139,7 +140,8 @@ Open [http://localhost:3000](http://localhost:3000) and complete account setup w
 | `npm run bootstrap -- ...` | Guarded first-admin creation (dry run by default) |
 | `npm run account-enrollment -- ...` | Offline first-admin setup/recovery with private file delivery |
 | `npm run test:auth` | Authentication policy and guarded PostgreSQL/HTTP tests |
-| `npm run --silent mcp` | Start the TemcoTools MCP server over stdio |
+| `npm run --silent mcp` | Explain migration from retired stdio to OAuth HTTP MCP |
+| `npm run test:mcp` | Check MCP policy/catalogue and optional local HTTP integration |
 | `npm run relay` | Start the label relay WebSocket service (port 3002) |
 | `npm run test:relay` | Test relay authentication, routing, queuing, and failures |
 | `npx prisma studio` | Open Prisma database GUI |
@@ -282,29 +284,16 @@ formats, integration hooks, routing, permissions and local qualification.
 
 ## MCP Server
 
-TemcoTools includes a read-only MCP server for MARS workflow inspection. It uses the same
-`DATABASE_URL` as the web app and exposes tools for workflow summaries, unit search, unit detail,
-problem units, and status-rule explanation.
+TemcoTools exposes the application at `/mcp` for **administrators only** using
+remote HTTP and OAuth. Configuration → MCP provides the server URL and authorized
+clients. Approve each client in the browser, choose read-only or read/write access,
+and manage it as a separately revocable device. Native application actions, imports,
+exports, labels and API relays share the web application's validation and identity.
+Credential entry and physical browser/device steps use explicit browser handoffs.
 
-For MCP client configuration on a local checkout, prefer launching the binary directly so stdio
-stays protocol-clean:
-
-```bash
-./node_modules/.bin/tsx scripts/mcp-server.ts
-```
-
-On the VPS, launch the stdio MCP server as its own Docker Compose service:
-
-```bash
-cd /srv/temcotools
-docker compose run --rm -T mcp
-```
-
-For an MCP client that connects over SSH, use that command as the remote stdio process. The MCP
-container joins the internal Compose network and talks to Postgres through the private `db` service.
-
-The initial tool set is intentionally read-only. Local bucket override and problem-resolution tools
-should be added after the database has explicit fields for Temco-side resolutions.
+See [MCP setup, action coverage and rollout notes](docs/mcp.md). The previous
+unauthenticated stdio process and Docker Compose MCP profile are retired.
+This source change does not deploy itself or retire a running v2 instance.
 
 ## Docker Deployment
 

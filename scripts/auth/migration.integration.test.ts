@@ -102,13 +102,11 @@ test("PostgreSQL account migration, recovery, durable sessions and administrativ
       const changed = await identity.changeOwnPassword(staffSession, { currentPassword: next, password: "Synthetic third cedar trail 31" }, context);
       assert.ok(!await livePasswordSession(staffRow.id)); assert.ok(await livePasswordSession(changed.id));
     });
-    await t.test("admin step-up, last usable admin and forbidden PIN writes are enforced server-side", async () => {
+    await t.test("admin changes work without a timer; last-admin and forbidden PIN writes remain enforced", async () => {
       await assert.rejects(identity.issueAccountCode(adminSession, { userId: owner.id, purpose: "reset", operationId: randomUUID(), reason: "test last admin" }), /another active administrator/);
       await assert.rejects(admin.updateManagedUser(adminSession, owner.id, { expectedAuthVersion: adminSession.authVersion, isActive: false }), /another active administrator/);
       await assert.rejects(admin.updateManagedUser(adminSession, staff.id, { expectedAuthVersion: 1, pin: "1234" }), /PIN sign-in cannot be restored/);
       await prisma.authSession.update({ where: { id: adminSession.sessionId }, data: { reauthenticatedAt: new Date(Date.now() - 11 * 60_000) } });
-      await assert.rejects(admin.createManagedUser(adminSession, { username: `auth-qa-${runId}-new`, displayName: "New" }), /Confirm your password/);
-      await identity.reauthenticate(adminSession, password, context);
       const created = await admin.createManagedUser(adminSession, { username: `auth-qa-${runId}-new`, displayName: "New" });
       const newUser = await prisma.user.findUniqueOrThrow({ where: { id: created.id } });
       assert.ok(!newUser.passwordHash && newUser.legacyDisabledAt && newUser.pinHash.startsWith("disabled:"));

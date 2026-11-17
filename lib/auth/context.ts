@@ -7,7 +7,7 @@ export function authContext(request: Request): AuthContext {
   const forwarded = process.env.TRUST_PROXY === "true" ? request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() : null;
   return { source: (forwarded || "direct").slice(0, 200) };
 }
-export async function authBudget(kind: string, subject: string, context: AuthContext) {
+export async function authBudget(kind: string, subject: string, context: AuthContext, limits: { account?: number; source?: number } = {}) {
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) throw new AuthError("Sign-in is unavailable.", 503);
   const digest = (text: string) => createHmac("sha256", secret).update(text).digest("hex");
@@ -16,7 +16,7 @@ export async function authBudget(kind: string, subject: string, context: AuthCon
   await prisma.$transaction(async tx => {
     // Stop before allocating arbitrary account keys when a source is already
     // blocked. Random usernames cannot grow the table past the source budget.
-    for (const [value, limit] of [[`${kind}:source:${context.source}`, 120], [`${kind}:account:${subject.trim().toLowerCase()}`, 12]] as const) {
+    for (const [value, limit] of [[`${kind}:source:${context.source}`, limits.source ?? 120], [`${kind}:account:${subject.trim().toLowerCase()}`, limits.account ?? 12]] as const) {
       const key = digest(value);
       const [row] = await tx.$queryRaw<{ attempts: number }[]>`INSERT INTO "AuthRateLimit" (key,"windowStart",attempts) VALUES (${key},${at},1) ON CONFLICT (key) DO UPDATE SET attempts=CASE WHEN "AuthRateLimit"."windowStart"<=${boundary} THEN 1 ELSE "AuthRateLimit".attempts+1 END,"windowStart"=CASE WHEN "AuthRateLimit"."windowStart"<=${boundary} THEN ${at} ELSE "AuthRateLimit"."windowStart" END RETURNING attempts`;
       if (row.attempts > limit) { blocked = true; break; }

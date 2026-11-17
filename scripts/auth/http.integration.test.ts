@@ -74,13 +74,11 @@ test("real HTTP login, migration, cookies, account APIs and live relay revocatio
       const signed = await request("/api/auth/login", "", { username: staff.username, password, deviceName: "Assigned HTTP laptop" }); assert.equal(signed.status, 200); secondCookie = cookieOf(signed);
       assert.ok((await (await request("/account/security", secondCookie)).text()).includes("Signed-in devices"));
     });
-    await t.test("sensitive publishing requires recent password confirmation", async () => {
+    await t.test("admin changes work after the old confirmation window without password prompts", async () => {
       const data = await claims(adminCookie);
       await prisma.authSession.update({ where: { id: data.sessionId }, data: { reauthenticatedAt: new Date(Date.now() - 11 * 60_000) } });
-      for (const path of ["/api/admin/users", "/api/admin/account-codes", "/api/admin/api-relays", "/api/driver-paperwork/templates"]) assert.equal((await request(path, adminCookie, {})).status, path === "/api/admin/users" || path === "/api/admin/account-codes" ? 400 : 403);
-      // Valid user mutation is blocked specifically by step-up, not parsing.
-      assert.equal((await request("/api/admin/users", adminCookie, { username: "synthetic-new", displayName: "Synthetic" })).status, 403);
-      assert.equal((await request("/api/account/security", adminCookie, { action: "reauthenticate", password: "Synthetic administrator path 17" })).status, 200);
+      const created = await request("/api/admin/users", adminCookie, { username: prefix + "no-timer", displayName: "Synthetic" }); assert.equal(created.status, 200);
+      assert.equal((await request("/api/account/security", adminCookie, { action: "reauthenticate", password: "unused" })).status, 400);
     });
     await t.test("revoking the creating session cancels queued relay work while another device remains signed in", async () => {
       const rule = { id: "auth-qa-relay", name: "Synthetic relay", enabled: true, origins: ["https://auth-qa.test"], pathPrefix: "/", identityPath: "/me", subjectPath: "user.id", operations: { item: { label: "Item", path: "/item/{id}" } }, program: DEFAULT_RELAY_PROGRAM, expectedRevision: 0, operationId: randomUUID() };

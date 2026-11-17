@@ -1,10 +1,9 @@
 "use client";
-/* eslint-disable @next/next/no-location-assign-relative-destination -- Authentication changes reload the document to discard prior session providers. */
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-export default function AccountUpdateClient({ initialUsername }: { initialUsername: string }) {
+export default function AccountUpdateClient({ initialUsername, returnTo = "/" }: { initialUsername: string; returnTo?: string }) {
   const [username, setUsername] = useState(initialUsername), [code, setCode] = useState("");
   const [password, setPassword] = useState(""), [confirm, setConfirm] = useState("");
   const [deviceName, setDeviceName] = useState("My Zebra / computer");
@@ -23,7 +22,7 @@ export default function AccountUpdateClient({ initialUsername }: { initialUserna
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "The account update could not be confirmed. Try signing in with your new password before requesting a new code.");
       try { localStorage.setItem("temco_last_username", username.trim()); } catch { /* Optional preference. */ }
-      setCode(""); setPassword(""); setConfirm(""); location.assign("/");
+      setCode(""); setPassword(""); setConfirm(""); location.assign(returnTo);
     } catch (error) { setError(error instanceof Error ? error.message : "Update could not be confirmed. Try signing in with your new password before requesting another code."); }
     finally { setBusy(false); }
   }

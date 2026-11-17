@@ -51,9 +51,104 @@ model AuthSession {
   expiresAt         DateTime
   revokedAt         DateTime?
   reauthenticatedAt DateTime?
+  lastUsedAt        DateTime @default(now())
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpGrant          McpGrant?
 
   @@index([userId, revokedAt, expiresAt])
+}
+
+model McpClient {
+  id            String @id
+  name          String
+  redirectUris  String[]
+  authMethod    String @default("none")
+  secretHash    String?
+  metadataUrl   String?
+  metadataUntil DateTime?
+  createdAt     DateTime @default(now())
+  authorizations McpAuthorization[]
+  grants         McpGrant[]
+}
+
+model McpAuthorization {
+  id               String @id
+  clientId         String
+  client           McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  redirectUri      String
+  resource         String
+  state            String?
+  scopes           String[]
+  challenge        String
+  browserSessionId String?
+  userId           String?
+  authVersion      Int?
+  codeHash         String? @unique
+  decidedAt        DateTime?
+  consumedAt       DateTime?
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+  @@index([expiresAt])
+}
+
+model McpGrant {
+  id                  String @id
+  clientId            String
+  client              McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  userId              String
+  sessionId           String @unique
+  session             AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  approvedBySessionId String
+  authVersion         Int
+  scopes              String[]
+  resource            String
+  generation          Int @default(0)
+  createdAt           DateTime @default(now())
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  tokens              McpToken[]
+  operations          McpOperation[]
+  artifacts           McpArtifact[]
+  @@index([userId, revokedAt])
+}
+
+model McpToken {
+  id         String @id
+  tokenHash  String @unique
+  grantId    String
+  grant      McpGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  kind       String
+  generation Int
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  usedAt     DateTime?
+  @@index([grantId])
+}
+
+model McpOperation {
+  id          String @id @default(cuid())
+  grantId     String
+  grant       McpGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  operationId String
+  action      String
+  inputHash   String
+  state       String
+  result      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@unique([grantId, operationId])
+}
+
+model McpArtifact {
+  id          String @id
+  grantId     String
+  grant       McpGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  filename    String
+  contentType String
+  bytes       Bytes
+  createdAt   DateTime @default(now())
+  expiresAt   DateTime
+  @@index([expiresAt])
 }
 
 model AccountCode {

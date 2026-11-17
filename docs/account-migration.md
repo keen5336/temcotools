@@ -14,9 +14,9 @@ breached-password lookup service. Passwords use salted scrypt (N=32768, r=8, p=3
 
 An assigned Zebra or laptop stays signed in for up to 30 days, including across
 shifts. There is no inactivity or shift logout. The cookie is HttpOnly, SameSite
-Lax, and Secure in production; the database enforces expiry and revocation. A
-password check within 10 minutes is required for account administration, API relay
-definition changes, and Driver Paperwork template/program publishing.
+Lax, and Secure in production; the database enforces expiry and revocation. Administrator
+actions use the current signed-in session; there is no extra password check or
+ten-minute window. Changing your own password requires the current password.
 
 The old PIN entry opens only “Let's update your login.” It never authorizes tools,
 relays, or administration. Even existing pre-upgrade cookies become setup hints,
@@ -99,12 +99,11 @@ an upgraded account's PIN. New accounts receive codes, never initial PINs.
 
 ## Staff migration and recovery
 
-An enrolled administrator opens User Management, confirms their password if
-necessary, and privately issues a setup code after checking the person's identity
+An enrolled administrator opens User Management and privately issues a setup code after checking the person's identity
 in person or through an established trusted channel. A name and old PIN are not
 proof of identity. Issue codes when the person is ready; they last 30 minutes.
-The manager shows migration state and live password-session counts, allows roles
-and active status to be changed, and can sign out all devices. Sensitive changes
+The manager shows migration state and live browser/MCP device counts, allows roles
+and active status to be changed, and can list devices and sign out one or all. Sensitive changes
 are audited without credentials. Keep two enrolled active administrators.
 
 Password recovery is a separate explicit action with a reason. It immediately
@@ -125,7 +124,7 @@ is revalidated against the app on each WebSocket command/heartbeat.
 
 Authentication has persistent account and source rate limits: 12 attempts per
 account and 120 per source in a 15-minute window for login, code redemption and
-password confirmation separately. Errors for failed login are generic. Code
+current-password verification for password changes separately. Errors for failed login are generic. Code
 hashes alone are stored, and replacement invalidates older unused codes. Request
 bodies are bounded and account mutations require the exact app Origin.
 

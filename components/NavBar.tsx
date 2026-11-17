@@ -77,6 +77,7 @@ export default function NavBar({ session }: NavBarProps) {
             )}
             <li><Link href="/configuration">Configuration</Link></li>
             <li><Link href="/account/security">Account security</Link></li>
+            {session.role === "admin" && <li><Link href="/configuration#mcp">MCP clients</Link></li>}
             {session.role === "admin" && <li><Link href="/admin/api-relays">API Relay Management</Link></li>}
             <li>
               <Link href="/tools/api-relay">API Relays</Link>

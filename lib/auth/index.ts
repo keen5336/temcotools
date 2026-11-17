@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { sessionOptions, type SessionData } from "@/lib/session";
 import { resolveSession } from "./sessions";
+import { applicationSessionResolver } from "./application-context";
 
 export async function getCookieSession() {
   const cookieStore = await cookies();
@@ -10,6 +11,8 @@ export async function getCookieSession() {
 }
 
 export async function getSession() {
+  const delegated = applicationSessionResolver();
+  if (delegated) return delegated();
   return resolveSession(await getCookieSession());
 }
 

@@ -1,18 +1,19 @@
 import { getSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import PinLoginForm from "@/components/PinLoginForm";
+import { safeReturnTo } from "@/lib/mcp/config";
 import { legacyEnabled } from "@/lib/auth/sessions";
 
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; returnTo?: string }>;
 }) {
-  const session = await getSession();
-  if (session.userId) redirect("/");
-  if (session.upgradeRequired) redirect("/account/update");
-
   const params = await searchParams;
+  const returnTo = safeReturnTo(params.returnTo);
+  const session = await getSession();
+  if (session.userId) redirect(returnTo);
+  if (session.upgradeRequired) redirect(`/account/update?returnTo=${encodeURIComponent(returnTo)}`);
 
   return (
     <div className="min-h-screen bg-base-200 flex items-center justify-center p-4">
@@ -27,7 +28,7 @@ export default async function SignInPage({
             </div>
           )}
 
-          <PinLoginForm legacyAllowed={await legacyEnabled()} />
+          <PinLoginForm legacyAllowed={await legacyEnabled()} returnTo={returnTo} />
         </div>
       </div>
     </div>

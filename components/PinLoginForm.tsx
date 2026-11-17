@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-export default function PinLoginForm({ legacyAllowed }: { legacyAllowed: boolean }) {
+export default function PinLoginForm({ legacyAllowed, returnTo = "/" }: { legacyAllowed: boolean; returnTo?: string }) {
   const [username, setUsername] = useState(""), [credential, setCredential] = useState("");
   const [legacy, setLegacy] = useState(false), [deviceName, setDeviceName] = useState("My Zebra / computer");
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
@@ -22,7 +22,7 @@ export default function PinLoginForm({ legacyAllowed }: { legacyAllowed: boolean
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Sign-in failed.");
       try { localStorage.setItem("temco_last_username", username.trim()); } catch { /* Optional preference. */ }
-      location.assign(result.redirectTo === "/account/update" ? "/account/update" : "/");
+      location.assign(result.redirectTo === "/account/update" ? `/account/update?returnTo=${encodeURIComponent(returnTo)}` : returnTo);
     } catch (error) { setError(error instanceof Error ? error.message : "Sign-in could not be confirmed. Try signing in again."); setCredential(""); }
     finally { setBusy(false); }
   }

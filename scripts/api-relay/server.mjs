@@ -23,7 +23,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], managedOrigi
   const live = (owner) => (leases.get(leaseKey(owner)) || 0) > Date.now();
   const authorized = async (binding) => {
     if (typeof authorize !== "function") return !managedOrigins;
-    try { return await authorize({ owner: binding.owner, relayId: binding.relayId, relayRevision: binding.relayRevision, origin: binding.origin, pathname: binding.pathname }) === true; }
+    try { return await authorize({ owner: binding.owner, relayId: binding.relayId, relayRevision: binding.relayRevision, origin: binding.origin, pathname: binding.pathname, ...(binding.requester ? { requester: binding.requester } : {}) }) === true; }
     catch { return false; }
   };
   const json = (res, status, body) => { res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" }); res.end(JSON.stringify(body)); };
@@ -66,6 +66,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], managedOrigi
       // Reauthorize when leaving the queue, so an admin change or disabled
       // account invalidates work that was accepted under an older revision.
       if (!await authorized(c)) { disconnect(c, "Relay configuration or account changed, or authorization is unavailable. Unsent queued work was cancelled; already-sent requests may have an uncertain outcome. Nothing was retried."); return; }
+      if (job.owner && !await authorized({ ...c, requester: job.owner })) { complete(c, requestId, { ok: false, error: "The requesting device was signed out or authorization is unavailable. Queued work was cancelled without sending." }); continue; }
       if (!connections.has(c.id) || !live(c.owner) || c.ws.readyState !== WebSocket.OPEN) return;
       if (!c.pending.has(requestId)) continue;
       job.started = true;
@@ -128,7 +129,7 @@ export function createApiRelayServer({ secret, allowedOrigins = [], managedOrigi
       const request = validateRequest(data.request);
       const requestId = randomUUID();
       const result = await new Promise((resolve) => {
-        c.pending.set(requestId, { request, resolve, started: false, timer: setTimeout(() => complete(c, requestId, { ok: false, error: "API request expired in the queue without being sent." }), 60000) });
+        c.pending.set(requestId, { owner, request, resolve, started: false, timer: setTimeout(() => complete(c, requestId, { ok: false, error: "API request expired in the queue without being sent." }), 60000) });
         dispatch(c);
         res.on("close", () => {
           if (res.writableEnded || !c.pending.has(requestId)) return;

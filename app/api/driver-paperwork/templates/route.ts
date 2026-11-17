@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { getTemplateEditor, PaperworkError, saveTemplate } from "@/lib/driver-paperwork/store";
-import { assertRecentSession } from "@/lib/auth/sessions";
 import { AuthError } from "@/lib/auth/policy";
 
 export const runtime = "nodejs";
@@ -30,7 +29,6 @@ export async function POST(req: NextRequest) {
   if (req.headers.get("origin") !== origin) return reply({ error: "Same-origin request required." }, 403);
   try {
     const userId = await actor();
-    assertRecentSession(await getSession());
     if (Number(req.headers.get("content-length")) > 350_000) return reply({ error: "Template update is too large." }, 413);
     // Bound the stream too: Content-Length is optional and cannot be trusted.
     const reader = req.body?.getReader();

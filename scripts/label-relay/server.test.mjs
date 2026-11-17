@@ -18,8 +18,8 @@ async function fixture(t, options = {}) {
   await once(relay.server, "listening");
   t.after(() => relay.close());
   const url = `ws://127.0.0.1:${relay.server.address().port}/api/label-relay/ws`;
-  async function connect(user = "scanner") {
-    const ws = new WebSocket(url, { origin, headers: { cookie: `session=${user}` } });
+  async function connect(user = "scanner", authorization = "") {
+    const ws = new WebSocket(url, { origin, headers: authorization ? { authorization } : { cookie: `session=${user}` } });
     const messages = [];
     const waiters = [];
     ws.on("message", (data) => {
@@ -50,6 +50,31 @@ async function fixture(t, options = {}) {
 }
 
 const print = (client, requestId = "r1", extra = {}) => client.send({ type: "print", requestId, printerId: "p1", zpl: "^XA^FDTest^FS^XZ\x04", ...extra });
+
+test("MCP can submit labels but cannot impersonate the physical printer relay", async t => {
+  const f = await fixture(t, { authenticate: async (_cookie, authorization) => authorization === "Bearer synthetic" ? { kind: "mcp", userId: "admin", printers: [printer] } : null });
+  const client = await f.connect("", "Bearer synthetic"), closed = once(client.ws, "close");
+  client.send({ type: "register", name: "Not a browser", printerIds: [printer.id] });
+  assert.equal((await closed)[0], 1008);
+});
+
+test("signing out an MCP sender cancels its queued label and preserves the browser relay", async t => {
+  let active = true;
+  const f = await fixture(t, { authenticate: async (cookie, authorization) => authorization ? active ? { kind: "mcp", userId: "admin", printers: [printer] } : null : { kind: "browser", userId: cookie, printers: [printer] } });
+  const receiver = await f.laptop(), blocker = await f.connect("blocker"), mcp = await f.connect("", "Bearer synthetic");
+  print(blocker, "blocking"); const first = await receiver.next("job");
+  print(mcp, "revoked-queued");
+  // A status round trip proves the sender's async print handler has queued it.
+  mcp.send({ type: "heartbeat" });
+  await new Promise(resolve => setTimeout(resolve, 20)); active = false;
+  receiver.send({ type: "result", jobId: first.jobId, ok: true });
+  assert.equal((await blocker.next("result")).ok, true);
+  assert.match((await mcp.next("result")).error, /signed out/);
+  assert.equal(receiver.messages.some(message => message.type === "job"), false);
+  print(blocker, "after-revocation"); const next = await receiver.next("job");
+  receiver.send({ type: "result", jobId: next.jobId, ok: true });
+  assert.equal((await blocker.next("result")).ok, true);
+});
 
 test("rejects unsigned and cross-origin WebSocket upgrades", async (t) => {
   const { url } = await fixture(t);

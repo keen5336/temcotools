@@ -76,20 +76,19 @@ export async function completeAccountUpdate(input: unknown, context: AuthContext
     return session;
   });
 }
-export async function reauthenticate(actor: SessionData, password: unknown, context: AuthContext) {
+async function verifyCurrentPassword(actor: SessionData, password: unknown, context: AuthContext) {
   await authBudget("reauth", actor.userId, context);
   const row = actor.sessionId ? await livePasswordSession(actor.sessionId, actor.userId) : null;
   if (!row || !await verifyPassword(password, row.user.passwordHash)) throw new AuthError("Password confirmation failed.", 401);
   return prisma.$transaction(async tx => {
     await assertActor(tx, actor);
-    await tx.authSession.update({ where: { id: row.id }, data: { reauthenticatedAt: new Date() } });
-    await authAudit(tx, "reauthenticated", row.userId, row.userId, row.id); return { ok: true };
+    await authAudit(tx, "password_confirmed_for_change", row.userId, row.userId, row.id); return { ok: true };
   });
 }
 export async function changeOwnPassword(actor: SessionData, input: unknown, context: AuthContext) {
   const result = z.object({ currentPassword: z.string().max(2048), password: z.string().max(2048), deviceName }).strict().safeParse(input);
   if (!result.success) throw new AuthError("Provide your current and new passwords.");
-  await reauthenticate(actor, result.data.currentPassword, context);
+  await verifyCurrentPassword(actor, result.data.currentPassword, context);
   validatePassword(result.data.password, actor.username);
   const passwordHash = await hashPassword(result.data.password);
   return prisma.$transaction(async tx => {
@@ -109,7 +108,7 @@ export async function revokeAuthSession(sessionId?: string, userId?: string) {
 export async function accountSecurity(actor: SessionData) {
   return prisma.$transaction(async tx => {
     await assertActor(tx, actor);
-    const sessions = await tx.authSession.findMany({ where: { userId: actor.userId, kind: "password", revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "desc" }, select: { id: true, deviceName: true, createdAt: true, expiresAt: true } });
+    const sessions = await tx.authSession.findMany({ where: { userId: actor.userId, kind: { in: ["password", "mcp"] }, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: "desc" }, select: { id: true, kind: true, deviceName: true, createdAt: true, lastUsedAt: true, expiresAt: true } });
     return { currentSessionId: actor.sessionId, sessions };
   });
 }
@@ -151,7 +150,7 @@ export async function issueAccountCode(actor: SessionData, input: unknown) {
   const result = z.object({ userId: z.string().min(1).max(200), purpose: z.enum(["enroll", "reset"]), operationId: z.uuid(), reason: z.string().trim().min(5).max(300) }).strict().safeParse(input);
   if (!result.success) throw new AuthError("Select an account, code purpose and reason.");
   return prisma.$transaction(async tx => {
-    await lockAuthWrites(tx); await assertActor(tx, actor, true, true);
+    await lockAuthWrites(tx); await assertActor(tx, actor, true);
     const target = await tx.user.findUnique({ where: { id: result.data.userId } });
     if (target?.role === "admin" && target.isActive && target.passwordHash && result.data.purpose === "reset") await ensureAnotherAdmin(tx, target.id);
     return issueCodeInTransaction(tx, result.data.userId, result.data.purpose, result.data.operationId, actor.userId, result.data.reason);

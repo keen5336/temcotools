@@ -1,6 +1,6 @@
 import { getCookieSession, getSession } from "@/lib/auth";
 import { authContext, authFailure, authReply, readAuthBody, sameOrigin } from "@/lib/auth/context";
-import { accountSecurity, changeOwnPassword, reauthenticate, revokeOwnDevices } from "@/lib/auth/identity";
+import { accountSecurity, changeOwnPassword, revokeOwnDevices } from "@/lib/auth/identity";
 import { installSession } from "@/lib/auth/cookie";
 import { AuthError } from "@/lib/auth/policy";
 
@@ -10,7 +10,6 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     sameOrigin(request); const actor = await getSession(); const body = await readAuthBody(request);
-    if (body.action === "reauthenticate") return authReply(await reauthenticate(actor, body.password, authContext(request)));
     if (body.action === "change-password") {
       const session = await changeOwnPassword(actor, body.input, authContext(request));
       await installSession(session); return authReply({ ok: true, changed: true });

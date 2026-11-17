@@ -36,6 +36,7 @@ services:
       NODE_ENV: "production"
       NEXTAUTH_URL: "https://temco.chronchive.com"
       NEXT_PUBLIC_APP_URL: "https://temco.chronchive.com"
+      LABEL_RELAY_INTERNAL_URL: http://label-relay:3002
       API_RELAY_INTERNAL_URL: http://api-relay:3003
       API_RELAY_PUBLIC_ORIGIN: https://temco.chronchive.com
       DMP_ORIGINS: ${DMP_ORIGINS-https://dmp.extapps.homedepot.com}
@@ -114,20 +115,6 @@ services:
     networks:
       - temco_net
 
-  mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile.mcp
-    profiles:
-      - mcp
-    environment:
-      DATABASE_URL: postgresql://ops_tools:password@db:5432/ops_tools
-      NODE_ENV: production
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - temco_net
 
 networks:
   temco_net:

@@ -19,20 +19,32 @@ export function createRelayServer({ authenticate, origin, jobTimeout = 15000, qu
   const available = () => [...clients].filter(([ws, client]) => ws.readyState === WebSocket.OPEN && client.relay && Date.now() - client.lastSeen < heartbeatInterval * 3);
   const status = () => ({ type: "status", relays: available().map(([, client]) => ({ name: client.name, printerIds: client.printerIds })) });
   const broadcast = () => { for (const ws of clients.keys()) send(ws, status()); };
-  const dispatch = (receiver) => {
-    const jobs = [...pending.entries()].filter(([, job]) => job.receiver === receiver);
-    if (receiver.readyState !== WebSocket.OPEN || jobs.some(([, job]) => job.started)) return;
-    const next = jobs.find(([, job]) => !job.started);
-    if (!next) return;
-    const [jobId, job] = next;
-    job.started = true;
-    clearTimeout(job.timer);
-    job.timer = setTimeout(() => {
-      // Stop this receiver before releasing queued jobs: the last delivery is uncertain.
-      receiver.close(1011, "Print acknowledgement timed out");
-      finish(jobId, false, uncertain);
-    }, jobTimeout);
-    send(receiver, { type: "job", jobId, printer: job.printer, zpl: job.zpl });
+  const dispatching = new Set();
+  const dispatch = async (receiver) => {
+    if (dispatching.has(receiver)) return;
+    dispatching.add(receiver);
+    try {
+      const jobs = [...pending.entries()].filter(([, job]) => job.receiver === receiver);
+      if (receiver.readyState !== WebSocket.OPEN || jobs.some(([, job]) => job.started)) return;
+      const next = jobs.find(([, job]) => !job.started);
+      if (!next) return;
+      const [jobId, job] = next, sender = clients.get(job.sender), relay = clients.get(receiver);
+      if (!sender || !relay) { finish(jobId, false, "A device disconnected before dispatch."); return; }
+      let source, destination;
+      try { [source, destination] = await Promise.all([authenticate(sender.cookie, sender.authorization), authenticate(relay.cookie, relay.authorization)]); }
+      catch { finish(jobId, false, "Device authorization is unavailable. The queued label was not sent."); return; }
+      if (!pending.has(jobId) || receiver.readyState !== WebSocket.OPEN) return;
+      if (job.sender.readyState !== WebSocket.OPEN) { finish(jobId, false, "Sender disconnected before dispatch."); return; }
+      const printer = source?.printers.find(item => item.id === job.printer.id);
+      if (!source || !destination || !printer || !destination.printers.some(item => item.id === printer.id) || !relay.printerIds.includes(printer.id)) { finish(jobId, false, "A device was signed out or the printer changed. The queued label was not sent."); return; }
+      job.started = true;
+      clearTimeout(job.timer);
+      job.timer = setTimeout(() => { receiver.close(1011, "Print acknowledgement timed out"); finish(jobId, false, uncertain); }, jobTimeout);
+      send(receiver, { type: "job", jobId, printer, zpl: job.zpl });
+    } finally {
+      dispatching.delete(receiver);
+      if (receiver.readyState === WebSocket.OPEN && ![...pending.values()].some(job => job.receiver === receiver && job.started) && [...pending.values()].some(job => job.receiver === receiver)) queueMicrotask(() => { void dispatch(receiver); });
+    }
   };
   const finish = (id, ok, error) => {
     const job = pending.get(id);
@@ -50,11 +62,11 @@ export function createRelayServer({ authenticate, origin, jobTimeout = 15000, qu
       return;
     }
     try {
-      const session = await authenticate(req.headers.cookie || "");
+      const session = await authenticate(req.headers.cookie || "", req.headers.authorization || "");
       if (!session) throw new Error("Unauthorized");
       if (socket.destroyed) return;
       wss.handleUpgrade(req, socket, head, (ws) => {
-        const client = { cookie: req.headers.cookie || "", session, relay: false, printerIds: [], name: "", lastSeen: Date.now(), requests: new Set(), handling: false };
+        const client = { cookie: req.headers.cookie || "", authorization: req.headers.authorization || "", session, relay: false, printerIds: [], name: "", lastSeen: Date.now(), requests: new Set(), handling: false };
         clients.set(ws, client);
         ws.on("error", () => {});
         ws.on("message", async (data, binary) => {
@@ -73,11 +85,12 @@ export function createRelayServer({ authenticate, origin, jobTimeout = 15000, qu
           if (client.handling) { ws.close(1008, "Wait for the previous request"); return; }
           client.handling = true;
           try {
-            const current = await authenticate(client.cookie);
+            const current = await authenticate(client.cookie, client.authorization);
             if (!current) { ws.close(1008, "Sign in again"); return; }
             if (ws.readyState !== WebSocket.OPEN) return;
             client.session = current;
             if (message.type === "register") {
+              if (current.kind === "mcp") { ws.close(1008, "MCP clients can submit labels through browser relays; they cannot register a printer device."); return; }
               if (!Array.isArray(message.printerIds) || !message.printerIds.length || message.printerIds.some((id) => !current.printers.some((printer) => printer.id === id))) {
                 send(ws, { type: "error", error: "Select at least one active printer for this laptop." });
                 return;
@@ -142,7 +155,7 @@ export function createRelayServer({ authenticate, origin, jobTimeout = 15000, qu
       await Promise.all([...clients].map(async ([ws, client]) => {
         if (Date.now() - client.lastSeen >= heartbeatInterval * 3) { ws.terminate(); return; }
         try {
-          const session = await authenticate(client.cookie);
+          const session = await authenticate(client.cookie, client.authorization);
           if (!session) { ws.close(1008, "Sign in again"); return; }
           client.printerIds = client.printerIds.filter((id) => session.printers.some((printer) => printer.id === id));
           send(ws, { type: "heartbeat" });
@@ -166,8 +179,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const appUrl = process.env.RELAY_APP_URL || "http://127.0.0.1:3000";
   const relay = createRelayServer({
     origin: process.env.RELAY_ORIGIN || "http://localhost:3000",
-    authenticate: async (cookie) => {
-      const response = await fetch(`${appUrl}/api/label-relay/session`, { headers: { cookie }, redirect: "error", signal: AbortSignal.timeout(5000) });
+    authenticate: async (cookie, authorization) => {
+      const response = await fetch(`${appUrl}/api/label-relay/session`, { headers: { cookie, ...(authorization ? { Authorization: authorization } : {}) }, redirect: "error", signal: AbortSignal.timeout(5000) });
       return response.ok ? response.json() : null;
     },
   });

@@ -19,6 +19,7 @@ export const TOOLS: readonly Tool[] = [
   { id: "labels", name: "Configuration", href: "/configuration", description: "Connect external systems and configure label relay, printers and templates." },
   { id: "api-relay-manager", name: "API Relay Management", href: "/admin/api-relays", description: "Manage allowed sites, named API operations and injection payloads.", roles: ["admin"] },
   { id: "users", name: "User Management", href: "/admin/users", description: "Manage users, roles, and access.", roles: ["admin"] },
+  { id: "mcp", name: "MCP clients", href: "/configuration#mcp", description: "Authorize and manage administrator MCP connections.", roles: ["admin"] },
   { id: "scanner-diagnostic", name: "Scanner Diagnostic", href: "/admin/scanner-diagnostic", description: "Test focus-free scanner events, keyboard suppression, and scan acknowledgement.", roles: ["admin"] },
 ];
 

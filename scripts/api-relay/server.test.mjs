@@ -232,6 +232,18 @@ test("authorization outages fail closed before dispatch without retry", async t 
   assert.equal(client.messages.some(message => message.type === "request"), false);
 });
 
+test("revoking a queued MCP requester cancels only its job, preserving the browser connection", async t => {
+  const requester = { userId: alice.userId, sessionId: "mcp-device" }; let active = true;
+  const f = await fixture(t, { maxConcurrent: 1, authorize: async binding => !binding.requester || binding.requester.sessionId !== requester.sessionId || active });
+  const client = await f.paired(); const first = f.request(client, "/first"); const job = await client.next("request");
+  const queued = f.request(client, "/revoked", requester); await f.control("connections"); active = false;
+  f.respond(client, job); await first;
+  assert.match((await queued).error, /requesting device was signed out/);
+  assert.equal(client.messages.some(message => message.type === "request" && message.request.path === "/revoked"), false);
+  assert.equal((await f.control("connections")).connections.length, 1);
+  const later = f.request(client, "/later"); const next = await client.next("request"); f.respond(client, next); assert.equal((await later).body, "done");
+});
+
 test("managed-origin mode without an authorization provider refuses pairing", async t => {
   const f = await fixture(t, { managedOrigins: true });
   const client = await f.connect(await f.token());
