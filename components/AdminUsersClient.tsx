@@ -24,9 +24,13 @@ export default function AdminUsersClient() {
     try {
       response = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const result = await response.json(); if (!response.ok) throw new Error(result.error || "The change could not be confirmed.");
-      await load(); return result;
+      // A confirmed write (especially self-recovery) can end this admin's
+      // session. Keep its one-time code even when the follow-up read fails.
+      try { await load(); }
+      catch { setUncertain(true); setMessage("Change confirmed. Reload the user list or sign in again before another change. Preserve any displayed code."); }
+      return result;
     } catch (error) {
-      if (!response || response.ok) { setUncertain(true); setMessage("The result could not be confirmed. Reload current users before another change. A lost code must be explicitly replaced."); }
+      if (!response || response.ok || response.status >= 500) { setUncertain(true); setMessage("The result could not be confirmed. Reload current users before another change. A lost code must be explicitly replaced."); }
       else setMessage(error instanceof Error ? error.message : "Change failed.");
       return null;
     } finally { setBusy(false); }

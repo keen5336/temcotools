@@ -7,14 +7,21 @@ export default function PinLoginForm({ legacyAllowed }: { legacyAllowed: boolean
   const [username, setUsername] = useState(""), [credential, setCredential] = useState("");
   const [legacy, setLegacy] = useState(false), [deviceName, setDeviceName] = useState("My Zebra / computer");
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
-  useEffect(() => { const saved = localStorage.getItem("temco_last_username"); if (saved) setUsername(saved); }, []);
+  // The remembered username lives only in browser storage; hydrate after SSR.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("temco_last_username");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Sync browser-only storage after hydration.
+      if (saved) setUsername(saved);
+    } catch { /* Storage is optional; manual sign-in still works. */ }
+  }, []);
   async function submit(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try {
       const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username.trim(), deviceName, ...(legacy ? { method: "legacy", pin: credential } : { password: credential }) }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Sign-in failed.");
-      localStorage.setItem("temco_last_username", username.trim());
+      try { localStorage.setItem("temco_last_username", username.trim()); } catch { /* Optional preference. */ }
       location.assign(result.redirectTo === "/account/update" ? "/account/update" : "/");
     } catch (error) { setError(error instanceof Error ? error.message : "Sign-in could not be confirmed. Try signing in again."); setCredential(""); }
     finally { setBusy(false); }

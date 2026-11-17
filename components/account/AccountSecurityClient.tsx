@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-location-assign-relative-destination -- Authentication changes reload the document to discard prior session providers. */
 
 import { useCallback, useEffect, useState } from "react";
 
@@ -9,9 +10,9 @@ export default function AccountSecurityClient() {
   const [message, setMessage] = useState(""), [busy, setBusy] = useState(false);
   const load = useCallback(async () => {
     const response = await fetch("/api/account/security", { cache: "no-store" });
-    const result = await response.json(); if (!response.ok) throw new Error(result.error || "Unable to load devices."); setDevices(result);
+    const result = await response.json(); if (!response.ok) throw new Error(result.error || "Unable to load devices."); return result as Devices;
   }, []);
-  useEffect(() => { void load().catch(error => setMessage(error.message)); }, [load]);
+  useEffect(() => { let active = true; void load().then(result => { if (active) setDevices(result); }).catch(error => { if (active) setMessage(error.message); }); return () => { active = false; }; }, [load]);
   async function send(body: Record<string, unknown>) {
     setBusy(true); setMessage("");
     try {
@@ -20,7 +21,7 @@ export default function AccountSecurityClient() {
       setPassword("");
       if (result.current) { location.assign("/signin"); return; }
       if (result.changed) { setNext(""); setConfirm(""); location.assign("/account/security"); return; }
-      await load(); setMessage(body.action === "reauthenticate" ? "Password confirmed for sensitive changes for 10 minutes. You can return to the tool you were using." : "Device sessions updated.");
+      setDevices(await load()); setMessage(body.action === "reauthenticate" ? "Password confirmed for sensitive changes for 10 minutes. You can return to the tool you were using." : "Device sessions updated.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Change could not be confirmed. Reload current state before trying again."); }
     finally { setBusy(false); }
   }

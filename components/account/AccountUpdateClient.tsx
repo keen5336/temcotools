@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-location-assign-relative-destination -- Authentication changes reload the document to discard prior session providers. */
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -10,6 +11,7 @@ export default function AccountUpdateClient({ initialUsername }: { initialUserna
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
   useEffect(() => {
     const fragment = new URLSearchParams(location.hash.slice(1));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate the browser-only private fragment and immediately scrub it from the URL.
     if (fragment.get("code")) { setCode(fragment.get("code") || ""); setUsername(fragment.get("username") || initialUsername); history.replaceState(null, "", location.pathname); }
   }, [initialUsername]);
   async function submit(event: React.FormEvent) {
@@ -20,7 +22,8 @@ export default function AccountUpdateClient({ initialUsername }: { initialUserna
       const response = await fetch("/api/auth/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: username.trim(), code: code.trim(), password, deviceName }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "The account update could not be confirmed. Try signing in with your new password before requesting a new code.");
-      localStorage.setItem("temco_last_username", username.trim()); setCode(""); setPassword(""); setConfirm(""); location.assign("/");
+      try { localStorage.setItem("temco_last_username", username.trim()); } catch { /* Optional preference. */ }
+      setCode(""); setPassword(""); setConfirm(""); location.assign("/");
     } catch (error) { setError(error instanceof Error ? error.message : "Update could not be confirmed. Try signing in with your new password before requesting another code."); }
     finally { setBusy(false); }
   }

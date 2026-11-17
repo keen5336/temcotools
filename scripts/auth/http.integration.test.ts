@@ -20,8 +20,8 @@ test("real HTTP login, migration, cookies, account APIs and live relay revocatio
   const request = (path: string, cookie = "", body?: unknown, origin: string | null = base!) => fetch(base + path, { method: body === undefined ? "GET" : "POST", redirect: "manual", headers: { ...(cookie ? { Cookie: cookie } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json", ...(origin === null ? {} : { Origin: origin }) }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const cookieOf = (response: Response) => { const value = response.headers.get("set-cookie"); assert.ok(value?.startsWith("temco_session="), "session cookie installed"); return value!.split(";")[0]; };
   const claims = (cookie: string) => unsealData<{ userId: string; sessionId: string; authVersion: number }>(cookie.slice(cookie.indexOf("=") + 1), { password: secret });
-  const createUser = async (name: string, role: "user" | "admin") => prisma.user.create({ data: { id: `auth-http-${name}`, username: `auth-http-${name}`, displayName: name, role, pinHash: await bcrypt.hash("1234", 4) } });
-  await prisma.user.deleteMany({ where: { id: { startsWith: "auth-http-" } } });
+  const prefix = `auth-http-${randomUUID().slice(0, 8)}-`;
+  const createUser = async (name: string, role: "user" | "admin") => prisma.user.create({ data: { id: prefix + name, username: prefix + name, displayName: name, role, pinHash: await bcrypt.hash("1234", 4) } });
   await prisma.apiRelayRevision.deleteMany({ where: { relayId: "auth-qa-relay" } });
   await prisma.apiRelayDefinition.deleteMany({ where: { id: "auth-qa-relay" } });
   const owner = await createUser("admin", "admin"), staff = await createUser("staff", "user");
@@ -110,6 +110,7 @@ test("real HTTP login, migration, cookies, account APIs and live relay revocatio
       ws.terminate();
     });
     await t.test("label commands and replayed cookies stop immediately after durable logout", async () => {
+      assert.equal((await request("/api/account/security", secondCookie, { action: "revoke-session", sessionId: "" })).status, 400);
       const ws = new WebSocket(`ws://127.0.0.1:${labelPort}/api/label-relay/ws`, { origin: base, headers: { Cookie: secondCookie } });
       await once(ws, "open");
       assert.equal((await request("/api/auth/logout", secondCookie, {})).status, 200);
@@ -117,8 +118,19 @@ test("real HTTP login, migration, cookies, account APIs and live relay revocatio
       assert.equal((await request("/api/pick-waves/locations", secondCookie)).status, 401);
       assert.equal((await request("/api/label-relay/session", secondCookie)).status, 401);
     });
+    await t.test("confirmed administrator self-recovery returns a code even though its old session ends", async () => {
+      const created = await request("/api/admin/users", adminCookie, { username: prefix + "backup", displayName: "Synthetic backup", role: "admin" }); assert.equal(created.status, 200);
+      const backup = await created.json();
+      const setup = await request("/api/admin/account-codes", adminCookie, { userId: backup.id, purpose: "enroll", operationId: randomUUID(), reason: "synthetic backup administrator" }); assert.equal(setup.status, 200);
+      const updated = await request("/api/auth/update", "", { username: backup.username, code: (await setup.json()).code, password: "Synthetic backup cedar 41" }); assert.equal(updated.status, 200);
+      const recovery = await request("/api/admin/account-codes", adminCookie, { userId: owner.id, purpose: "reset", operationId: randomUUID(), reason: "synthetic self recovery" }); assert.equal(recovery.status, 200);
+      const result = await recovery.json(); assert.ok(result.code);
+      assert.equal((await request("/api/admin/users", adminCookie)).status, 401);
+      const restored = await request("/api/auth/update", "", { username: owner.username, code: result.code, password: "Synthetic recovered admin 44" }); assert.equal(restored.status, 200);
+      assert.equal((await request("/api/admin/users", cookieOf(restored))).status, 200);
+    });
   } finally {
-    await prisma.user.deleteMany({ where: { id: { startsWith: "auth-http-" } } });
+    await prisma.user.deleteMany({ where: { username: { startsWith: prefix } } });
     await prisma.apiRelayRevision.deleteMany({ where: { relayId: "auth-qa-relay" } });
     await prisma.apiRelayDefinition.deleteMany({ where: { id: "auth-qa-relay" } });
     await prisma.$disconnect();

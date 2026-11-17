@@ -20,15 +20,15 @@ export default function ApiRelayManagerClient() {
     const response = await fetch("/api/admin/api-relays", { cache: "no-store" });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "Unable to load API relays.");
-    setData(result); return result as Data;
+    return result as Data;
   }, []);
   function edit(definition: RelayDefinition, id = definition.id) {
     setDraft(definition); setOrigins(definition.origins.join("\n")); setOperations(JSON.stringify(definition.operations, null, 2)); setSelected(id); setUncertain(false);
   }
-  useEffect(() => { void load().then(value => { if (value.definitions[0]) edit(value.definitions[0]); }).catch(error => setMessage(error.message)); }, [load]);
+  useEffect(() => { let active = true; void load().then(value => { if (active) { setData(value); if (value.definitions[0]) edit(value.definitions[0]); } }).catch(error => { if (active) setMessage(error.message); }); return () => { active = false; }; }, [load]);
   async function reload() {
     setBusy(true);
-    try { const next = await load(); edit(next.definitions.find(row => row.id === selected) || blank()); setMessage("Current definitions loaded. Review before saving."); }
+    try { const next = await load(); setData(next); edit(next.definitions.find(row => row.id === selected) || blank()); setMessage("Current definitions loaded. Review before saving."); }
     catch (error) { setMessage(error instanceof Error ? error.message : "Reload failed."); }
     finally { setBusy(false); }
   }
@@ -42,7 +42,7 @@ export default function ApiRelayManagerClient() {
       response = await fetch("/api/admin/api-relays", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...draft, revision: undefined, expectedRevision: draft.revision, operationId: crypto.randomUUID(), origins: origins.split(/[\n,]/).map(value => value.trim()).filter(Boolean), operations: parsed }) });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to save API relay.");
-      edit(result.definition); await load(); setMessage(`Saved ${result.definition.name} revision ${result.definition.revision}. Existing connections must reconnect before using this revision.`);
+      edit(result.definition); setData(await load()); setMessage(`Saved ${result.definition.name} revision ${result.definition.revision}. Existing connections must reconnect before using this revision.`);
     } catch (error) {
       if (!response || response.ok) { setUncertain(true); setMessage("Save could not be confirmed. Reload the current definition before making another edit."); }
       else setMessage(error instanceof Error ? error.message : "Save failed.");

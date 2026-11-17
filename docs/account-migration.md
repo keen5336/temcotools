@@ -48,7 +48,9 @@ an upgraded account's PIN. New accounts receive codes, never initial PINs.
 3. In the approved window, apply migration
    `20261117030000_account_login_migration` with the migration runner and start
    the matching app and broker release. No password or setup code is seeded.
-4. On the operator host with that release and protected database environment,
+4. On the operator host with a full source checkout of that release, installed
+   locked dependencies (`npm ci`), a generated Prisma client (`npx prisma
+   generate`), and the protected database environment,
    run the offline administrator enrollment command. The target must match both
    host (including port) and database. Default invocation is read-only:
 

@@ -16,7 +16,7 @@ export async function POST(request: Request) {
       await installSession(session); return authReply({ ok: true, changed: true });
     }
     if (body.action === "revoke-session" || body.action === "revoke-others") {
-      if (body.action === "revoke-session" && (typeof body.sessionId !== "string" || body.sessionId.length > 200)) throw new AuthError("Select a device session.");
+      if (body.action === "revoke-session" && (typeof body.sessionId !== "string" || !body.sessionId || body.sessionId.length > 200)) throw new AuthError("Select a device session.");
       const result = await revokeOwnDevices(actor, body.action === "revoke-others" ? null : body.sessionId as string);
       if (result.current) (await getCookieSession()).destroy();
       return authReply(result);
